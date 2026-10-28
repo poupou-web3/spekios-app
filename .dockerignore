@@ -1,0 +1,10 @@
+.env
+.env.*
+.aws
+.git
+**/node_modules
+**/target
+.tools
+.cache
+artifacts
+**/*.log

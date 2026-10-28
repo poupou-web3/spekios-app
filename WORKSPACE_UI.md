@@ -1,0 +1,113 @@
+# User workspace and operations console
+
+Both interfaces run at **http://127.0.0.1:18080** and use the existing Rust API, PostgreSQL records, private evidence bucket and ClickHouse export. The 28 October 2026 GUI increment separates the user workspace from the Operations back office, improves launch tracking and evidence inspection, and adds scoped filters and execution summaries. The frontend is HTML/CSS/JavaScript embedded in the Rust binary; browser automation stays in the separate TypeScript/Playwright worker.
+
+## Open the app
+
+```sh
+.tools/bin/just dev
+```
+
+Open the URL above. This machine enables `SCOUT_DEV_AUTH_BYPASS=true` in the private `.env`, so the workspace and back office open directly during development. The browser discovers this mode through `/v1/auth-mode` and sends no bearer token. Compose still publishes the API only on loopback; development access requires a literal localhost host and same-origin browser requests. The interface labels this mode **Local development · sign-in disabled**.
+
+Set `SCOUT_DEV_AUTH_BYPASS=false` and run `just dev` to restore the token screen. The default is false in source/example configuration, and the provider-fixture overlay explicitly disables bypass for authentication tests. In normal mode, enter `SCOUT_API_TOKEN` from the private `.env`; it is kept in the current tab's session storage and sent as a Bearer header. Neither mode embeds tokens in static assets or URLs, and provider/storage keys stay on the server.
+
+Use the **Workspace / Back office** switch to move between testing and operational inspection. Existing runs can be reviewed immediately. Live exploration requires a provider key in `.env` and a matching model selection; see [MODEL_GATEWAY.md](./MODEL_GATEWAY.md). Back office → Connections now includes an **Exploration defaults** form for nonsecret model and execution preferences. Credential availability, allowed origins, worker heartbeat and other server policy remain read-only. Change credentials or origins in `.env` and apply them with `just dev`. A configured key is not proof of a successful live provider request, and saving defaults makes no model call or connection test. No provider account is connected automatically. ChatGPT/Claude subscription authentication is still pending. [Private app login](./AUTH_HANDOFF.md) is available from the queued worker, with optional encrypted session reuse; Google/external identity-provider handoff remains pending.
+
+## User workspace
+
+- Submit only an application URL. Saved provider, model, allowed-origin and action-limit settings are applied at admission. The optional viewport picker selects desktop, tablet or mobile; the saved default applies otherwise. A setup checklist explains the gateway, model connection and worker requirements.
+- Launches remain in the workspace, display the queued job, and automatically open its run when the worker assigns one. Explicit navigation cancels that automatic follow behavior. A job that finishes or fails before creating a run remains visible with its terminal state and any recorded error.
+- Search the latest 50 runs by application, run or model; filter execution/review status and live versus fixture data. Test fixtures are labeled **TEST DATA**. Pending and confirmed finding counts come from server-derived summaries for original explorer runs within those latest 50 records; replay runs do not create duplicate finding counts. Active-run and screenshot totals have their separate workspace-wide scope labeled on the cards.
+- Review every action's frozen expectation and observed outcome, before/after PNGs, exact difference mask and unique evidence IDs. Fill/select/check/uncheck actions have explicit timeline labels; Inspect action shows their exact parameters. **Compare** shows Before and After together on desktop and stacked on mobile, each with its own capture ID, copy control and full-resolution viewer. Screenshots are displayed independently; the UI does not claim automatic alignment or treat a difference as a defect. Capturing/pending-upload states remain distinct from permanent evidence gaps, and recorded IDs remain visible. Individual Before, After, Difference mask and settling-frame views remain available.
+- Open screenshots, masks and settling frames in the evidence drawer to inspect their actual native pixels with scrolling, or switch to fitting the panel. The original PNG is unchanged. **Previous / Next** follows the visible action list or active Findings filter, displays its position and disables the list boundaries. Moving between actions keeps Compare selected; a previously selected settling frame is cleared.
+- Inspect ranked next actions, score components expressed through selection reasons, discovery paths and the first-parent tree in the Flow tab. The graph retains recorded transitions, return paths, visited controls and blocked/unvisited controls. Scores are labeled as uncalibrated rather than measured probabilities.
+- Start one fresh-browser reproduction for an eligible suspected issue; open the resulting run and compare separate evidence. Reproduced candidates still require review before confirmation.
+- Optionally enable **Automatically recheck suspected bugs** beside the URL launch. It is off by default and keeps an explicit per-tab choice through refresh and URL changes. The help explains the additional usage bounds before launch: two cases and twelve replay actions in total by default, with every prerequisite action counted. The original source run shows an **Automatic checks** panel with reservation reasons, child runs, outcomes and source-action links. An automatic replay shows its parent lineage. Pending or queued automatic work suppresses duplicate manual replay controls.
+- Use **Export report** to download readable Markdown, an evidence ZIP or the existing full run JSON. Opening the drawer pins the loaded snapshot; an active run is labeled partial. The ZIP carries verified selected-run PNGs, JSON artifacts and a SHA-256 manifest, with missing or invalid evidence listed as gaps. Related replay evidence stays in its own run. Standalone Markdown has no image links; ZIP Markdown uses fixed relative paths to included images. Export makes no model call and does not approve data for training. See [portable reports](./REPORT_EXPORT.md).
+
+The run summary separates execution state, application context and action budget. Its meter reports allowed browser actions used; it is not a percentage of tested application coverage. Actions, Findings and Flow tabs support keyboard selection. Automatic refresh preserves active text entry, selection and IME composition, open evidence/access disclosures, and relevant timeline/table/drawer scroll positions. Refresh timestamps identify the loaded snapshot; failed refreshes retain the last available data with an error notice.
+
+The export drawer reports verification progress and supports cancellation. Closing it, navigating away or disconnecting stops an unfinished download without changing the browser run. ZIP bounds are 256 evidence entries, 8 MiB per file, 64 MiB per archive and two minutes; document-size and aggregate checks can also stop an oversized export. Inspect `manifest.json` for gaps even when the ZIP downloaded successfully. Provider payloads and saved private sign-in sessions are not added. Raw JSON retains the existing authenticated report projection, including recorded application data, so review it before sharing. Downloads stay local; they are not persisted as new bucket objects or database export records.
+
+For the bundled controlled app, run `just fixture` and submit `http://exploration-fixture:8082/branches`. The browser runs inside Compose, so the host preview `http://127.0.0.1:18082` is not its target address. Other apps need a reachable container address and an exact origin in `SCOUT_ALLOWED_ORIGINS`. This is still the bounded, controlled-app explorer described in [EXPLORATION.md](./EXPLORATION.md). Native text entry, dropdowns, checkbox/radio changes and scrolling are described in [browser interactions](./BROWSER_INTERACTIONS.md). `just explore-matrix URL` runs all three responsive viewport profiles sequentially; each appears as a separate run in the GUI. See [the planner guide](./EXPLORATION_PLANNER.md) for ranking, return routing and replanning limits.
+
+## Operations back office
+
+The overview separates worker availability, model-gateway readiness, evidence delivery and event delivery, with attention signals that link to the relevant view. It shows run counts, worker heartbeats, pending screenshot/artifact/model payload uploads, and runtime/model events awaiting ClickHouse delivery. Readiness describes the local dispatcher and configured connections. PostgreSQL supplies durable upload/export counters; these snapshots do not directly probe bucket, provider or ClickHouse health. A previous export acknowledgement is not a current service-health test.
+
+Browser jobs expose search, execution-status and live/simulated-mode filters across the latest 50 returned jobs, with worker assignment, launch/duration details, errors, cancellation and result links. Automatic reproduction jobs are labeled and link to their parent exploration when it is in the recent queue view; otherwise the lineage drawer preserves the parent job ID.
+
+Select a run to inspect model requests with provider, state, purpose and search filters. Model activity separates stable logical request IDs from actual provider attempts; recorded attempts and their nullable usage come from the run report, rather than being inferred from request state. The drawer exposes frozen input, response text, attempt details, stored payload keys and event history. Event search applies to the selected run's ordered execution events. These filters do not change whole-run usage totals.
+
+The usage overview follows the gateway's current live or simulated mode; per-run usage stays attached to that run. Each reproduction has its own usage totals. Missing usage/cost remains **Unknown**; incomplete sums display **≥** to identify a known subtotal. Connections separates editable nonsecret exploration defaults from read-only provider credentials, scope and server policy. Saved app sessions retain their existing explicit removal controls.
+
+Both views represent the same local developer. They share the active local-development access mode or normal bearer-token mode; Operations is an inspection interface, not a separate administrative permission role.
+
+## Save exploration defaults
+
+Open **Back office → Connections → Exploration defaults**. Supported fields are:
+
+| Preference | Accepted values |
+| --- | --- |
+| Model provider | OpenRouter, OpenAI or Anthropic |
+| Model ID | Up to 200 characters using letters, numbers, `/ : . _ -`; surrounding spaces are trimmed |
+| Maximum exploration actions | Integer from 1 to 12 |
+| Default viewport | Desktop, tablet or mobile |
+| Restrict OpenRouter to free model IDs | Requires `openrouter/free` or a model ending in `:free`; direct-provider calls use their own API billing |
+| Automatic checks by default | Optional boolean; each URL launch can explicitly override it |
+| Maximum automatic cases | Integer from 1 to 3 |
+| Total additional replay actions | Integer from 1 to 24 across complete selected paths |
+
+**Save defaults** creates an append-only PostgreSQL revision and applies it to future browser-job admissions without restarting services. Queued and running jobs retain their original settings, as do exact retries of an already admitted job UUID. Existing per-launch viewport and automatic-check choices continue to override defaults. Saved preferences survive service restarts. Environment values provide the initial defaults; after a saved revision exists, its editable fields take precedence. Credentials, origins, execution mode and network policy continue to come from the operator configuration. Direct recorder CLI exploration continues to use its environment configuration.
+
+Dirty drafts survive polling. Inputs are disabled during a save, duplicate clicks make one request, and an ambiguous response offers **Retry save** with the same request UUID and values. A concurrent revision preserves the draft and requires an explicit choice to discard it or keep the edits on the latest revision. An idempotent receipt may describe an older saved revision; the UI reads the latest state after acknowledgement and prevents older polling results from rolling it back. Saved defaults and current revision are available through authenticated `GET /v1/exploration-settings`; updates use `POST` on that same endpoint. See [the API contract](./apps/api/README.md#exploration-settings).
+
+## Queue and recovery
+
+`browser_jobs` stores an immutable request, settings snapshot and execution mode. A UUID makes admission idempotent, including retrying an uncertain browser response. A single background worker claims work while a PostgreSQL session lock excludes another daemon; the existing recorder lock also serializes CLI activity. Heartbeats update every five seconds and become unavailable after twenty seconds without an update.
+
+Queued jobs survive restarts. If the worker dies during a run, recovery preserves existing evidence and marks the job interrupted. It exports recovery events to ClickHouse before becoming idle, even when no next job is queued. It does not repeat the browser actions or silently restart the trajectory. Live and simulated jobs are executed only when the gateway is in the matching mode. Resumable execution and several isolated workers remain future increments.
+
+Automatic scheduling applies only to completed original explorations launched through the queue. Reservations survive restarts and remain within the source launch's frozen limits. Temporary provider, storage or queue failures leave checks deferred; invalid paths, missing saved sessions, scope changes or completed reviews can skip them. A cancelled or interrupted check is never automatically retried. The original immutable evidence manifest remains unchanged; the current API report overlays later task decisions, child jobs, reproduction outcomes and cancellation state. See [automatic reproduction](./AUTOMATIC_REPRODUCTION.md).
+
+Screenshot and artifact endpoints look up the UUID within the authenticated workspace, load the stored object key server-side, and verify length/SHA-256 before returning bytes. The UI never receives bucket credentials. Target text, model output and event payloads are escaped as text; the static interface uses a same-origin content security policy.
+
+## Verification
+
+```sh
+.tools/bin/just web-test
+.tools/bin/just workspace-test
+.tools/bin/just web-contract-test
+.tools/bin/just settings-test
+.tools/bin/just report-export-test
+.tools/bin/just auto-reproduction-test
+.tools/bin/just jobs
+.tools/bin/just operations
+```
+
+`web-test` runs `node --test apps/web/*.test.mjs`, including existing, workspace, back-office, configuration, comparison and report-export suites. All 96 cases passed, including 18 report-projection, nine bundle and seven export-interface cases alongside the preceding 62 tests. The portable-report suites cover projection, archive verification, bounds, snapshot pinning and cancellation. These tests check rendering and simulated DOM/event behavior, including untrusted text, nullable usage, launch following, filters, native-pixel evidence controls, preference validation/idempotency/conflicts, reconnect races, refresh preservation and disconnect handling. They do not launch a browser or prove visual correctness. The native Rust API suite passed 35 tests, including the public report-module asset contract; Clippy passed with warnings denied.
+
+`report-export-test` reads saved runs, renders standalone Markdown and builds representative selected-run evidence ZIPs without inference. Python's independent ZIP reader checks CRC32, UUID-based paths, exact manifest membership, lengths and SHA-256; a failed capture must remain an explicit gap. The script verifies that model calls and recorded runtime evidence do not change. Its result is [artifacts/report-export/verification.json](./artifacts/report-export/verification.json). The final run rendered 50 reports and checked three ZIPs: an original human-confirmed source, a failed-capture run and a completed replay. Served-module checks passed. At the default 484 × 724 browser viewport, Markdown and ZIP downloads completed; the downloaded ZIP independently passed CRC32/SHA-256 and retained source confirmation. The drawer had no horizontal overflow or console errors, and Escape restored focus to Export report. The result and preview are [artifacts/report-export/browser-verification.json](./artifacts/report-export/browser-verification.json) and [artifacts/report-export/gui-report-export.jpg](./artifacts/report-export/gui-report-export.jpg). `just export-report RUN_UUID` writes a report locally under `artifacts/run-reports/<export_uuid>/` using the same bundle implementation.
+
+`settings-test` checks the real exploration-settings API and PostgreSQL while the browser worker is stopped. It exercises revision conflicts, idempotent historical receipts, frozen job settings, restart persistence and append-only storage, then restores the original preference values through another revision and cancels its unexecuted fixture jobs. It does not run a browser or call a model. On 28 October 2026 this verification passed: saved defaults survived an API restart, exact UUID retries reused their historical receipts, new jobs froze the matching revision, old jobs and recorded evidence remained unchanged, and no model calls were made. The original preferences were restored through a new append-only revision. The record is [artifacts/exploration-settings/verification.json](./artifacts/exploration-settings/verification.json).
+
+`workspace-test` verifies authentication, URL admission, idempotent jobs, real worker execution, evidence hashes, model request/response retrieval, reproduction, workspace isolation and worker interruption. It uses simulated models against the controlled fixture, restores normal provider mode, and retains evidence. Fixture suites refuse to restart services when existing runs, jobs or model requests are active; run them while the local workspace is idle.
+
+`web-contract-test` runs both `scripts/verify-ui-rendering.mjs` and `scripts/verify-gui-contract.mjs`. The former renders real stored API snapshots through the UI templates. The latter checks server-derived finding summaries, actual model-attempt projections and nullable usage against persisted run reports, and verifies that served JavaScript/CSS match source, including both report modules. These checks require the local stack and existing recorded examples; they do not test browser layout or interaction. The final 28 October verification passed across 50 stored runs, 192 model attempts and 23 review revisions; 808 template views rendered across 44 recorded runs. Results are saved in [artifacts/gui/contract-verification.json](./artifacts/gui/contract-verification.json) and [artifacts/workspace/render-verification.json](./artifacts/workspace/render-verification.json).
+
+`auto-reproduction-test` exercises the automatic scheduler and worker with real Chromium, PostgreSQL, the evidence bucket and ClickHouse, using simulated model responses. On 28 October 2026, nine scheduler tests and seventeen queued-worker/API checks passed; the record is [artifacts/automatic-reproduction/verification.json](./artifacts/automatic-reproduction/verification.json). These checks do not verify GUI layout or live-model quality.
+
+The earlier worker integration record is [artifacts/workspace/verification.json](./artifacts/workspace/verification.json). After enabling local development access, the workspace, back-office overview and job queue, per-run model list, finding detail and screenshot drawer were visually inspected in the in-app browser at its default 484 × 724 viewport. Queue status filtering worked; actual screenshot pixels remained 800 pixels wide and fit mode displayed 452 pixels; Escape closed the drawer and returned focus to its opener. A further browser check verified the editable-defaults form at 484 × 724 and 1280 × 900: drafts survived refresh, a temporary tablet default survived reload, and the original desktop default was restored. Compare displayed two loaded original PNGs in desktop columns and stacked them at the narrow breakpoint without horizontal page overflow. Previous/Next preserved Compare, the active Findings filter disabled both boundaries for its single candidate, and native inspection retained the 800-pixel source width. Browser console errors were absent. Results and screenshots are in [artifacts/gui/exploration-settings-visual-verification.json](./artifacts/gui/exploration-settings-visual-verification.json). This is not full browser/accessibility coverage or live-model QA validation.
+
+The 25 October increment adds an Action completion disclosure with a sampled-frame timeline and diagnostics on each new action. Screenshot counts include intermediate occurrences. Structured outcomes and events are available in Operations and exports; see [ACTION_OUTCOMES.md](./ACTION_OUTCOMES.md).
+
+## Run controls
+
+Use **Stop run** on an active run or **Cancel queued job** before launch. The queue and run header show **Stopping…** while the worker acknowledges a durable request. Cancelled runs retain their evidence, and in-flight model usage may settle later. [Cancellation behavior](./CANCELLATION.md) describes the API and restart recovery.
+
+For an opted-in source, **Stop automatic checks** remains available while planning, reservations or children are outstanding, even after the parent exploration finishes. It stops future automatic planning and records stop intent for existing child jobs and active child runs in one transaction. It leaves the original exploration and unrelated manual jobs alone. The source panel shows the acknowledged stop state; a narrow retry control is available if a child stop request is still unacknowledged. Already completed replay outcomes, actions and usage remain recorded. Stopping does not undo browser actions or cancel usage already sent to a model provider.
+
+## Human finding review
+
+The Findings tab filters pending, human-confirmed and dismissed candidates. Open an action to inspect its complete review history and record a reasoned decision. Confirmation requires verified reproduction evidence, an expectation basis and severity; it adds a separate human label and preserves the original AI assessment. Draft text survives refresh and concurrency conflicts. See [finding reviews](./FINDING_REVIEWS.md).

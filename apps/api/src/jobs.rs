@@ -1,0 +1,942 @@
+use crate::{AppState, WORKSPACE_ID, error, gateway::USER_ID, query};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::{env, sync::Arc};
+use tokio::sync::Mutex;
+use tokio_postgres::Client;
+use uuid::Uuid;
+
+pub struct Queue {
+    db: Mutex<Client>,
+    pub settings: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsSubmission {
+    request_id: Uuid,
+    expected_revision: i64,
+    provider: String,
+    model: String,
+    max_actions: u32,
+    viewport_profile: String,
+    free_only: bool,
+    auto_reproduce: bool,
+    max_auto_reproductions: u32,
+    max_auto_replay_actions: u32,
+}
+
+#[derive(Debug)]
+struct NormalizedSettings {
+    request_id: Uuid,
+    expected_revision: i64,
+    settings: Value,
+}
+
+impl SettingsSubmission {
+    fn normalize(self) -> Result<NormalizedSettings, &'static str> {
+        if self.request_id.is_nil()
+            || self.expected_revision < 0
+            || self.expected_revision == i64::MAX
+        {
+            return Err("invalid_settings_request_id_or_revision");
+        }
+        if !matches!(
+            self.provider.as_str(),
+            "openai" | "anthropic" | "openrouter"
+        ) {
+            return Err("invalid_settings_provider");
+        }
+        let model = self.model.trim();
+        if self.model.chars().any(char::is_control)
+            || model.is_empty()
+            || model.len() > 200
+            || !model
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"/:._-".contains(&c))
+        {
+            return Err("invalid_settings_model");
+        }
+        if !(1..=12).contains(&self.max_actions)
+            || !(1..=3).contains(&self.max_auto_reproductions)
+            || !(1..=24).contains(&self.max_auto_replay_actions)
+        {
+            return Err("invalid_settings_limits");
+        }
+        if !matches!(
+            self.viewport_profile.as_str(),
+            "desktop" | "tablet" | "mobile"
+        ) {
+            return Err("invalid_settings_viewport");
+        }
+        let free_only = self.provider == "openrouter" && self.free_only;
+        if free_only && model != "openrouter/free" && !model.ends_with(":free") {
+            return Err("free_only_requires_free_model");
+        }
+        Ok(NormalizedSettings {
+            request_id: self.request_id,
+            expected_revision: self.expected_revision,
+            settings: json!({
+                "provider":self.provider,"model":model,"maxActions":self.max_actions,
+                "viewportProfile":self.viewport_profile,"freeOnly":free_only,
+                "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
+                "maxAutoReplayActions":self.max_auto_replay_actions
+            }),
+        })
+    }
+}
+
+fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Value {
+    let mut settings = base.clone();
+    // Security policy, origins and secrets never come from a saved preference.
+    if let Some(saved) = saved {
+        for key in [
+            "provider",
+            "model",
+            "maxActions",
+            "viewportProfile",
+            "freeOnly",
+            "autoReproduce",
+            "maxAutoReproductions",
+            "maxAutoReplayActions",
+        ] {
+            if let Some(value) = saved.get(key) {
+                settings[key] = value.clone();
+            }
+        }
+    }
+    settings["settingsRevision"] = json!(revision);
+    settings
+}
+
+fn settings_retry(saved: &Value, input: &NormalizedSettings) -> Result<(), &'static str> {
+    if saved["workspace_id"] != WORKSPACE_ID.to_string()
+        || saved["user_id"] != USER_ID.to_string()
+        || saved["expected_revision"] != input.expected_revision
+        || saved["settings"] != input.settings
+    {
+        return Err("settings_request_id_conflict");
+    }
+    Ok(())
+}
+
+fn next_settings_revision(expected: i64, current: i64) -> Result<i64, &'static str> {
+    if expected != current {
+        return Err("revision_conflict");
+    }
+    current.checked_add(1).ok_or("invalid_settings_revision")
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Submission {
+    job_id: Uuid,
+    kind: String,
+    #[serde(default)]
+    target_url: Option<String>,
+    #[serde(default)]
+    source_action_id: Option<Uuid>,
+    #[serde(default)]
+    viewport_profile: Option<String>,
+    #[serde(default)]
+    auth_mode: Option<String>,
+    #[serde(default)]
+    session_id: Option<Uuid>,
+    #[serde(default)]
+    auto_reproduce: Option<bool>,
+}
+
+fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
+    env::var(name)
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|n| (1..=max).contains(n))
+        .unwrap_or(default)
+}
+
+fn target(value: &str, allowed: &[String]) -> Result<String, &'static str> {
+    let url = reqwest::Url::parse(value).map_err(|_| "invalid_target_url")?;
+    if value.len() > 2048
+        || !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !allowed.contains(&url.origin().ascii_serialization())
+    {
+        return Err("target_origin_not_allowed");
+    }
+    Ok(url.to_string())
+}
+
+fn prepare_submission(
+    input: &Submission,
+    defaults: &Value,
+) -> Result<(Value, Value), &'static str> {
+    let mut settings = defaults.clone();
+    let mut request = match input.kind.as_str() {
+        "explore" if input.source_action_id.is_none() => {
+            let allowed = defaults["allowedOrigins"]
+                .as_array()
+                .ok_or("target_origin_not_allowed")?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            json!({"kind":"explore","target_url":target(input.target_url.as_deref().ok_or("missing_target_url")?, &allowed)?})
+        }
+        "reproduce"
+            if input.target_url.is_none()
+                && input.viewport_profile.is_none()
+                && input.auth_mode.is_none()
+                && input.session_id.is_none()
+                && input.auto_reproduce.is_none() =>
+        {
+            json!({"kind":"reproduce","source_action_id":input.source_action_id.ok_or("missing_source_action_id")?})
+        }
+        _ => return Err("invalid_job_kind_or_fields"),
+    };
+    if input.kind == "explore" {
+        if let Some(enabled) = input.auto_reproduce {
+            settings["autoReproduce"] = json!(enabled);
+            // Keep omitted defaults omitted in the idempotency request.
+            request["auto_reproduce"] = json!(enabled);
+        }
+    } else {
+        settings["autoReproduce"] = json!(false);
+    }
+    if let Some(mode) = &input.auth_mode {
+        if !matches!(mode.as_str(), "auto" | "sign_in" | "public") {
+            return Err("invalid_auth_mode");
+        }
+        if mode == "public" && input.session_id.is_some() {
+            return Err("public_mode_cannot_use_session");
+        }
+        request["auth_mode"] = json!(mode);
+    }
+    if let Some(id) = input.session_id {
+        request["session_id"] = json!(id);
+    }
+    if let Some(profile) = &input.viewport_profile {
+        if !matches!(profile.as_str(), "desktop" | "tablet" | "mobile") {
+            return Err("invalid_viewport_profile");
+        }
+        settings["viewportProfile"] = json!(profile);
+        request["viewport_profile"] = settings["viewportProfile"].clone();
+    }
+    if !matches!(
+        settings["viewportProfile"].as_str(),
+        Some("desktop" | "tablet" | "mobile")
+    ) {
+        return Err("invalid_viewport_profile");
+    }
+    Ok((request, settings))
+}
+
+impl Queue {
+    pub async fn effective_settings(&self) -> Result<Value, &'static str> {
+        let db = self.db.lock().await;
+        let saved = db.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+        let (revision, settings) = saved
+            .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
+            .unwrap_or((0, None));
+        Ok(
+            json!({"revision":revision,"settings":settings_snapshot(&self.settings,settings.as_ref(),revision)}),
+        )
+    }
+
+    async fn save_settings(&self, input: SettingsSubmission) -> Result<Value, &'static str> {
+        let input = input.normalize()?;
+        let mut db = self.db.lock().await;
+        let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
+        // New job admissions and preference revisions have one serialization
+        // point across API instances. Already admitted jobs remain immutable.
+        tx.query_one("SELECT pg_advisory_xact_lock(736268194002)", &[])
+            .await
+            .map_err(|_| "database_unavailable")?;
+        if let Some(row) = tx
+            .query_opt(
+                "SELECT to_jsonb(v) FROM exploration_settings_versions v WHERE request_id=$1",
+                &[&input.request_id],
+            )
+            .await
+            .map_err(|_| "database_unavailable")?
+        {
+            let saved: Value = row.get(0);
+            settings_retry(&saved, &input)?;
+            let revision = saved["revision"].as_i64().ok_or("database_unavailable")?;
+            return Ok(
+                json!({"revision":revision,"settings":settings_snapshot(&self.settings,Some(&saved["settings"]),revision),"reused":true}),
+            );
+        }
+        let current:i64=tx.query_one("SELECT COALESCE(max(revision),0) FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2",&[&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.get(0);
+        let revision = next_settings_revision(input.expected_revision, current)?;
+        tx.execute("INSERT INTO exploration_settings_versions(request_id,workspace_id,user_id,revision,expected_revision,settings) VALUES($1,$2,$3,$4,$5,$6)",&[&input.request_id,&WORKSPACE_ID,&USER_ID,&revision,&input.expected_revision,&input.settings]).await.map_err(|_|"database_unavailable")?;
+        tx.commit().await.map_err(|_| "database_unavailable")?;
+        Ok(
+            json!({"revision":revision,"settings":settings_snapshot(&self.settings,Some(&input.settings),revision),"reused":false}),
+        )
+    }
+
+    async fn cancel(&self, id: Uuid, by_run: bool) -> Result<Value, &'static str> {
+        let mut db = self.db.lock().await;
+        let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
+        // Always lock the job before its run, matching the worker's linking
+        // transaction. Dispatch/finalization serialize on the run row.
+        let job_id = if by_run {
+            tx.query_opt("SELECT job_id FROM browser_jobs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 ORDER BY (status='running') DESC,created_at DESC LIMIT 1", &[&id,&WORKSPACE_ID,&USER_ID])
+                .await.map_err(|_| "database_unavailable")?.map(|r|r.get::<_,Uuid>(0))
+        } else {
+            Some(id)
+        };
+        let job: Option<Value> = if let Some(job_id) = job_id {
+            tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE job_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&job_id,&WORKSPACE_ID,&USER_ID])
+                .await.map_err(|_| "database_unavailable")?.map(|r|r.get(0))
+        } else {
+            None
+        };
+        if !by_run && job.is_none() {
+            return Err("job_not_found");
+        }
+        let run_id = if by_run {
+            Some(id)
+        } else {
+            job.as_ref()
+                .and_then(|j| j["run_id"].as_str())
+                .and_then(|s| Uuid::parse_str(s).ok())
+        };
+        let run: Option<Value> = if let Some(run_id) = run_id {
+            tx.query_opt("SELECT to_jsonb(r) FROM runtime_runs r WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&run_id,&WORKSPACE_ID,&USER_ID])
+                .await.map_err(|_| "database_unavailable")?.map(|r|r.get(0))
+        } else {
+            None
+        };
+        if by_run && run.is_none() {
+            return Err("run_not_found");
+        }
+        let existing = run
+            .as_ref()
+            .and_then(|r| r["cancel_id"].as_str())
+            .or_else(|| job.as_ref().and_then(|j| j["cancel_id"].as_str()));
+        let terminal = run.as_ref().is_some_and(|r| r["lifecycle"] != "active")
+            || job
+                .as_ref()
+                .is_some_and(|j| !matches!(j["status"].as_str(), Some("queued" | "running")));
+        if terminal {
+            let cancelled = run.as_ref().is_some_and(|r| r["lifecycle"] == "cancelled")
+                || job.as_ref().is_some_and(|j| j["status"] == "cancelled");
+            return Ok(
+                json!({"job_id":job_id,"run_id":run_id,"cancellation_id":existing,"status":if cancelled{"cancelled"}else{"already_finished"},"reused":true}),
+            );
+        }
+        if run
+            .as_ref()
+            .is_some_and(|r| r["config"]["runtime_version"] != "explorer-v1")
+        {
+            return Err("run_cancellation_unsupported");
+        }
+        let cancellation_id = existing
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .unwrap_or_else(Uuid::new_v4);
+        let queued = job.as_ref().is_some_and(|j| j["status"] == "queued");
+        if let Some(job_id) = job_id {
+            tx.execute("UPDATE browser_jobs SET cancel_id=$2,cancel_requested_at=COALESCE(cancel_requested_at,now()),status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,finished_at=CASE WHEN status='queued' THEN now() ELSE finished_at END WHERE job_id=$1",&[&job_id,&cancellation_id]).await.map_err(|_| "database_unavailable")?;
+        }
+        if let Some(run_id) = run_id
+            && run.as_ref().is_some_and(|r| r["cancel_id"].is_null())
+        {
+            let row=tx.query_one("UPDATE runtime_runs SET cancel_id=$2,cancel_requested_at=now(),event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq",&[&run_id,&cancellation_id]).await.map_err(|_| "database_unavailable")?;
+            let seq: i64 = row.get(0);
+            tx.execute("INSERT INTO runtime_events(event_id,run_id,seq,event_type,payload) VALUES($1,$2,$3,'run.cancel_requested',$4)",&[&Uuid::new_v4(),&run_id,&seq,&json!({"cancellation_id":cancellation_id,"actor":"user","in_flight_usage_may_settle":true})]).await.map_err(|_| "database_unavailable")?;
+        }
+        tx.commit().await.map_err(|_| "database_unavailable")?;
+        Ok(
+            json!({"job_id":job_id,"run_id":run_id,"cancellation_id":cancellation_id,"status":if queued{"cancelled"}else{"cancelling"},"reused":existing.is_some()}),
+        )
+    }
+
+    async fn cancel_automatic(&self, run_id: Uuid) -> Result<Value, &'static str> {
+        let (cancellation_id, reused) = {
+            let mut db = self.db.lock().await;
+            let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
+            // Match scheduler order: source job -> source run -> child jobs.
+            // Persist every child stop intent in this same transaction so an
+            // API crash after acknowledgement cannot leave a child running.
+            let source_job: Option<Value> = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 AND request->>'kind'='explore' ORDER BY created_at,job_id LIMIT 1 FOR UPDATE",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.map(|row|row.get(0));
+            let run: Value = tx.query_opt("SELECT to_jsonb(r) FROM runtime_runs r WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.ok_or("run_not_found")?.get(0);
+            if source_job
+                .as_ref()
+                .is_none_or(|j| j["settings"]["autoReproduce"] != true)
+                || run["config"]["runtime_version"] != "explorer-v1"
+                || !run["config"]["replay_of"].is_null()
+            {
+                return Err("automatic_reproduction_not_enabled");
+            }
+            let existing = run["auto_reproduction_cancel_id"]
+                .as_str()
+                .and_then(|v| Uuid::parse_str(v).ok());
+            let cancellation_id = existing.unwrap_or_else(Uuid::new_v4);
+            if existing.is_none() {
+                let seq: i64 = tx.query_one("UPDATE runtime_runs SET auto_reproduction_cancel_id=$2,auto_reproduction_cancelled_at=now(),event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq",&[&run_id,&cancellation_id]).await.map_err(|_|"database_unavailable")?.get(0);
+                tx.execute("INSERT INTO runtime_events(event_id,run_id,seq,event_type,payload) VALUES($1,$2,$3,'auto_reproduction.cancel_requested',$4)",&[&Uuid::new_v4(),&run_id,&seq,&json!({"cancellation_id":cancellation_id,"actor":"user","in_flight_usage_may_settle":true})]).await.map_err(|_|"database_unavailable")?;
+            }
+            let skipped = tx.query("UPDATE automatic_reproduction_tasks SET status='skipped',reason='user_cancelled',updated_at=now() WHERE source_run_id=$1 AND status='pending' RETURNING task_id,source_action_id",&[&run_id]).await.map_err(|_|"database_unavailable")?;
+            for row in skipped {
+                let task_id: Uuid = row.get(0);
+                let action_id: Uuid = row.get(1);
+                let seq: i64 = tx.query_one("UPDATE runtime_runs SET event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq",&[&run_id]).await.map_err(|_|"database_unavailable")?.get(0);
+                tx.execute("INSERT INTO runtime_events(event_id,run_id,seq,event_type,action_id,payload) VALUES($1,$2,$3,'auto_reproduction.skipped',$4,$5)",&[&Uuid::new_v4(),&run_id,&seq,&action_id,&json!({"task_id":task_id,"source_action_id":action_id,"reason":"user_cancelled","cancellation_id":cancellation_id})]).await.map_err(|_|"database_unavailable")?;
+            }
+            let children=tx.query("SELECT j.job_id,j.run_id,j.cancel_id FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id JOIN browser_jobs p ON p.job_id=t.source_job_id WHERE t.source_run_id=$1 AND p.workspace_id=$2 AND p.user_id=$3 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=p.job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running') ORDER BY j.created_at,j.job_id FOR UPDATE OF j",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+            for child in children {
+                let child_id: Uuid = child.get(0);
+                let child_run_id: Option<Uuid> = child.get(1);
+                let job_cancel_id: Option<Uuid> = child.get(2);
+                let child_run = if let Some(id) = child_run_id {
+                    tx.query_opt("SELECT lifecycle,cancel_id FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?
+                } else {
+                    None
+                };
+                // A replay that already finished keeps its original outcome,
+                // even if its job is still publishing evidence.
+                if child_run
+                    .as_ref()
+                    .is_some_and(|r| r.get::<_, String>(0) != "active")
+                {
+                    continue;
+                }
+                let run_cancel_id = child_run.as_ref().and_then(|r| r.get::<_, Option<Uuid>>(1));
+                let child_cancel_id = job_cancel_id.or(run_cancel_id).unwrap_or_else(Uuid::new_v4);
+                tx.execute("UPDATE browser_jobs SET cancel_id=$2,cancel_requested_at=COALESCE(cancel_requested_at,now()),finished_at=CASE WHEN status='queued' THEN now() ELSE finished_at END,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE job_id=$1",&[&child_id,&child_cancel_id]).await.map_err(|_|"database_unavailable")?;
+                if let Some(id) = child_run_id
+                    && run_cancel_id.is_none()
+                {
+                    let seq:i64=tx.query_one("UPDATE runtime_runs SET cancel_id=$2,cancel_requested_at=now(),event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq",&[&id,&child_cancel_id]).await.map_err(|_|"database_unavailable")?.get(0);
+                    tx.execute("INSERT INTO runtime_events(event_id,run_id,seq,event_type,payload) VALUES($1,$2,$3,'run.cancel_requested',$4)",&[&Uuid::new_v4(),&id,&seq,&json!({"cancellation_id":child_cancel_id,"parent_cancellation_id":cancellation_id,"source_run_id":run_id,"actor":"user","in_flight_usage_may_settle":true})]).await.map_err(|_|"database_unavailable")?;
+                }
+            }
+            tx.commit().await.map_err(|_| "database_unavailable")?;
+            (cancellation_id, existing.is_some())
+        };
+        let db = self.db.lock().await;
+        let remaining: i64 = db.query_one("SELECT count(*) FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id WHERE t.source_run_id=$1 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=t.source_job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running')",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.get(0);
+        Ok(
+            json!({"cancellation_id":cancellation_id,"run_id":run_id,"status":if remaining>0{"cancelling"}else{"cancelled"},"reused":reused}),
+        )
+    }
+
+    pub fn from_env(db: Client) -> Arc<Self> {
+        let provider = env::var("SCOUT_EXPLORER_PROVIDER").unwrap_or_else(|_| "openrouter".into());
+        let model = env::var("SCOUT_EXPLORER_MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                if provider == "openrouter" {
+                    "openrouter/free".into()
+                } else {
+                    String::new()
+                }
+            });
+        Arc::new(Self {
+            db: Mutex::new(db),
+            settings: json!({
+                "provider":provider,"model":model,"freeOnly":provider=="openrouter" && env::var("SCOUT_EXPLORER_FREE_ONLY").as_deref()!=Ok("false"),
+                "maxActions":env::var("SCOUT_EXPLORER_MAX_ACTIONS").ok().and_then(|s|s.parse::<u32>().ok()).filter(|n|(1..=12).contains(n)).unwrap_or(6),
+                "autoReproduce":env::var("SCOUT_AUTO_REPRODUCE").as_deref()==Ok("true"),
+                "maxAutoReproductions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_CASES",2,3),
+                "maxAutoReplayActions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_ACTIONS",12,24),
+                "viewportProfile":env::var("SCOUT_EXPLORER_VIEWPORT").unwrap_or_else(|_|"desktop".into()),
+                "allowedOrigins":env::var("SCOUT_ALLOWED_ORIGINS").unwrap_or_else(|_|"http://exploration-fixture:8082".into()).split(',').map(str::trim).collect::<Vec<_>>()
+            }),
+        })
+    }
+
+    async fn admit(&self, input: Submission, providers: Value) -> Result<Value, &'static str> {
+        let mut db = self.db.lock().await;
+        let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
+        // Serialize admission across API instances, including the queue limit.
+        tx.query_one("SELECT pg_advisory_xact_lock(736268194002)", &[])
+            .await
+            .map_err(|_| "database_unavailable")?;
+        if let Some(row) = tx
+            .query_opt(
+                "SELECT to_jsonb(j) FROM browser_jobs j WHERE job_id=$1",
+                &[&input.job_id],
+            )
+            .await
+            .map_err(|_| "database_unavailable")?
+        {
+            let saved: Value = row.get(0);
+            if saved["workspace_id"] != WORKSPACE_ID.to_string()
+                || saved["user_id"] != USER_ID.to_string()
+            {
+                return Err("job_id_conflict");
+            }
+            // Reconstruct against the original snapshot. A retry cannot adopt
+            // new preferences or fail because the current model changed.
+            let (request, _) = prepare_submission(&input, &saved["settings"])?;
+            if saved["request"] != request {
+                return Err("job_id_conflict");
+            }
+            return Ok(json!({"job":saved,"reused":true}));
+        }
+        let latest=tx.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+        let (revision, saved) = latest
+            .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
+            .unwrap_or((0, None));
+        let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
+        let (request, settings) = prepare_submission(&input, &defaults)?;
+        // Automatic and manual admission share this transaction lock, so the
+        // same suspect cannot start two queued/running paid replays.
+        if let Some(id) = input.source_action_id
+            && let Some(row) = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE workspace_id=$1 AND user_id=$2 AND request->>'kind'='reproduce' AND request->>'source_action_id'=$3 AND status IN ('queued','running') ORDER BY created_at,job_id LIMIT 1",&[&WORKSPACE_ID,&USER_ID,&id.to_string()]).await.map_err(|_|"database_unavailable")?
+        {
+            return Ok(json!({"job":row.get::<_,Value>(0),"reused":true}));
+        }
+        let connected = providers["gateway_ready"] == true
+            && providers["providers"].as_array().is_some_and(|list| {
+                list.iter()
+                    .any(|p| p["provider"] == settings["provider"] && p["configured"] == true)
+            });
+        if !connected || settings["model"].as_str().is_none_or(str::is_empty) {
+            return Err("provider_not_configured");
+        }
+        if let Some(id) = input.source_action_id
+            && tx.query_opt("SELECT 1 FROM runtime_actions a JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 AND r.lifecycle<>'active' AND a.state='completed' AND a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND COALESCE(r.config->>'replay_of','')=''", &[&id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.is_none() { return Err("source_is_not_an_eligible_suspect"); }
+        let count: i64 = tx.query_one("SELECT count(*) FROM browser_jobs WHERE workspace_id=$1 AND status IN ('queued','running')", &[&WORKSPACE_ID]).await.map_err(|_|"database_unavailable")?.get(0);
+        if count >= 10 {
+            return Err("browser_queue_full");
+        }
+        let mode = if providers["test_mode"] == true {
+            "protocol_fixture"
+        } else {
+            "live"
+        };
+        if let Some(id) = input.session_id {
+            let origin =
+                reqwest::Url::parse(request["target_url"].as_str().ok_or("missing_target_url")?)
+                    .map_err(|_| "invalid_target_url")?
+                    .origin()
+                    .ascii_serialization();
+            if tx.query_opt("SELECT 1 FROM browser_sessions WHERE session_id=$1 AND workspace_id=$2 AND user_id=$3 AND origin=$4 AND execution_mode=$5 AND revoked_at IS NULL AND expires_at>now()",&[&id,&WORKSPACE_ID,&USER_ID,&origin,&mode]).await.map_err(|_|"database_unavailable")?.is_none(){return Err("saved_session_unavailable");}
+        }
+        let row = tx.query_one("INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING to_jsonb(browser_jobs)", &[&input.job_id,&WORKSPACE_ID,&USER_ID,&request,&settings,&mode]).await.map_err(|_|"database_unavailable")?;
+        let job: Value = row.get(0);
+        tx.commit().await.map_err(|_| "database_unavailable")?;
+        Ok(json!({"job":job,"reused":false}))
+    }
+}
+
+pub async fn submit(
+    State(state): State<AppState>,
+    input: Result<Json<Submission>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let Some(queue) = &state.jobs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
+    };
+    let Ok(Json(input)) = input else {
+        return error(StatusCode::BAD_REQUEST, "invalid_job_request");
+    };
+    let providers = state
+        .gateway
+        .as_ref()
+        .map(|g| g.providers())
+        .unwrap_or(json!({}));
+    match queue.admit(input, providers).await {
+        Ok(value) => (
+            if value["reused"] == true {
+                StatusCode::OK
+            } else {
+                StatusCode::ACCEPTED
+            },
+            Json(value),
+        )
+            .into_response(),
+        Err(code) => error(
+            match code {
+                "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+                "job_id_conflict" | "provider_not_configured" | "browser_queue_full" => {
+                    StatusCode::CONFLICT
+                }
+                _ => StatusCode::BAD_REQUEST,
+            },
+            code,
+        ),
+    }
+}
+
+pub async fn list(State(state): State<AppState>) -> Response {
+    let effective = match &state.jobs {
+        Some(queue) => match queue.effective_settings().await {
+            Ok(value) => value,
+            Err(code) => return error(StatusCode::SERVICE_UNAVAILABLE, code),
+        },
+        None => json!({"revision":0,"settings":{}}),
+    };
+    match query(&state,"SELECT jsonb_build_object('jobs',COALESCE((SELECT jsonb_agg(to_jsonb(j) ORDER BY created_at DESC) FROM (SELECT * FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50) j),'[]'::jsonb),'workers',COALESCE((SELECT jsonb_agg(to_jsonb(w)||jsonb_build_object('available',status='online' AND heartbeat_at>now()-interval '20 seconds') ORDER BY started_at DESC) FROM (SELECT * FROM browser_workers WHERE workspace_id=$1 ORDER BY started_at DESC LIMIT 10) w),'[]'::jsonb))",&[&WORKSPACE_ID,&USER_ID]).await {
+        Ok(Some(mut value))=>{value["settings"]=effective["settings"].clone();value["settings_revision"]=effective["revision"].clone();Json(value).into_response()},
+        Ok(None)=>Json(json!({})).into_response(),Err(r)=>r,
+    }
+}
+
+pub async fn exploration_settings(State(state): State<AppState>) -> Response {
+    let Some(queue) = &state.jobs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
+    };
+    match queue.effective_settings().await {
+        Ok(value) => Json(value).into_response(),
+        Err(code) => error(StatusCode::SERVICE_UNAVAILABLE, code),
+    }
+}
+
+pub async fn get_job(State(state): State<AppState>,Path(id): Path<Uuid>) -> Response {
+    match query(&state,"SELECT jsonb_build_object('job',to_jsonb(j)) FROM browser_jobs j WHERE j.job_id=$1 AND j.workspace_id=$2 AND j.user_id=$3",&[&id,&WORKSPACE_ID,&USER_ID]).await {
+        Ok(Some(value))=>Json(value).into_response(),
+        Ok(None)=>error(StatusCode::NOT_FOUND,"job_not_found"),
+        Err(response)=>response,
+    }
+}
+
+pub async fn save_exploration_settings(
+    State(state): State<AppState>,
+    input: Result<Json<SettingsSubmission>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let Some(queue) = &state.jobs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
+    };
+    let Ok(Json(input)) = input else {
+        return error(StatusCode::BAD_REQUEST, "invalid_settings_request");
+    };
+    match queue.save_settings(input).await {
+        Ok(value) => (
+            if value["reused"] == true {
+                StatusCode::OK
+            } else {
+                StatusCode::CREATED
+            },
+            Json(value),
+        )
+            .into_response(),
+        Err(code) => error(
+            match code {
+                "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+                "revision_conflict" | "settings_request_id_conflict" => StatusCode::CONFLICT,
+                _ => StatusCode::BAD_REQUEST,
+            },
+            code,
+        ),
+    }
+}
+
+async fn cancel_response(state: AppState, id: Uuid, by_run: bool) -> Response {
+    let Some(queue) = &state.jobs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
+    };
+    match queue.cancel(id, by_run).await {
+        Ok(value) => (
+            if value["status"] == "cancelling" {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(value),
+        )
+            .into_response(),
+        Err(code) => error(
+            match code {
+                "job_not_found" | "run_not_found" => StatusCode::NOT_FOUND,
+                "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+                _ => StatusCode::CONFLICT,
+            },
+            code,
+        ),
+    }
+}
+pub async fn cancel_job(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+    cancel_response(state, id, false).await
+}
+pub async fn cancel_run(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+    cancel_response(state, id, true).await
+}
+
+pub async fn cancel_automatic(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+    let Some(queue) = &state.jobs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
+    };
+    match queue.cancel_automatic(id).await {
+        Ok(value) => (
+            if value["status"] == "cancelling" {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(value),
+        )
+            .into_response(),
+        Err(code) => error(
+            match code {
+                "run_not_found" => StatusCode::NOT_FOUND,
+                "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+                _ => StatusCode::CONFLICT,
+            },
+            code,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn submission(value: Value) -> Submission {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn defaults() -> Value {
+        json!({"autoReproduce":false,"viewportProfile":"desktop","allowedOrigins":["http://app:8082"]})
+    }
+
+    fn settings_input() -> Value {
+        json!({"request_id":Uuid::new_v4(),"expected_revision":0,"provider":"openrouter","model":"openrouter/free", "max_actions":6,"viewport_profile":"desktop","free_only":true,"auto_reproduce":false,"max_auto_reproductions":2,"max_auto_replay_actions":12})
+    }
+
+    fn normalize_settings(value: Value) -> Result<NormalizedSettings, &'static str> {
+        serde_json::from_value::<SettingsSubmission>(value)
+            .map_err(|_| "invalid_settings_request")?
+            .normalize()
+    }
+
+    #[test]
+    fn settings_are_typed_bounded_and_cannot_change_security_or_credentials() {
+        for (key, value) in [
+            ("provider", json!("other")),
+            ("model", json!("")),
+            ("model", json!("a b")),
+            ("model", json!(" model\n")),
+            ("model", json!("a".repeat(201))),
+            ("model", json!("méta/model")),
+            ("max_actions", json!(0)),
+            ("max_actions", json!(13)),
+            ("max_auto_reproductions", json!(0)),
+            ("max_auto_reproductions", json!(4)),
+            ("max_auto_replay_actions", json!(0)),
+            ("max_auto_replay_actions", json!(25)),
+            ("viewport_profile", json!("watch")),
+            ("expected_revision", json!(-1)),
+            ("expected_revision", json!(i64::MAX)),
+            ("request_id", json!(Uuid::nil())),
+            ("free_only", json!("true")),
+            ("auto_reproduce", json!(1)),
+            ("max_actions", json!(1.5)),
+            ("api_key", json!("cannot-save-secrets")),
+            ("allowed_origins", json!(["https://other.test"])),
+            ("allowedOrigins", json!(["https://other.test"])),
+            ("workspace_id", json!(Uuid::new_v4())),
+        ] {
+            let mut input = settings_input();
+            input[key] = value;
+            assert!(normalize_settings(input).is_err(), "Rejected field {key}");
+        }
+        for missing in [
+            "request_id",
+            "expected_revision",
+            "provider",
+            "model",
+            "max_actions",
+            "viewport_profile",
+            "free_only",
+            "auto_reproduce",
+            "max_auto_reproductions",
+            "max_auto_replay_actions",
+        ] {
+            let mut input = settings_input();
+            input.as_object_mut().unwrap().remove(missing);
+            assert!(
+                normalize_settings(input).is_err(),
+                "Required field {missing}"
+            );
+        }
+        let mut maximum = settings_input();
+        maximum["model"] = json!("a".repeat(200));
+        maximum["free_only"] = json!(false);
+        maximum["max_actions"] = json!(12);
+        maximum["max_auto_reproductions"] = json!(3);
+        maximum["max_auto_replay_actions"] = json!(24);
+        assert!(normalize_settings(maximum).is_ok());
+    }
+
+    #[test]
+    fn settings_normalize_models_and_direct_provider_free_flags_without_model_calls() {
+        for provider in ["openai", "anthropic"] {
+            let mut input = settings_input();
+            input["provider"] = json!(provider);
+            input["model"] = json!("  valid-model  ");
+            let settings = normalize_settings(input).unwrap().settings;
+            assert_eq!(settings["model"], "valid-model");
+            assert_eq!(settings["freeOnly"], false);
+            assert_eq!(settings["provider"], provider);
+        }
+        for model in ["openrouter/free", "vendor/model:free"] {
+            let mut input = settings_input();
+            input["model"] = json!(model);
+            assert_eq!(
+                normalize_settings(input).unwrap().settings["freeOnly"],
+                true
+            );
+        }
+        let mut input = settings_input();
+        input["model"] = json!("vendor/paid-model");
+        assert_eq!(
+            normalize_settings(input.clone()).unwrap_err(),
+            "free_only_requires_free_model"
+        );
+        input["free_only"] = json!(false);
+        assert!(normalize_settings(input).is_ok());
+    }
+
+    #[test]
+    fn settings_history_retry_is_scoped_normalized_and_independent_of_later_revisions() {
+        let raw = settings_input();
+        let normalized = normalize_settings(raw.clone()).unwrap();
+        let saved = json!({"request_id":normalized.request_id,"workspace_id":WORKSPACE_ID,"user_id":USER_ID,"revision":1,"expected_revision":0,"settings":normalized.settings});
+        assert!(settings_retry(&saved, &normalized).is_ok());
+        // A later revision prevents a new write, but never invalidates an
+        // identical UUID retry of the already committed revision.
+        assert_eq!(
+            next_settings_revision(0, 2).unwrap_err(),
+            "revision_conflict"
+        );
+        assert!(settings_retry(&saved, &normalized).is_ok());
+        let mut trimmed = raw.clone();
+        trimmed["model"] = json!("  openrouter/free  ");
+        assert!(settings_retry(&saved, &normalize_settings(trimmed).unwrap()).is_ok());
+        for (key, value) in [("expected_revision", json!(1)), ("max_actions", json!(7))] {
+            let mut changed = raw.clone();
+            changed[key] = value;
+            assert_eq!(
+                settings_retry(&saved, &normalize_settings(changed).unwrap()).unwrap_err(),
+                "settings_request_id_conflict"
+            );
+        }
+        for key in ["workspace_id", "user_id"] {
+            let mut foreign = saved.clone();
+            foreign[key] = json!(Uuid::new_v4());
+            assert_eq!(
+                settings_retry(&foreign, &normalized).unwrap_err(),
+                "settings_request_id_conflict"
+            );
+        }
+        assert_eq!(next_settings_revision(2, 2).unwrap(), 3);
+    }
+
+    #[test]
+    fn preferences_overlay_only_editable_fields_and_old_job_snapshots_remain_frozen() {
+        let mut base = defaults();
+        base["provider"] = json!("openrouter");
+        base["model"] = json!("openrouter/free");
+        base["maxActions"] = json!(6);
+        let original = settings_snapshot(&base, None, 0);
+        let mut saved = json!({"provider":"anthropic","model":"new-model","maxActions":9,"viewportProfile":"mobile","allowedOrigins":["https://unsafe.test"],"secret":"not-permitted"});
+        let updated = settings_snapshot(&base, Some(&saved), 3);
+        assert_eq!(updated["settingsRevision"], 3);
+        assert_eq!(updated["provider"], "anthropic");
+        assert_eq!(updated["maxActions"], 9);
+        assert_eq!(updated["allowedOrigins"], base["allowedOrigins"]);
+        assert!(updated.get("secret").is_none());
+        assert_eq!(original["model"], "openrouter/free");
+        assert_eq!(original["maxActions"], 6);
+        assert_eq!(original["settingsRevision"], 0);
+        let input = submission(
+            json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/path"}),
+        );
+        let (original_request, original_job) = prepare_submission(&input, &original).unwrap();
+        saved["viewportProfile"] = json!("tablet");
+        let updated = settings_snapshot(&base, Some(&saved), 4);
+        let (new_request, new_job) = prepare_submission(&input, &updated).unwrap();
+        assert_eq!(new_request, original_request);
+        assert_eq!(new_job["model"], "new-model");
+        assert_eq!(new_job["settingsRevision"], 4);
+        let (retry_request, retry_job) = prepare_submission(&input, &original_job).unwrap();
+        assert_eq!(retry_request, original_request);
+        assert_eq!(retry_job, original_job);
+    }
+
+    #[test]
+    fn automatic_reproduction_is_opt_in_and_request_identity_keeps_omissions() {
+        let base =
+            json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/"});
+        let (request, settings) =
+            prepare_submission(&submission(base.clone()), &defaults()).unwrap();
+        assert_eq!(settings["autoReproduce"], false);
+        assert!(request.get("auto_reproduce").is_none());
+        let mut enabled_defaults = defaults();
+        enabled_defaults["autoReproduce"] = json!(true);
+        let (same_request, settings) =
+            prepare_submission(&submission(base.clone()), &enabled_defaults).unwrap();
+        assert_eq!(same_request, request);
+        assert_eq!(settings["autoReproduce"], true);
+        for enabled in [true, false] {
+            let mut explicit = base.clone();
+            explicit["auto_reproduce"] = json!(enabled);
+            let (request, settings) =
+                prepare_submission(&submission(explicit), &enabled_defaults).unwrap();
+            assert_eq!(settings["autoReproduce"], enabled);
+            assert_eq!(request["auto_reproduce"], enabled);
+        }
+    }
+
+    #[test]
+    fn reproductions_cannot_enable_automatic_descendants() {
+        let base =
+            json!({"job_id":Uuid::new_v4(),"kind":"reproduce","source_action_id":Uuid::new_v4()});
+        let mut enabled_defaults = defaults();
+        enabled_defaults["autoReproduce"] = json!(true);
+        let (_, settings) =
+            prepare_submission(&submission(base.clone()), &enabled_defaults).unwrap();
+        assert_eq!(settings["autoReproduce"], false);
+        for enabled in [true, false] {
+            let mut explicit = base.clone();
+            explicit["auto_reproduce"] = json!(enabled);
+            assert_eq!(
+                prepare_submission(&submission(explicit), &enabled_defaults).unwrap_err(),
+                "invalid_job_kind_or_fields"
+            );
+        }
+    }
+
+    #[test]
+    fn automatic_reproduction_flag_requires_boolean_and_cannot_supply_limits() {
+        let base =
+            json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/"});
+        for invalid in [json!("true"), json!(1), json!([])] {
+            let mut input = base.clone();
+            input["auto_reproduce"] = invalid;
+            assert!(serde_json::from_value::<Submission>(input).is_err());
+        }
+        let mut input = base;
+        input["max_auto_reproductions"] = json!(100);
+        assert!(serde_json::from_value::<Submission>(input).is_err());
+    }
+
+    #[test]
+    fn target_requires_exact_origin_without_credentials() {
+        let allowed = vec!["http://app:8082".to_owned()];
+        assert_eq!(
+            target("http://app:8082/path", &allowed).unwrap(),
+            "http://app:8082/path"
+        );
+        for value in [
+            "http://app:8082.evil/path",
+            "http://app:8083/",
+            "file:///tmp/a",
+            "http://user:pass@app:8082/",
+            "http://other:8082/",
+        ] {
+            assert!(target(value, &allowed).is_err());
+        }
+    }
+}

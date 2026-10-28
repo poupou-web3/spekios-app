@@ -1,0 +1,27 @@
+# Explicitly isolated provider protocol mode: the Rust gateway ignores real API
+# keys and only sends the fixed fake credential to this fixture container.
+services:
+  api:
+    environment:
+      SCOUT_DEV_AUTH_BYPASS: 'false'
+      SCOUT_MODEL_TEST_MODE: '1'
+      SCOUT_MODEL_FIXTURE_URL: http://model-fixture:8081
+    depends_on:
+      model-fixture: { condition: service_healthy }
+  model-fixture:
+    image: scout-qa-model-fixture:local
+    build:
+      context: ./infra/model-fixture
+    ports:
+      - '127.0.0.1:18081:8081'
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8081/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 192m
+    cpus: 1

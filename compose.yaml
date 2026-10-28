@@ -1,0 +1,213 @@
+name: scout-qa
+
+services:
+  api:
+    image: scout-qa-api:local
+    build:
+      context: .
+      dockerfile: infra/api/Dockerfile
+    environment:
+      SCOUT_API_TOKEN: ${SCOUT_API_TOKEN:?Run node scripts/setup-local.mjs}
+      SCOUT_DEV_AUTH_BYPASS: ${SCOUT_DEV_AUTH_BYPASS:-false}
+      SCOUT_API_BIND: '0.0.0.0:8080'
+      PGHOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/setup-local.mjs}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Run node scripts/setup-local.mjs}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Run node scripts/setup-local.mjs}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Run node scripts/setup-local.mjs}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MODEL_SPOOL: /data/gateway
+      SCOUT_EXPLORER_PROVIDER: ${SCOUT_EXPLORER_PROVIDER:-openrouter}
+      SCOUT_EXPLORER_MODEL: ${SCOUT_EXPLORER_MODEL:-}
+      SCOUT_EXPLORER_FREE_ONLY: ${SCOUT_EXPLORER_FREE_ONLY:-true}
+      SCOUT_EXPLORER_MAX_ACTIONS: ${SCOUT_EXPLORER_MAX_ACTIONS:-6}
+      SCOUT_EXPLORER_VIEWPORT: ${SCOUT_EXPLORER_VIEWPORT:-desktop}
+      SCOUT_AUTO_REPRODUCE: ${SCOUT_AUTO_REPRODUCE:-false}
+      SCOUT_AUTO_REPRODUCE_MAX_CASES: ${SCOUT_AUTO_REPRODUCE_MAX_CASES:-2}
+      SCOUT_AUTO_REPRODUCE_MAX_ACTIONS: ${SCOUT_AUTO_REPRODUCE_MAX_ACTIONS:-12}
+      SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082}
+      SCOUT_TEST_FORM_RULES: ${SCOUT_TEST_FORM_RULES:-[]}
+    volumes:
+      - gateway-spool:/data/gateway
+    ports:
+      - '127.0.0.1:18080:8080'
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, /usr/local/bin/scout-api, --healthcheck]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 1
+    restart: unless-stopped
+
+  postgres:
+    image: scout-qa-postgres:local
+    build:
+      context: ./infra/postgres
+    environment:
+      POSTGRES_USER: scout
+      POSTGRES_DB: scout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/setup-local.mjs}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U scout -d scout']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m
+    cpus: 1
+    restart: unless-stopped
+
+  evidence:
+    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+    command: [mini, '-dir=/data']
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Run node scripts/setup-local.mjs}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Run node scripts/setup-local.mjs}
+      S3_BUCKET: qa-evidence
+    ports:
+      - '127.0.0.1:18333:8333'
+    volumes:
+      - evidence-data:/data
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:9333/cluster/status']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 1g
+    cpus: 1
+    restart: unless-stopped
+
+  clickhouse:
+    image: scout-qa-clickhouse:local
+    build:
+      context: ./infra/clickhouse
+    environment:
+      CLICKHOUSE_DB: scout
+      CLICKHOUSE_USER: scout
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Run node scripts/setup-local.mjs}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    ports:
+      - '127.0.0.1:18123:8123'
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8123/ping']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 2g
+    cpus: 2
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: unless-stopped
+
+  exploration-fixture:
+    profiles: [runtime]
+    image: scout-qa-recorder:local
+    build:
+      context: .
+      dockerfile: infra/recorder/Dockerfile
+    entrypoint: [./node_modules/.bin/tsx, src/fixture-cli.ts]
+    ports:
+      - '127.0.0.1:18082:8082'
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8082/branches').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 1
+
+  recorder:
+    profiles: [runtime]
+    image: scout-qa-recorder:local
+    build:
+      context: .
+      dockerfile: infra/recorder/Dockerfile
+    environment: &recorder-environment
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/setup-local.mjs}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Run node scripts/setup-local.mjs}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Run node scripts/setup-local.mjs}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Run node scripts/setup-local.mjs}
+      RECORDER_SPOOL: /data/recorder
+      SCOUT_API_URL: http://api:8080
+      SCOUT_AUTH_VAULT: /data/auth
+      SCOUT_API_TOKEN: ${SCOUT_API_TOKEN:?Run node scripts/setup-local.mjs}
+      SCOUT_EXPLORER_PROVIDER: ${SCOUT_EXPLORER_PROVIDER:-openrouter}
+      SCOUT_EXPLORER_MODEL: ${SCOUT_EXPLORER_MODEL:-}
+      SCOUT_EXPLORER_FREE_ONLY: ${SCOUT_EXPLORER_FREE_ONLY:-true}
+      SCOUT_EXPLORER_MAX_ACTIONS: ${SCOUT_EXPLORER_MAX_ACTIONS:-6}
+      SCOUT_EXPLORER_VIEWPORT: ${SCOUT_EXPLORER_VIEWPORT:-desktop}
+      SCOUT_AUTO_REPRODUCE: ${SCOUT_AUTO_REPRODUCE:-false}
+      SCOUT_AUTO_REPRODUCE_MAX_CASES: ${SCOUT_AUTO_REPRODUCE_MAX_CASES:-2}
+      SCOUT_AUTO_REPRODUCE_MAX_ACTIONS: ${SCOUT_AUTO_REPRODUCE_MAX_ACTIONS:-12}
+      SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082}
+      SCOUT_TEST_FORM_RULES: ${SCOUT_TEST_FORM_RULES:-[]}
+    depends_on:
+      postgres: { condition: service_healthy }
+      evidence: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    volumes:
+      - recorder-spool:/data/recorder
+      - auth-vault:/data/auth
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 2
+
+  browser-worker:
+    image: scout-qa-recorder:local
+    build:
+      context: .
+      dockerfile: infra/recorder/Dockerfile
+    entrypoint: [./node_modules/.bin/tsx, src/worker.ts]
+    environment: *recorder-environment
+    depends_on:
+      postgres: { condition: service_healthy }
+      api: { condition: service_healthy }
+      evidence: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    volumes:
+      - recorder-spool:/data/recorder
+      - auth-vault:/data/auth
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 2
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  evidence-data:
+  clickhouse-data:
+  recorder-spool:
+  gateway-spool:
+  auth-vault:
