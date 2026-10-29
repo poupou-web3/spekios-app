@@ -1,7 +1,8 @@
-use crate::{AppState, WORKSPACE_ID, error, query};
+use crate::identity::ScopedState;
+use crate::{AppState, error, query};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::Path,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -28,23 +29,30 @@ pub async fn index() -> Response {
         "text/html; charset=utf-8",
     )
 }
-pub async fn script() -> Response {
+pub async fn connect() -> Response {
     asset(
-        include_str!("../../web/app.js"),
-        "text/javascript; charset=utf-8",
+        include_str!("../../web/connect.html"),
+        "text/html; charset=utf-8",
     )
 }
-pub async fn report_export_script() -> Response {
+pub async fn issues() -> Response {
     asset(
-        include_str!("../../web/report-export.js"),
-        "text/javascript; charset=utf-8",
+        include_str!("../../web/issues.html"),
+        "text/html; charset=utf-8",
     )
 }
-pub async fn report_bundle_script() -> Response {
-    asset(
-        include_str!("../../web/report-bundle.js"),
-        "text/javascript; charset=utf-8",
-    )
+/// A closed embedded asset list: this handler never reads request paths from disk.
+pub async fn script(Path(name): Path<String>) -> Response {
+    let body = match name.as_str() {
+        "app.js" => include_str!("../../web/app.js"),
+        "connect.js" => include_str!("../../web/connect.js"),
+        "issues.js" => include_str!("../../web/issues.js"),
+        "workspace-http.js" => include_str!("../../web/workspace-http.js"),
+        "report-export.js" => include_str!("../../web/report-export.js"),
+        "report-bundle.js" => include_str!("../../web/report-bundle.js"),
+        _ => return error(StatusCode::NOT_FOUND, "asset_not_found"),
+    };
+    asset(body, "text/javascript; charset=utf-8")
 }
 pub async fn style() -> Response {
     asset(include_str!("../../web/app.css"), "text/css; charset=utf-8")
@@ -84,17 +92,17 @@ async fn bytes(state: &AppState, row: Value) -> Response {
         Err(code) => error(StatusCode::BAD_GATEWAY, code),
     }
 }
-pub async fn capture_image(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    match query(&state,"SELECT to_jsonb(c) FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE c.capture_id=$1 AND r.workspace_id=$2",&[&id,&WORKSPACE_ID]).await {
+pub async fn capture_image(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
+    match query(&state,"SELECT to_jsonb(c) FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE c.capture_id=$1 AND r.workspace_id=$2",&[&id,&state.principal.workspace_id]).await {
         Ok(Some(row))=>bytes(&state,row).await,Ok(None)=>error(StatusCode::NOT_FOUND,"capture_not_found"),Err(r)=>r,
     }
 }
-pub async fn artifact(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    match query(&state,"SELECT to_jsonb(a) FROM runtime_artifacts a JOIN runtime_runs r USING(run_id) WHERE a.artifact_id=$1 AND r.workspace_id=$2",&[&id,&WORKSPACE_ID]).await {
+pub async fn artifact(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
+    match query(&state,"SELECT to_jsonb(a) FROM runtime_artifacts a JOIN runtime_runs r USING(run_id) WHERE a.artifact_id=$1 AND r.workspace_id=$2",&[&id,&state.principal.workspace_id]).await {
         Ok(Some(row))=>bytes(&state,row).await,Ok(None)=>error(StatusCode::NOT_FOUND,"artifact_not_found"),Err(r)=>r,
     }
 }
-pub async fn operations(State(state): State<AppState>) -> Response {
+pub async fn operations(ScopedState(state): ScopedState) -> Response {
     let sql="SELECT jsonb_build_object(
       'runs',(SELECT count(*) FROM runtime_runs WHERE workspace_id=$1),
       'active_runs',(SELECT count(*) FROM runtime_runs WHERE workspace_id=$1 AND lifecycle='active'),
@@ -108,10 +116,13 @@ pub async fn operations(State(state): State<AppState>) -> Response {
       'pending_runtime_events',(SELECT count(*) FROM runtime_events e JOIN runtime_runs r USING(run_id) WHERE workspace_id=$1 AND e.exported_at IS NULL),
       'last_runtime_export',(SELECT max(exported_at) FROM runtime_events e JOIN runtime_runs r USING(run_id) WHERE workspace_id=$1),
       'model_calls',(SELECT count(*) FROM model_calls c JOIN model_requests r USING(request_id) WHERE workspace_id=$1),
+      'issues',(SELECT count(*) FROM issues WHERE workspace_id=$1),
+      'candidate_checks',(SELECT count(*) FROM issue_verifications WHERE workspace_id=$1),
+      'pending_issue_events',(SELECT count(*) FROM issue_events WHERE workspace_id=$1 AND exported_at IS NULL),
       'pending_model_events',(SELECT count(*) FROM model_events e JOIN model_requests r USING(request_id) WHERE workspace_id=$1 AND e.exported_at IS NULL),
       'pending_model_payloads',(SELECT count(*) FROM model_payloads p JOIN model_calls c USING(call_id) JOIN model_requests r USING(request_id) WHERE workspace_id=$1 AND p.uploaded_at IS NULL),
       'as_of',now())";
-    match query(&state, sql, &[&WORKSPACE_ID]).await {
+    match query(&state, sql, &[&state.principal.workspace_id]).await {
         Ok(Some(mut value)) => {
             value["database"] = json!("reachable");
             Json(value).into_response()

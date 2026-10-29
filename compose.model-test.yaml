@@ -6,6 +6,7 @@ services:
       SCOUT_DEV_AUTH_BYPASS: 'false'
       SCOUT_MODEL_TEST_MODE: '1'
       SCOUT_MODEL_FIXTURE_URL: http://model-fixture:8081
+      SCOUT_ALLOWED_ORIGINS: http://exploration-fixture:8082,http://candidate-fixture:8082
     depends_on:
       model-fixture: { condition: service_healthy }
   model-fixture:
@@ -25,3 +26,10 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 192m
     cpus: 1
+  exploration-fixture:
+    networks:
+      default:
+        aliases: [candidate-fixture]
+  browser-worker:
+    environment:
+      SCOUT_ALLOWED_ORIGINS: http://exploration-fixture:8082,http://candidate-fixture:8082

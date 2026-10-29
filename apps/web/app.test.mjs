@@ -1,6 +1,6 @@
+import {uiSource} from './test-support/source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // Pure rendering tests; these do not launch or control a browser.
@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(readFileSync(new URL('./app.js',import.meta.url),'utf8')+'\nglobalThis.testing={state,home,connections,actionDetail,drawer,eventsView,opsOverview,planningView,tokenTotal,costTotal,refresh,authOptions,accessBanner,savedSessions,runStatus,cancelButton,jobsView,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(uiSource('app.js')+'\nglobalThis.testing={state,home,connections,actionDetail,drawer,eventsView,opsOverview,planningView,tokenTotal,costTotal,refresh,authOptions,accessBanner,savedSessions,runStatus,cancelButton,jobsView,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{

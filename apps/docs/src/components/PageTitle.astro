@@ -1,0 +1,35 @@
+---
+import DefaultPageTitle from '@astrojs/starlight/components/PageTitle.astro';
+import { settings } from '../../scripts/site.mjs';
+const { entry } = Astro.locals.starlightRoute;
+const path = Astro.url.pathname.slice(settings.base.length);
+const sections: Record<string, string> = { 'getting-started': 'Getting started', product: 'Understand Scout', guides: 'Workspace guides', agents: 'Agents & LLMs', api: 'HTTP API', operators: 'Operate & deploy' };
+const section = sections[path.split('/')[0]] || 'Documentation';
+---
+<nav class="doc-breadcrumb" aria-label="Breadcrumb">
+  <a href={settings.href()}>Documentation</a><span aria-hidden="true">/</span><span>{section}</span>
+</nav>
+<DefaultPageTitle />
+{entry.id !== '404' && <div class="page-tools" data-pagefind-ignore>
+  <a href={settings.href(path + 'index.md')}>View Markdown <span aria-hidden="true">↗</span></a>
+  <button type="button" data-copy-markdown={settings.href(path + 'index.md')}>Copy page</button>
+  <span class="copy-status" role="status" aria-live="polite"></span>
+</div>}
+<script>
+  document.addEventListener('click', async (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>('[data-copy-markdown]');
+    if (!button) return;
+    const status = button.parentElement?.querySelector('.copy-status');
+    button.disabled = true;
+    try {
+      const response = await fetch(button.dataset.copyMarkdown!);
+      if (!response.ok) throw new Error('Markdown is unavailable');
+      await navigator.clipboard.writeText(await response.text());
+      if (status) status.textContent = 'Copied';
+    } catch {
+      if (status) status.textContent = 'Could not copy. Open View Markdown instead.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>

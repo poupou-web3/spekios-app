@@ -10,15 +10,25 @@ Start it with the rest of the stack using `just dev` or `bash scripts/start-loca
 | `GET /healthz` | Process liveness; public on local loopback |
 | `GET /v1/auth-mode` | Public uncached access-mode discovery; returns only `local_development` or `bearer_token` |
 | `GET /readyz` | Verifies database schema and gateway recovery/readiness |
+| `POST /mcp` | MCP tools through Streamable HTTP; explicit bearer required even with GUI development bypass |
+| `GET /v1/agent/tools` | Discover 18 strict agent tool schemas |
+| `POST /v1/agent/tools/{name}` | Invoke the same tools through plain HTTP |
 | `GET /v1/capabilities` | Gateway configuration, workspace availability, bounded exploration/reproduction entry points |
 | `GET /v1/runs` | Latest 50 owned runs with action counts and current human-review summaries |
 | `GET /v1/runs/{run_id}` | Consistent snapshot of run, actions, captures, artifacts, events, graph, reproduction links/results, model requests and usage |
 | `GET /v1/runs/{run_id}/graph` | Exact page states, action edges, frontier and model decisions; 404 for non-explorer runs |
+| `GET /v1/runs/{run_id}/progress` | Lightweight phase, action/evidence counts, blockers and event cursor |
+| `GET /v1/runs/{run_id}/report` | Snapshot-bound JSON/Markdown coding-agent report; offset, limit, include_changes and expected_snapshot |
+| `GET /v1/runs/{run_id}/issues/{action_id}` | Repair handoff with expected/actual, path, diagnostics and evidence retrieval references |
+| `GET /v1/runs/{run_id}/events` | Durable event page with after_seq, limit, next_after_seq and has_more |
 | `GET /v1/captures/{capture_id}` | Capture metadata and bucket references |
 | `GET /v1/captures/{capture_id}/image` | Authenticated PNG retrieval with size and SHA-256 verification |
 | `GET /v1/artifacts/{artifact_id}/content` | Authenticated mask, delta or manifest retrieval with hash verification |
 | `GET /v1/operations` | Consistent snapshot of run counts, evidence backlog and event-export acknowledgements |
 | `GET /v1/browser-jobs` | Latest 50 jobs, worker heartbeats and saved exploration defaults |
+| `GET /v1/browser-jobs/{job_id}/progress` | Nonblocking progress, including queued/pre-launch state |
+| `GET /v1/browser-jobs/{job_id}/report` | Coding report selected by job, including explicit no-run outcomes |
+| `GET /v1/browser-jobs/{job_id}` | One owned job directly by UUID, outside the recent-list limit |
 | `POST /v1/browser-jobs` | Idempotent URL exploration or suspect-reproduction admission; execution is asynchronous |
 | `GET /v1/exploration-settings` | Current revision and effective nonsecret exploration preferences, with operator scope retained |
 | `POST /v1/exploration-settings` | Append a validated preferences revision using optimistic concurrency and an idempotent request UUID |
@@ -31,7 +41,7 @@ Start it with the rest of the stack using `just dev` or `bash scripts/start-loca
 | `GET /v1/model-requests/{request_id}` | Attempts, output, usage and evidence references |
 | `GET /v1/usage` | Per-user token/cost totals, separated by fixture/live mode |
 
-Data routes require `Authorization: Bearer <SCOUT_API_TOKEN>`. Setup generates this token in the ignored `.env`, preserving existing storage credentials. Use `just runs` or `just run RUN_UUID` to read data without putting the token in shell history. Responses use `Cache-Control: no-store`. Inputs use typed UUIDs and parameterized SQL, and queries enforce the local workspace ID.
+Data routes require `Authorization: Bearer <SCOUT_API_TOKEN>`. Setup generates this token in the ignored `.env`, preserving existing storage credentials. Use `just runs` or `just run RUN_UUID` to read data without putting the token in shell history. Responses use `Cache-Control: no-store`. Inputs use typed UUIDs and parameterized SQL, and queries enforce the authenticated workspace. `just mcp-login` issues per-agent credentials through browser approval; `/connect` manages revocation. The shared local operator token remains privileged infrastructure access.
 
 For local GUI development, explicitly enabling `SCOUT_DEV_AUTH_BYPASS=true` also admits tokenless requests on literal `localhost`, `127.0.0.1` or `[::1]` hosts with a valid port. Browser Origin must match the request's origin, and cross-site/same-site fetch metadata is rejected; forwarded headers do not broaden access. Bad or duplicated Authorization headers remain rejected. Valid bearer access for container workers still works. The flag defaults to false, Compose publishes the API only on loopback, and the provider-fixture overlay disables bypass for normal authentication tests.
 
@@ -44,6 +54,10 @@ Browser jobs accept `{ "job_id": "UUID", "kind": "explore", "target_url": "http:
 Exploration also accepts optional `viewport_profile`: `desktop`, `tablet` or `mobile`. Admission snapshots the selected profile or current saved default in the job settings. Before any preferences are saved, `SCOUT_EXPLORER_VIEWPORT` supplies the default (`desktop` otherwise). Reproduction rejects an override and uses its source run's profile. Graph schema version 2 adds state/frontier planning metadata and action-linked ranked selections. The same selections and replanning events are retained in manifests and exported to ClickHouse; see [the planner](../../EXPLORATION_PLANNER.md).
 
 An exploration request can also include `"auto_reproduce": true`. Omission follows the effective saved default, initially false. Admission freezes the current saved case/action limits. Before preferences are saved, `SCOUT_AUTO_REPRODUCE_MAX_CASES` defaults to 2, bounded to 1–3; `SCOUT_AUTO_REPRODUCE_MAX_ACTIONS` defaults to 12 total additional replay actions, bounded to 1–24; `SCOUT_AUTO_REPRODUCE` supplies the opt-in default. Browser-job callers cannot supply per-job limit overrides, and reproduction requests cannot enable automatic descendants. Manual reproduction admission reuses an existing queued/running check of the same source action, even when its job was generated automatically.
+
+## Agent interface
+
+The Rust API exposes 24 shared MCP/HTTP tools for durable exploration, job polling, findings, actions, graphs, cursor events, verified evidence, reproduction, cancellation, usage and human access blockers. The native scout-mcp binary bridges local MCP stdio clients to /mcp. Users can connect through **/connect** and standard HTTP MCP browser authorization without installing the bridge. Developers can keep the optional native connector with browser-approved private credentials; explicit operator env-file configurations remain compatible. Read the [agent guide](../../AGENT_INTERFACE.md) for schemas, workflow, size bounds, authentication and remaining steering/direct-driver work.
 
 ## Exploration settings
 
@@ -101,10 +115,12 @@ just report-export-test
 
 Run from the repository root. Rust tests cover auth, liveness, provider payloads and usage. API verification checks real recorder reads and workspace filtering. Gateway tests use fake providers with real databases/S3, including process kills, journal recovery, outages and replay. They temporarily restart services, restore normal mode, and retain evidence. No live model calls are made.
 
-The native Rust suite currently passes 35 tests; Clippy passes with warnings denied. The added asset test verifies exact embedded report-module bytes, public access, MIME, CSP, no-store and security headers. Preference cases cover typed bounds, security-field rejection, normalized retry identity, optimistic revisions and frozen admission snapshots. `just settings-test` uses real PostgreSQL and the API with the browser worker stopped to verify persisted revisions, historical UUID receipts, new-job versus exact-retry settings, restart survival and the append-only trigger. It restores original values through a new revision, cancels its unexecuted fixture jobs and checks that no model usage or recorded evidence changed. The 28 October 2026 integration run passed with zero model calls added; its result is [artifacts/exploration-settings/verification.json](../../artifacts/exploration-settings/verification.json). Pure UI configuration/comparison tests use no browser or model.
+The native Rust suite currently passes 53 tests (50 library and three stdio bridge tests); Clippy passes with warnings denied. The added asset test verifies exact embedded report-module bytes, public access, MIME, CSP, no-store and security headers. Preference cases cover typed bounds, security-field rejection, normalized retry identity, optimistic revisions and frozen admission snapshots. `just settings-test` uses real PostgreSQL and the API with the browser worker stopped to verify persisted revisions, historical UUID receipts, new-job versus exact-retry settings, restart survival and the append-only trigger. It restores original values through a new revision, cancels its unexecuted fixture jobs and checks that no model usage or recorded evidence changed. The 28 October 2026 integration run passed with zero model calls added; its result is [artifacts/exploration-settings/verification.json](../../artifacts/exploration-settings/verification.json). Pure UI configuration/comparison tests use no browser or model.
 
 `just report-export-test` renders existing saved reports and checks representative ZIPs with an independent Python ZIP/CRC32/SHA-256 reader. It also checks manifest membership, a failed-capture gap and unchanged model-call/runtime-evidence counts. Results are recorded in [artifacts/report-export/verification.json](../../artifacts/report-export/verification.json). The final integration rendered 50 reports and checked original human-confirmed, failed-capture and replay archives. All four served assets match source and have the expected security headers. Markdown and ZIP downloads were checked in the local browser; Python independently verified the downloaded ZIP and its 16 evidence files. The browser record is [artifacts/report-export/browser-verification.json](../../artifacts/report-export/browser-verification.json).
 
 See [cancellation](../../CANCELLATION.md) for operation IDs, dispatch fences, restart recovery and late provider settlement. `just cancellation-test` exercises these endpoints with the real local worker and simulated models.
 
 [Human finding reviews](../../FINDING_REVIEWS.md) are append-only report overlays. Confirmation requires an independently reproduced, matching result with verified screenshot/metadata/artifact bytes, plus a human expectation basis and severity. Decisions do not rewrite automated assessments or training classifications.
+
+Permanent issue history is available at `/v1/issues` and `/v1/issues/{issue_id}`. Submit `{verification_id,candidate_url}` to `POST /v1/issues/{issue_id}/verifications` and poll `/v1/issue-verifications/{verification_id}`. The same flow is exposed through `scout_get_issue`, `scout_verify_fix` and `scout_get_verification`, and the `/issues` dashboard. Verification outcomes apply to the recorded behavior on one candidate; failed or interrupted work never establishes a fix.

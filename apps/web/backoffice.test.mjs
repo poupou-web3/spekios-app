@@ -1,6 +1,6 @@
+import {uiSource} from './test-support/source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // Rendering contracts only. No browser or remote provider is controlled here.
@@ -9,7 +9,7 @@ function view(){
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console};
   vm.createContext(sandbox);
-  vm.runInContext(readFileSync(new URL('./app.js',import.meta.url),'utf8')+'\nglobalThis.testing={state,picker,operations,opsOverview,jobsView,modelsView,eventsView,connections};',sandbox);
+  vm.runInContext(uiSource('app.js')+'\nglobalThis.testing={state,picker,operations,opsOverview,jobsView,modelsView,eventsView,connections};',sandbox);
   return sandbox.testing;
 }
 function configured(ui){

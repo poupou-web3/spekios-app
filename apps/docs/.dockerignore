@@ -1,0 +1,10 @@
+node_modules
+dist
+.astro
+.cache
+.env
+.env.*
+*.log
+src/content/docs/agents/reference
+public/*
+!public/favicon.svg

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Store } from './store.js';
-import { isUuid, workspaceId, userId, type BrowserCommand, type Capture } from './contracts.js';
+import { isUuid, type BrowserCommand, type Capture } from './contracts.js';
 import { stateFingerprint } from './exploration-policy.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
 import { observedCommand } from './browser-interactions.js';
+import type { FixVerification } from './fix-verification.js';
 import type { AccessResult } from './access-handoff.js';
 
 export type ReplayStep = {
@@ -13,7 +14,7 @@ export type ReplayStep = {
   goal: string; expected_result: string; before: Capture; after: Capture;
 };
 export type Replay = { reproduction_id: string; source_run_id: string; source_action_id: string;
-  target_url: string; training_status: string; viewport_profile: ViewportProfile; steps: ReplayStep[]; auth_context?:AccessResult };
+  target_url: string; training_status: string; viewport_profile: ViewportProfile; steps: ReplayStep[]; auth_context?:AccessResult; fix_verification?:FixVerification };
 
 export async function readCapture(store: Store, row: Record<string, any>): Promise<Capture> {
   if (!row || row.status !== 'available' || row.observation?.observation_error) throw new Error('Replay requires complete source evidence.');
@@ -30,7 +31,7 @@ export async function readCapture(store: Store, row: Record<string, any>): Promi
 export async function loadReplay(store: Store, sourceActionId: string): Promise<Replay> {
   if (!isUuid(sourceActionId)) throw new Error('Invalid source action ID.');
   const source = (await store.query(`SELECT a.*,r.target_url,r.lifecycle,r.config FROM runtime_actions a
-    JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3`, [sourceActionId, workspaceId, userId])).rows[0];
+    JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3`, [sourceActionId, store.workspaceId, store.userId])).rows[0];
   if (!source) throw new Error('Source action not found in this workspace.');
   if (source.lifecycle === 'active' || source.config.runtime_version !== 'explorer-v1' || source.config.replay_of ||
       source.state !== 'completed' || source.assessment?.verdict !== 'suspect' || source.assessment.expectation_uncertain ||

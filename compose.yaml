@@ -9,6 +9,7 @@ services:
     environment:
       SCOUT_API_TOKEN: ${SCOUT_API_TOKEN:?Run node scripts/setup-local.mjs}
       SCOUT_DEV_AUTH_BYPASS: ${SCOUT_DEV_AUTH_BYPASS:-false}
+      SCOUT_PUBLIC_ORIGIN: ${SCOUT_PUBLIC_ORIGIN:-}
       SCOUT_API_BIND: '0.0.0.0:8080'
       PGHOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/setup-local.mjs}

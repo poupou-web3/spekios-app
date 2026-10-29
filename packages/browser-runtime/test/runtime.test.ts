@@ -25,6 +25,9 @@ test('real browser recording, failure handling, storage and telemetry', { timeou
       const result = await record(store, target.url, plan(target.url));
       recordedRun = result.run_id;
       assert.equal(result.report.run.lifecycle, 'completed');
+      assert.equal(result.report.run.workspace_id, store.workspaceId);
+      assert.equal(result.report.run.user_id, store.userId);
+      assert.equal(result.report.run.target_url, target.url);
       assert.equal(result.manifest_error, null);
       assert.equal(result.export_error, null);
       assert.equal(result.report.actions.length, 2);
@@ -48,7 +51,10 @@ test('real browser recording, failure handling, storage and telemetry', { timeou
       assert.equal(manifest.run.run_id, result.run_id);
       assert.equal(manifest.actions[1].action_id, result.report.actions[1].action_id);
       assert.equal(manifest.model_usage.input_tokens, null);
+      assert.equal(manifest.model_usage.output_tokens, null);
       assert.equal(manifest.model_usage.status, 'not_connected');
+      assert.deepEqual(manifest.model_requests, []);
+      assert.deepEqual(manifest.model_calls, []);
       const seq = result.report.events.map(e => Number(e.seq));
       assert.deepEqual(seq, seq.map((_, i) => i + 1));
     });

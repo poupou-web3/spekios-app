@@ -140,3 +140,8 @@ test('review and automatic-check text stays escaped and tokenless in both report
   report.actions[0].spec.private_login_password='SHOULD_NOT_APPEAR';report.run.config.session_secret='SHOULD_NOT_APPEAR';
   for(const bundle of [false,true]){const markdown=reportMarkdown(report,{...options,bundle,evidence:[]});assert.doesNotMatch(markdown,/<img|https:\/\/|javascript:|SHOULD_NOT_APPEAR/);assert.match(markdown,/&lt;img/);assert.match(markdown,/\\\[claim\\\]/);}
 });
+
+test('exported focus history preserves command and decision references without turning instructions into markup',()=>{
+  const report=fixture();report.steering={revision:2,messages:[{revision:1,focus:'<script>run()</script>',status:'applied',steering_id:id(70),decision_id:id(71)},{revision:2,focus:'',status:'not_applied',steering_id:id(72),decision_id:null}]};
+  const md=reportMarkdown(report,options);assert.match(md,/## Testing focus/);assert.ok(md.includes(id(70)));assert.ok(md.includes(id(71)));assert.ok(md.includes('not'+String.fromCharCode(92)+'_applied'));assert.doesNotMatch(md,/<script>/);assert.match(md,/Restore normal exploration/);
+});

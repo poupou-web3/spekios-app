@@ -4,3 +4,6 @@ COPY user-limits.xml /etc/clickhouse-server/users.d/user-limits.xml
 COPY 001-evidence.sql /docker-entrypoint-initdb.d/001-evidence.sql
 COPY 002-runtime.sql /docker-entrypoint-initdb.d/002-runtime.sql
 COPY 003-model-gateway.sql /docker-entrypoint-initdb.d/003-model-gateway.sql
+COPY 004-agent-identity.sql /docker-entrypoint-initdb.d/004-agent-identity.sql
+
+COPY 005-issue-events.sql /docker-entrypoint-initdb.d/005-issue-events.sql

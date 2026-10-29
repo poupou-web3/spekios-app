@@ -24,7 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let token = env::var("SCOUT_API_TOKEN").map_err(|_| "SCOUT_API_TOKEN is required")?;
     let mut state = AppState::new(None, &token)?
-        .with_dev_auth_bypass(env::var("SCOUT_DEV_AUTH_BYPASS").as_deref() == Ok("true"));
+        .with_dev_auth_bypass(env::var("SCOUT_DEV_AUTH_BYPASS").as_deref() == Ok("true"))
+        .with_public_origin(env::var("SCOUT_PUBLIC_ORIGIN").ok().as_deref())?;
     if let Ok(host) = env::var("PGHOST") {
         let mut config = tokio_postgres::Config::new();
         config
@@ -84,6 +85,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
         state.reviews = Some(scout_api::reviews::Reviews::new(reviews));
+        let (identity, connection) = config
+            .connect(NoTls)
+            .await
+            .map_err(|_| "Identity database connection failed")?;
+        tokio::spawn(async move {
+            if connection.await.is_err() {
+                eprintln!("identity_database_connection_closed");
+                std::process::exit(1);
+            }
+        });
+        state.identities = Some(scout_api::identity::Identities::new(identity));
     }
     let address: SocketAddr = env::var("SCOUT_API_BIND")
         .unwrap_or_else(|_| "127.0.0.1:18080".into())

@@ -5,6 +5,38 @@ set positional-arguments
 default:
     @"{{just_executable()}}" --list
 
+# Public docs have their own static build and independent Compose service.
+docs-install:
+    npm ci --prefix apps/docs --no-audit --no-fund
+
+docs-dev:
+    npm run dev --prefix apps/docs
+
+docs-build:
+    npm run build --prefix apps/docs
+
+docs-test:
+    npm run check --prefix apps/docs
+    npm test --prefix apps/docs
+    node apps/docs/scripts/check-api-contract.mjs
+
+# Export pure schemas; no API, database or model calls.
+docs-sync-api:
+    node apps/docs/scripts/sync-api.mjs
+
+docs-up:
+    docker compose -f compose.docs.yaml up -d --build --wait
+
+docs-down:
+    docker compose -f compose.docs.yaml down
+
+# Copy lightweight instructions only; MCP/service setup remains explicit.
+skill-install client="codex":
+    python3 scripts/install-scout-skill.py --client "$1"
+
+skill-test:
+    python3 -m unittest discover -s scripts -p 'test_scout_skill.py'
+
 # Start the API and storage services, preserving existing data and credentials.
 up:
     bash scripts/start-local.sh
@@ -86,6 +118,22 @@ api-check:
 api-test:
     cargo test --locked --manifest-path apps/api/Cargo.toml --lib --bins
 
+# Build the native stdio bridge used by local MCP clients.
+mcp-build:
+    cargo build --locked --release --manifest-path apps/api/Cargo.toml --bin scout-mcp
+
+# Start only the stdio bridge; the ordinary local API must already be running.
+mcp:
+    @apps/api/target/release/scout-mcp --env-file "$PWD/.env"
+
+# Print an MCP client configuration with absolute paths and no embedded token.
+mcp-config:
+    @node scripts/mcp-config.mjs
+
+# HTTP/stdio agent workflow with real browser/storage and simulated models.
+agent-test:
+    bash scripts/test-agent-interface.sh
+
 # Inspect provider configuration without revealing credentials.
 models:
     node scripts/api-read.mjs /v1/model-providers
@@ -120,6 +168,10 @@ reproduce action_id: build-recorder
 explorer-test:
     bash scripts/test-explorer.sh
 
+# Persistent issue → candidate fix: API/MCP, real Chromium/evidence, simulated models.
+fix-verification-test:
+    bash scripts/test-fix-verification.sh
+
 # Focused private-login and saved-session tests with simulated models.
 access-test:
     bash scripts/test-explorer.sh test/access.test.ts
@@ -153,3 +205,24 @@ test: api-test runtime-test web-test
     npm test --prefix packages/image-diff
     node scripts/verify-api.mjs
     node scripts/verify-local.mjs
+
+# Pair this machine's agent using explicit approval in the workspace browser.
+mcp-login: mcp-build
+    @apps/api/target/release/scout-mcp login
+
+# Revoke the saved agent credential and remove its private local file.
+mcp-logout:
+    @apps/api/target/release/scout-mcp logout
+
+# Browser pairing, private credentials, history, usage and cross-team isolation.
+identity-test:
+    bash scripts/test-agent-identity.sh
+
+# Browser OAuth lifecycle with isolated workspaces; does not request inference.
+oauth-test:
+    node scripts/verify-agent-oauth.mjs
+
+# Active testing focus: real browser/model fixture, then REST/MCP validation without inference.
+steering-test:
+    bash scripts/test-explorer.sh test/steering.test.ts test/frontier-planner.test.ts
+    node scripts/verify-steering.mjs

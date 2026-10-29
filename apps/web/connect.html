@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f4f6ef">
+  <title>Connect your agent · ScoutQA</title>
+  <link rel="stylesheet" href="/assets/app.css"><script type="module" src="/assets/connect.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<main id="main-content" class="content connection-page">
+  <header class="connection-top"><a class="brand" href="/">scout <small>QA FOR YOU & YOUR AGENT</small></a><a class="button quiet" href="/">← Your workspace</a></header>
+  <div class="connection-heading"><p class="eyebrow">YOUR WORKSPACE. YOUR AGENT.</p><h1 id="connection-title">Bring your agent to Scout.</h1><p id="connection-description">Connect once. Ask your agent to test a URL, follow the run and bring back findings with evidence.</p></div>
+  <div id="connection-status" class="connection-status" role="status" aria-live="polite"></div>
+  <section id="manager-login" class="panel connection-signin" hidden>
+    <h2>Open your workspace to continue</h2><p>Use your existing Scout workspace access. Your agent will receive its own limited connection.</p>
+    <form id="manager-form" class="login-card"><label for="manager-token">Workspace access token</label><input id="manager-token" type="password" autocomplete="off" required minlength="32"><button class="button primary" type="submit">Open workspace</button></form>
+  </section>
+  <section id="connections" hidden>
+    <p id="workspace-label" class="small muted"></p>
+    <section id="approval" class="panel connection-approval" hidden aria-labelledby="agent-name">
+      <p class="eyebrow">REVIEW CONNECTION</p><h2 id="agent-name"></h2><p id="approval-scope"></p>
+      <p id="callback-label" class="small" hidden></p><p id="client-warning" class="small muted" hidden>The app supplies its name. Check that you started this connection and recognize the return address.</p>
+      <ul id="scopes" class="connection-scopes"></ul>
+      <p id="usage-warning" class="connection-warning" hidden>Starting or reproducing tests can change your test app and use your workspace’s configured model allowance. Reading reports does not make model calls.</p>
+      <p class="small muted">Access stays within this workspace. You can disconnect the agent at any time. Reconnect after 30 days.</p>
+      <div class="connection-actions"><button id="approve" class="button primary">Allow connection</button><button id="deny" class="button">Cancel</button></div>
+    </section>
+    <div id="connection-onboarding" class="connection-layout">
+      <section class="panel connection-setup" aria-labelledby="setup-title">
+        <div class="connection-step-label"><span>01</span><p class="eyebrow">CHOOSE YOUR AGENT</p></div>
+        <h2 id="setup-title">Where do you want to use Scout?</h2><p class="small muted">Use an agent app that supports MCP connections and browser sign-in.</p>
+        <div class="connection-clients" role="group" aria-label="Your agent app">
+          <button class="connection-client" id="client-desktop" aria-pressed="true"><strong>Codex / ChatGPT desktop</strong><span>Connect an app on your computer</span></button>
+          <button class="connection-client" id="client-claude" aria-pressed="false"><strong>Claude</strong><span>Connect through your Claude account</span></button>
+          <button class="connection-client" id="client-other" aria-pressed="false"><strong>Another agent</strong><span>Use a compatible MCP app</span></button>
+        </div>
+        <div class="connection-step-label"><span>02</span><p class="eyebrow">ADD SCOUT TO YOUR AGENT</p></div>
+        <div id="network-notice" class="connection-warning" hidden></div>
+        <label for="mcp-url" class="small">Scout connection URL</label><div class="connection-copy-row"><input id="mcp-url" readonly aria-describedby="url-help"><button id="copy-url" class="button" disabled>Copy URL</button></div>
+        <p id="url-help" class="small muted">This address contains no secret. Your agent opens a browser for approval.</p>
+        <ol id="client-steps" class="connection-instructions"></ol>
+        <a id="client-help" class="connection-doc-link" href="https://learn.chatgpt.com/docs/extend/mcp?surface=app" target="_blank" rel="noopener noreferrer">Agent app instructions ↗</a>
+        <div class="connection-step-label"><span>03</span><p class="eyebrow">APPROVE & START TESTING</p></div>
+        <p class="small">Review the workspace and permissions when your agent opens Scout. Then give it a URL to test.</p>
+        <label for="test-url" class="small">Your app URL <span class="muted">(optional)</span></label><input id="test-url" type="url" placeholder="https://your-app.com" maxlength="2048">
+        <div class="connection-prompt"><p id="starter-prompt"></p><button id="copy-prompt" class="button">Copy prompt for your agent</button></div>
+      </section>
+      <aside class="connection-companion">
+        <div class="connection-illustration" aria-hidden="true"><span class="connection-you">You</span><span class="connection-line">↔</span><span class="connection-scout">S</span><span class="connection-line">↔</span><span class="connection-you">Agent</span></div>
+        <h2>A shared view of your testing.</h2><p>Your agent works in your workspace. You can follow its runs in Scout and open the same screenshots, findings and reports.</p>
+        <ul><li>Find previous tests for a URL or domain.</li><li>Start a test and check progress later.</li><li>Get expected vs. actual behavior with evidence.</li></ul>
+        <p class="small muted">Your agent app manages its connection securely. You never need to paste a Scout secret into a conversation.</p>
+        <details class="connection-advanced"><summary>Using the development connector?</summary><p class="small">The existing native connector still works. Enter its browser approval code below.</p><form id="code-form" class="login-card"><label for="user-code">Connector code</label><input id="user-code" required maxlength="15" autocomplete="off" placeholder="ABCD-EF12-3456"><button class="button" type="submit">Review connection</button></form></details>
+      </aside>
+    </div>
+    <section class="connection-management" aria-labelledby="connected-title"><div class="connection-list-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h2 id="connected-title">Your connected agents</h2></div><button id="refresh-agents" class="button">Check connection</button></div><p class="small muted">Disconnecting prevents further access. Tests already queued continue until you stop them in the workspace.</p><div id="agent-list"></div></section>
+  </section>
+</main>
+</body></html>

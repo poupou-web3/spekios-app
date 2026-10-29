@@ -1,0 +1,993 @@
+{
+  "interface_version": 1,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a run's versioned testing focus and acknowledgements. Follow next_offset for older pages (newest page first). Applied means included in a planning decision, not proof of coverage. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 32,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_steering",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Replace an active exploration's testing focus at its next planning decision. Read the current revision first. Save steering_id and retry identical inputs after uncertainty. Empty focus clears it. Does not alter in-flight actions, frozen replay paths, budgets or safety policy. Poll scout_get_steering for applied, superseded or not_applied acknowledgement.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "maximum": 32,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "focus": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "steering_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "steering_id",
+          "expected_revision",
+          "focus"
+        ],
+        "type": "object"
+      },
+      "name": "scout_steer_run",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List persistent workspace issues and candidate verification status. Search title/URL; follow next_offset. Original suspicions and human review remain separate.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "unverified",
+              "running",
+              "resolved",
+              "still_reproducible",
+              "blocked",
+              "inconclusive"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_list_issues",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Verify the frozen behavior of an issue on a candidate URL in a fresh browser. Can change the controlled app and consume model usage. Save verification_id before sending and reuse identical inputs after uncertainty. Results are resolved, still_reproducible, blocked or inconclusive for this candidate only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_mode": {
+            "enum": [
+              "auto",
+              "public"
+            ],
+            "type": "string"
+          },
+          "candidate_url": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "deployment_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "issue_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "verification_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_id",
+          "verification_id",
+          "candidate_url"
+        ],
+        "type": "object"
+      },
+      "name": "scout_verify_fix",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read candidate verification progress/outcome, frozen original expectation, both evidence sets and separately attributed usage. No model call. Follow the issue tool for the full history.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "verification_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verification_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_verification",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read the authenticated agent, workspace, credential reference and scopes. Contains no secret.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_whoami",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Search the complete accessible private run history by exact domain/URL, project, task or submitting agent. Follow pagination.next_offset; new runs may move offsets.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_list_sessions",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read the latest 20 accessible runs for a required exact domain, total matching history and coverage caveats. Historical observations are not a fresh verification.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_get_domain_summary",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Allocate a command UUID when the client cannot generate one. Save and reuse it for command retries.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_new_request_id",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Inspect Scout readiness, configured provider availability, operator scope and defaults. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_status",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List a filtered slice of the latest 50 owned runs. Results explicitly state this recent-list scope.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "lifecycle": {
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "interrupted",
+              "blocked",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_list_runs",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Queue URL-only exploration. Can interact with and change the controlled target app; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_mode": {
+            "enum": [
+              "auto",
+              "sign_in",
+              "public"
+            ],
+            "type": "string"
+          },
+          "auto_reproduce": {
+            "type": "boolean"
+          },
+          "job_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "viewport_profile": {
+            "enum": [
+              "desktop",
+              "tablet",
+              "mobile"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "url"
+        ],
+        "type": "object"
+      },
+      "name": "scout_start_exploration",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read one durable browser job by UUID, including a linked run, settings revision, errors and cancellation acknowledgement. Works outside the latest-50 list.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_job",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a compact run summary, action IDs, usage and pending sign-in blockers. Missing evidence or usage stays explicit.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_run",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Check lightweight durable progress for exactly one job_id or run_id, then continue other work. Returns phase, action counts, human blockers, event cursor and the report tool to call later. No model call or blocking wait.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_get_progress",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Return a coding-agent handoff for exactly one job_id or run_id: bugs, observed changes and uncertain checks with expected versus actual behavior, page/control location, reproduction steps, diagnostics and evidence IDs. Can be partial while work continues. Follow next_offset to retrieve every item; no new inference.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_snapshot": {
+            "maxLength": 64,
+            "minLength": 64,
+            "type": "string"
+          },
+          "include_changes": {
+            "type": "boolean"
+          },
+          "job_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_get_report",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a persistent issue by issue_id: original repair handoff, occurrences, candidate checks, evidence and usage. History pages use offset/limit and expected_revision. Legacy run_id plus action_id still reads one recorded observation. Source locations and root causes are not inferred.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "run_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "action_id"
+                  ]
+                }
+              ]
+            },
+            "required": [
+              "issue_id"
+            ]
+          },
+          {
+            "not": {
+              "required": [
+                "issue_id"
+              ]
+            },
+            "required": [
+              "run_id",
+              "action_id"
+            ]
+          }
+        ],
+        "properties": {
+          "action_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_get_issue",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read original AI candidates and latest human-review status. Replays do not create duplicate findings; no automatic confirmation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "all",
+              "needs_review",
+              "confirmed",
+              "dismissed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_list_findings",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Inspect one recorded action, frozen expectation, assessment, before/after evidence metadata and sampled-frame references.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "action_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_action",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Inspect a bounded slice of recorded states, transitions, frontier and decisions. The offset applies to each array; each has its own total and has_more flag. Scores are uncalibrated.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_graph",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Poll ordered durable run events after a sequence number. Follow next_after_seq while has_more is true; no simulated progress or model calls.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "after_seq": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_events",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a recorded capture PNG or artifact for this run. Supply exactly one capture_id or artifact_id. PNGs return an MCP image block; bytes are verified against recorded length/SHA256. Private login screens are excluded.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "capture_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_read_evidence",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Queue the existing fresh-browser suspect reproduction. Can change the controlled target app and may consume configured model usage. Stable job_id required; server eligibility/deduplication rules still apply.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "source_action_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "source_action_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_reproduce_candidate",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Request durable cancellation of a job, run, or a source run's automatic checks. In-flight model usage may still settle; recorded evidence is retained.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "job",
+              "run",
+              "automatic_checks"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_cancel_work",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Inspect owned provider-reported token/cost totals. Missing usage remains unknown; model subscriptions are not inferred from token counts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_usage",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List pending user sign-in handoffs, optionally for one run. Returns no credentials, private frames, leases or saved-session material.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_access_requests",
+      "outputSchema": {
+        "type": "object"
+      }
+    }
+  ]
+}

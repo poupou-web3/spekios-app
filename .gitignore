@@ -15,6 +15,10 @@ spool/
 coverage/
 dist/
 build/
+.astro/
+apps/docs/src/content/docs/agents/reference/
+apps/docs/public/*
+!apps/docs/public/favicon.svg
 *.log
 *.pem
 *.key

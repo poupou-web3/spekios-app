@@ -1,13 +1,14 @@
 //! A single local worker owns the PostgreSQL advisory lock. Admission, dispatch,
 //! usage settlement and outbox creation commit before their external effects.
+use crate::identity::ScopedState;
 use crate::{
-    AppState, WORKSPACE_ID, error,
+    error,
     models::{CallResult, ModelRequest, Provider, interpret, wire_request},
     query,
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -340,7 +341,7 @@ impl Gateway {
                 self.remove_journal(result.call_id).await?;
             }
         }
-        let calls = self.db.lock().await.query("SELECT c.call_id FROM model_calls c JOIN model_requests r USING(request_id) WHERE r.workspace_id=$1 AND c.state='dispatched'",&[&WORKSPACE_ID]).await.map_err(|_| "database_unavailable")?;
+        let calls = self.db.lock().await.query("SELECT c.call_id FROM model_calls c JOIN model_requests r USING(request_id) WHERE c.state='dispatched'",&[]).await.map_err(|_| "database_unavailable")?;
         for row in calls {
             // The provider might have billed this attempt. Never replay it.
             self.settle(&CallResult::unknown(
@@ -349,11 +350,23 @@ impl Gateway {
             ))
             .await?;
         }
-        self.db.lock().await.execute("UPDATE model_requests SET state='queued' WHERE workspace_id=$1 AND state='preparing'",&[&WORKSPACE_ID]).await.map_err(|_| "database_unavailable")?;
+        self.db
+            .lock()
+            .await
+            .execute(
+                "UPDATE model_requests SET state='queued' WHERE state='preparing'",
+                &[],
+            )
+            .await
+            .map_err(|_| "database_unavailable")?;
         Ok(())
     }
 
-    async fn admit(&self, spec: &ModelRequest) -> GResult<bool> {
+    async fn admit(
+        &self,
+        spec: &ModelRequest,
+        principal: &crate::identity::Principal,
+    ) -> GResult<bool> {
         spec.validate()?;
         let value = serde_json::to_value(spec).map_err(|_| "invalid_request")?;
         let bytes = serde_json::to_vec(&value).map_err(|_| "invalid_request")?;
@@ -366,6 +379,22 @@ impl Gateway {
         let sha = hash(&bytes);
         let mut db = self.db.lock().await;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
+        // Only the trusted operator/worker may submit raw model requests. Derive
+        // ownership from its admitted run, never a client-supplied workspace ID.
+        let (workspace_id, user_id, agent_id) = if let Some(id) = spec.run_id {
+            let row=tx.query_opt("SELECT r.workspace_id,r.user_id,(SELECT agent_id FROM browser_jobs j WHERE j.run_id=r.run_id AND j.workspace_id=r.workspace_id AND j.user_id=r.user_id ORDER BY j.created_at,j.job_id LIMIT 1) FROM runtime_runs r WHERE r.run_id=$1",&[&id]).await.map_err(|_|"database_unavailable")?.ok_or("run_not_found")?;
+            (
+                row.get::<_, Uuid>(0),
+                row.get::<_, Uuid>(1),
+                row.get::<_, Option<Uuid>>(2),
+            )
+        } else {
+            (
+                principal.workspace_id,
+                principal.user_id,
+                principal.agent_id,
+            )
+        };
         if let Some(row) = tx
             .query_opt(
                 "SELECT spec_sha256,workspace_id,user_id,execution_mode FROM model_requests WHERE request_id=$1",
@@ -375,8 +404,8 @@ impl Gateway {
             .map_err(|_| "database_unavailable")?
         {
             if row.get::<_, String>(0) != sha
-                || row.get::<_, Uuid>(1) != WORKSPACE_ID
-                || row.get::<_, Uuid>(2) != USER_ID
+                || row.get::<_, Uuid>(1) != workspace_id
+                || row.get::<_, Uuid>(2) != user_id
                 || row.get::<_, String>(3) != self.execution_mode()
             {
                 return Err("idempotency_conflict");
@@ -389,12 +418,12 @@ impl Gateway {
         if !self.is_ready() {
             return Err("gateway_not_ready");
         }
-        let pending: i64 = tx.query_one("SELECT count(*) FROM model_requests WHERE workspace_id=$1 AND execution_mode=$2 AND state IN ('queued','preparing','dispatched')",&[&WORKSPACE_ID,&self.execution_mode()]).await.map_err(|_| "database_unavailable")?.get(0);
+        let pending: i64 = tx.query_one("SELECT count(*) FROM model_requests WHERE workspace_id=$1 AND execution_mode=$2 AND state IN ('queued','preparing','dispatched')",&[&workspace_id,&self.execution_mode()]).await.map_err(|_| "database_unavailable")?.get(0);
         if pending >= 32 {
             return Err("queue_full");
         }
         if let Some(id) = spec.run_id {
-            let run=tx.query_opt("SELECT (cancel_id IS NOT NULL OR lifecycle='cancelled') FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&id,&WORKSPACE_ID,&USER_ID])
+            let run=tx.query_opt("SELECT (cancel_id IS NOT NULL OR lifecycle='cancelled') FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&id,&workspace_id,&user_id])
                 .await.map_err(|_| "database_unavailable")?.ok_or("run_not_found")?;
             if run.get::<_, bool>(0) {
                 return Err("run_cancelled");
@@ -415,7 +444,7 @@ impl Gateway {
         for id in &spec.capture_ids {
             if tx.query_opt("SELECT 1 FROM runtime_captures WHERE capture_id=$1 AND run_id=$2 AND status='available' AND byte_length <= $3",&[id,&spec.run_id,&(MAX_IMAGE as i64)]).await.map_err(|_| "database_unavailable")?.is_none() { return Err("capture_unavailable_or_too_large"); }
         }
-        tx.execute("INSERT INTO model_requests(request_id,workspace_id,user_id,run_id,action_id,provider,model,spec,spec_sha256,state,execution_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10)",&[&spec.request_id,&WORKSPACE_ID,&USER_ID,&spec.run_id,&spec.action_id,&spec.provider.name(),&spec.model,&value,&sha,&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
+        tx.execute("INSERT INTO model_requests(request_id,workspace_id,user_id,run_id,action_id,provider,model,spec,spec_sha256,state,execution_mode,agent_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11)",&[&spec.request_id,&workspace_id,&user_id,&spec.run_id,&spec.action_id,&spec.provider.name(),&spec.model,&value,&sha,&self.execution_mode(),&agent_id]).await.map_err(|_| "database_unavailable")?;
         event(&tx,spec.request_id,None,"request_accepted",&json!({"spec":value,"training_status":if self.fixture_url.is_some(){"excluded_fixture"}else{"pending_review"}})).await?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
         self.notify.notify_one();
@@ -423,7 +452,7 @@ impl Gateway {
     }
 
     async fn process_next(&self) -> GResult<bool> {
-        let row = self.db.lock().await.query_opt("UPDATE model_requests SET state='preparing' WHERE request_id=(SELECT request_id FROM model_requests WHERE workspace_id=$1 AND execution_mode=$2 AND state='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1) RETURNING spec",&[&WORKSPACE_ID,&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
+        let row = self.db.lock().await.query_opt("UPDATE model_requests SET state='preparing' WHERE request_id=(SELECT request_id FROM model_requests WHERE execution_mode=$1 AND state='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1) RETURNING spec",&[&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
         let Some(row) = row else { return Ok(false) };
         let spec: ModelRequest =
             serde_json::from_value(row.get(0)).map_err(|_| "stored_request_invalid")?;
@@ -492,7 +521,7 @@ impl Gateway {
     }
 
     async fn image(&self, id: Uuid, run_id: Option<Uuid>) -> GResult<Vec<u8>> {
-        let row = self.db.lock().await.query_opt("SELECT c.object_key,c.sha256,c.byte_length FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE capture_id=$1 AND c.run_id=$2 AND r.workspace_id=$3 AND c.status='available'",&[&id,&run_id,&WORKSPACE_ID]).await.map_err(|_| "database_unavailable")?.ok_or("capture_unavailable")?;
+        let row = self.db.lock().await.query_opt("SELECT c.object_key,c.sha256,c.byte_length FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE capture_id=$1 AND c.run_id=$2 AND c.status='available'",&[&id,&run_id]).await.map_err(|_| "database_unavailable")?.ok_or("capture_unavailable")?;
         let key: String = row.get(0);
         let sha: String = row.get(1);
         let length: i64 = row.get(2);
@@ -626,7 +655,7 @@ impl Gateway {
     async fn settle(&self, result: &CallResult) -> GResult<()> {
         let mut db = self.db.lock().await;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
-        let row = tx.query_opt("SELECT c.state,c.request_id,c.attempt,r.spec FROM model_calls c JOIN model_requests r USING(request_id) WHERE c.call_id=$1 AND r.workspace_id=$2 FOR UPDATE OF c,r",&[&result.call_id,&WORKSPACE_ID]).await.map_err(|_| "database_unavailable")?.ok_or("journal_call_not_found")?;
+        let row = tx.query_opt("SELECT c.state,c.request_id,c.attempt,r.spec FROM model_calls c JOIN model_requests r USING(request_id) WHERE c.call_id=$1 FOR UPDATE OF c,r",&[&result.call_id]).await.map_err(|_| "database_unavailable")?.ok_or("journal_call_not_found")?;
         if row.get::<_, String>(0) != "dispatched" {
             return Ok(());
         }
@@ -766,7 +795,7 @@ impl Gateway {
                 .await
                 .map_err(|_| "database_unavailable")?;
         }
-        let rows=self.db.lock().await.query("SELECT e.event_id,jsonb_build_object('event_id',e.event_id,'workspace_id',r.workspace_id,'user_id',r.user_id,'request_id',r.request_id,'call_id',e.call_id,'event_type',e.event_type,'occurred_at',to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),'provider',r.provider,'requested_model',r.model,'execution_mode',r.execution_mode,'run_id',r.run_id,'action_id',r.action_id,'payload',e.payload::text) FROM model_events e JOIN model_requests r USING(request_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at LIMIT 100",&[]).await.map_err(|_|"database_unavailable")?;
+        let rows=self.db.lock().await.query("SELECT e.event_id,jsonb_build_object('event_id',e.event_id,'workspace_id',r.workspace_id,'user_id',r.user_id,'agent_id',r.agent_id,'request_id',r.request_id,'call_id',e.call_id,'event_type',e.event_type,'occurred_at',to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),'provider',r.provider,'requested_model',r.model,'execution_mode',r.execution_mode,'run_id',r.run_id,'action_id',r.action_id,'payload',e.payload::text) FROM model_events e JOIN model_requests r USING(request_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at LIMIT 100",&[]).await.map_err(|_|"database_unavailable")?;
         if !rows.is_empty() {
             progressed = true;
             let ids: Vec<Uuid> = rows.iter().map(|r| r.get(0)).collect();
@@ -838,12 +867,13 @@ async fn event(
 async fn payload(tx: &Transaction<'_>, call_id: Uuid, kind: &str, bytes: &[u8]) -> GResult<Value> {
     let id = Uuid::new_v4();
     let sha = hash(bytes);
-    let key = format!("workspace/{WORKSPACE_ID}/model-calls/{call_id}/{kind}-{sha}.json");
+    let workspace_id:Uuid=tx.query_one("SELECT r.workspace_id FROM model_requests r JOIN model_calls c USING(request_id) WHERE c.call_id=$1",&[&call_id]).await.map_err(|_|"payload_owner_unavailable")?.get(0);
+    let key = format!("workspace/{workspace_id}/model-calls/{call_id}/{kind}-{sha}.json");
     tx.execute("INSERT INTO model_payloads(payload_id,call_id,kind,object_key,sha256,byte_length,body) VALUES($1,$2,$3,$4,$5,$6,$7)",&[&id,&call_id,&kind,&key,&sha,&(bytes.len() as i64),&bytes]).await.map_err(|_|"payload_write_failed")?;
     Ok(json!({"payload_id":id,"object_key":key,"sha256":sha,"byte_length":bytes.len()}))
 }
 
-pub async fn providers(State(state): State<AppState>) -> Json<Value> {
+pub async fn providers(ScopedState(state): ScopedState) -> Json<Value> {
     Json(
         state
             .gateway
@@ -853,7 +883,7 @@ pub async fn providers(State(state): State<AppState>) -> Json<Value> {
     )
 }
 pub async fn submit(
-    State(state): State<AppState>,
+    ScopedState(state): ScopedState,
     body: Result<Json<ModelRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let spec = match body {
@@ -863,7 +893,7 @@ pub async fn submit(
     let Some(g) = state.gateway.as_ref() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "gateway_unavailable");
     };
-    match g.admit(&spec).await {
+    match g.admit(&spec, &state.principal).await {
         Ok(created) => (if created {StatusCode::ACCEPTED}else{StatusCode::OK},Json(json!({"request_id":spec.request_id,"created":created,"status_url":format!("/v1/model-requests/{}",spec.request_id)}))).into_response(),
         Err(code) => error(match code {
             "idempotency_conflict"|"run_cancelled"=>StatusCode::CONFLICT,
@@ -874,18 +904,18 @@ pub async fn submit(
         },code)
     }
 }
-pub async fn request(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    match query(&state,"SELECT jsonb_build_object('request',to_jsonb(r),'calls',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY attempt) FROM model_calls c WHERE c.request_id=r.request_id),'[]'::jsonb),'payloads',COALESCE((SELECT jsonb_agg(to_jsonb(p)-'body' ORDER BY c.attempt,p.kind) FROM model_payloads p JOIN model_calls c USING(call_id) WHERE c.request_id=r.request_id),'[]'::jsonb),'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.occurred_at,e.event_id) FROM model_events e WHERE e.request_id=r.request_id),'[]'::jsonb)) FROM model_requests r WHERE r.request_id=$1 AND workspace_id=$2 AND user_id=$3",&[&id,&WORKSPACE_ID,&USER_ID]).await {
+pub async fn request(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
+    match query(&state,"SELECT jsonb_build_object('request',to_jsonb(r),'calls',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY attempt) FROM model_calls c WHERE c.request_id=r.request_id),'[]'::jsonb),'payloads',COALESCE((SELECT jsonb_agg(to_jsonb(p)-'body' ORDER BY c.attempt,p.kind) FROM model_payloads p JOIN model_calls c USING(call_id) WHERE c.request_id=r.request_id),'[]'::jsonb),'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.occurred_at,e.event_id) FROM model_events e WHERE e.request_id=r.request_id),'[]'::jsonb)) FROM model_requests r WHERE r.request_id=$1 AND ((workspace_id=$2 AND user_id=$3) OR $4::bool)",&[&id,&state.principal.workspace_id,&state.principal.user_id,&state.principal.operator]).await {
         Ok(Some(v))=>Json(v).into_response(),Ok(None)=>error(StatusCode::NOT_FOUND,"model_request_not_found"),Err(r)=>r
     }
 }
-pub async fn usage_report(State(state): State<AppState>) -> Response {
+pub async fn usage_report(ScopedState(state): ScopedState) -> Response {
     let mode = state
         .gateway
         .as_ref()
         .map(|g| g.execution_mode())
         .unwrap_or("live");
-    match query(&state,"SELECT jsonb_build_object('user_id',$2::uuid,'execution_mode',$3::text,'requests',(SELECT count(*) FROM model_requests WHERE workspace_id=$1 AND user_id=$2 AND execution_mode=$3),'attempts',count(*),'in_flight_attempts',count(*) FILTER (WHERE c.state='dispatched'),'known_input_tokens',sum(input_tokens),'known_output_tokens',sum(output_tokens),'incomplete_usage_attempts',count(*) FILTER (WHERE usage_status<>'reported'),'provider_reported_cost_usd',sum(cost_usd)::text,'unpriced_attempts',count(*) FILTER (WHERE cost_usd IS NULL),'cost_complete',count(*) FILTER (WHERE cost_usd IS NULL)=0,'complete',count(*) FILTER (WHERE usage_status<>'reported' OR c.state='dispatched')=0) FROM model_calls c JOIN model_requests r USING(request_id) WHERE r.workspace_id=$1 AND r.user_id=$2 AND r.execution_mode=$3",&[&WORKSPACE_ID,&USER_ID,&mode]).await {
+    match query(&state,"SELECT jsonb_build_object('user_id',$2::uuid,'execution_mode',$3::text,'requests',(SELECT count(*) FROM model_requests WHERE workspace_id=$1 AND user_id=$2 AND execution_mode=$3),'attempts',count(*),'in_flight_attempts',count(*) FILTER (WHERE c.state='dispatched'),'known_input_tokens',sum(input_tokens),'known_output_tokens',sum(output_tokens),'incomplete_usage_attempts',count(*) FILTER (WHERE usage_status<>'reported'),'provider_reported_cost_usd',sum(cost_usd)::text,'unpriced_attempts',count(*) FILTER (WHERE cost_usd IS NULL),'cost_complete',count(*) FILTER (WHERE cost_usd IS NULL)=0,'by_agent',COALESCE((SELECT jsonb_agg(to_jsonb(t)) FROM (SELECT m.agent_id,count(*) AS attempts,sum(a.input_tokens) AS known_input_tokens,sum(a.output_tokens) AS known_output_tokens,sum(a.cost_usd)::text AS provider_reported_cost_usd,count(*) FILTER(WHERE a.usage_status<>'reported') AS incomplete_usage_attempts,count(*) FILTER(WHERE a.cost_usd IS NULL) AS unpriced_attempts FROM model_calls a JOIN model_requests m USING(request_id) WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.execution_mode=$3 GROUP BY m.agent_id) t),'[]'::jsonb),'complete',count(*) FILTER (WHERE usage_status<>'reported' OR c.state='dispatched')=0) FROM model_calls c JOIN model_requests r USING(request_id) WHERE r.workspace_id=$1 AND r.user_id=$2 AND r.execution_mode=$3",&[&state.principal.workspace_id,&state.principal.user_id,&mode]).await {
         Ok(Some(v))=>Json(v).into_response(),Ok(None)=>Json(json!({})).into_response(),Err(r)=>r
     }
 }

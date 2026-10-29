@@ -7,7 +7,7 @@ export type { BrowserCommand } from './contracts.js';
 export type ChangeSignal = { newly_exposed: boolean; changed_pixels: number; sampled_pixels: number };
 type Node = {
   id: string; capture: Capture; parent_state_id: string | null; depth: number; reach_estimate: number;
-  signals: Record<string, ChangeSignal>; proposals: Map<string, Proposal>; attempted: Set<string>; declined: boolean;
+  signals: Record<string, ChangeSignal>; proposals: Map<string, Proposal>; attempted: Set<string>; declined: boolean; focus_stale: boolean;
 };
 export type RouteStep = {
   from_state_id: string; to_state_id: string; command: BrowserCommand;
@@ -16,7 +16,7 @@ export type RouteStep = {
 export type RankedPath = {
   state_id: string; control_id: string; name: string; goal: string; expected_result: string;
   likelihood: number; path_likelihood_score: number; priority: number; travel_steps: number;
-  action?: ControlAction;
+  action?: ControlAction; focus_stale: boolean;
   path_state_ids: string[]; route: RouteStep[];
   components: { likely_next: number; newly_exposed: number; changed_control: number; novelty: number; repeat_penalty: number; reach_weight: number };
   reason: string;
@@ -41,7 +41,7 @@ export class FrontierPlanner {
     const node: Node = { id, capture, parent_state_id: initial ? null : parentId ?? null,
       depth: initial ? 0 : (parent?.depth ?? -1) + 1,
       reach_estimate: initial ? 1 : (parent?.reach_estimate ?? 1) * likelihood,
-      signals, proposals: new Map(), attempted: new Set(), declined: false };
+      signals, proposals: new Map(), attempted: new Set(), declined: false, focus_stale: false };
     this.nodes.set(id, node);
     if (initial) this.root = id;
     return node;
@@ -56,9 +56,15 @@ export class FrontierPlanner {
     return (node.capture.observation.controls ?? []).filter(control => !node.attempted.has(control.control_id)
       && !blockedReason(control, new URL(this.targetUrl).origin));
   }
+  refocus() {
+    // Preserve observed paths/attempted actions. Cached hypotheses may guide a
+    // return to another branch, but fresh rankings always take precedence.
+    for (const node of this.nodes.values()) { node.focus_stale=true; node.declined=false; }
+  }
   plan(id: string, proposals: Proposal[]) {
     const node = this.nodes.get(id)!;
     node.declined = proposals.length === 0;
+    node.focus_stale=false;
     // A fresh decision replaces this state's older hypotheses. Other states
     // keep their cached frontiers until we return and observe them again.
     node.proposals = new Map(proposals.map(proposal => [proposal.control_id, proposal]));
@@ -140,15 +146,16 @@ export class FrontierPlanner {
         const reasons = [`Model next-action score ${Math.round(proposal.likelihood * 100)}/100`];
         if (signal?.newly_exposed) reasons.push('newly exposed control');
         if (signal && signal.changed_pixels > 0) reasons.push(`${signal.changed_pixels} changed pixels inside the control`);
+        if (node.focus_stale) reasons.push('cached branch awaiting ranking for the current focus');
         if (repeats) reasons.push('repeated control is deprioritized');
         if (route.length) reasons.push(`${route.length} recorded return steps`);
         ranked.push({ state_id: node.id, control_id: control.control_id, name: control.name,
-          goal: proposal.goal, expected_result: proposal.expected_result, likelihood: proposal.likelihood, action:proposal.action,
+          goal: proposal.goal, expected_result: proposal.expected_result, likelihood: proposal.likelihood, action:proposal.action, focus_stale:node.focus_stale,
           path_likelihood_score: node.reach_estimate * proposal.likelihood, priority,
           travel_steps: route.length, path_state_ids: this.ancestry(node.id), route, components, reason: reasons.join('; ') + '.' });
       }
     }
-    return ranked.sort((a,b) => b.priority-a.priority || a.travel_steps-b.travel_steps || a.control_id.localeCompare(b.control_id));
+    return ranked.sort((a,b) => Number(a.focus_stale)-Number(b.focus_stale) || b.priority-a.priority || a.travel_steps-b.travel_steps || a.control_id.localeCompare(b.control_id));
   }
   context(id: string) {
     return { algorithm: PLANNER_VERSION, current_path: this.ancestry(id).map(stateId => {const url=this.nodes.get(stateId)!.capture.observation.url;return {state_id:stateId,url:url.slice(0,240),url_truncated:url.length>240};}),

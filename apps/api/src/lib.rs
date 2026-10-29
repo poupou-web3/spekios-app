@@ -2,13 +2,12 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
-    extract::{Path, Request, State},
+    extract::{Request, State},
     http::{StatusCode, uri::Authority},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
 };
-use gateway::USER_ID;
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
 use tokio_postgres::Client;
@@ -16,22 +15,32 @@ use uuid::Uuid;
 pub mod access;
 pub mod agent;
 pub mod gateway;
+pub mod history;
+pub mod identity;
+pub mod issues;
 pub mod jobs;
+use identity::{Principal, ScopedState};
 pub mod models;
+pub mod oauth;
 pub mod reviews;
+mod runs;
+pub mod steering;
 pub mod ui;
 
-/// Fixed local fixture workspace. Multi-user authentication is a later increment.
+/// Legacy local workspace retained for CLI fixtures and operator bootstrap.
 pub const WORKSPACE_ID: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
 
 #[derive(Clone)]
 pub struct AppState {
     pub database: Option<Arc<Client>>,
+    pub identities: Option<Arc<identity::Identities>>,
+    pub principal: Principal,
     pub gateway: Option<Arc<gateway::Gateway>>,
     pub jobs: Option<Arc<jobs::Queue>>,
     pub reviews: Option<Arc<reviews::Reviews>>,
     bearer: Arc<str>,
     dev_auth_bypass: bool,
+    public_origin: Option<Arc<str>>,
 }
 
 impl AppState {
@@ -47,31 +56,113 @@ impl AppState {
         }
         Ok(Self {
             database,
+            identities: None,
+            principal: Principal::default(),
             gateway: None,
             jobs: None,
             reviews: None,
             bearer: Arc::from(format!("Bearer {token}")),
             dev_auth_bypass: false,
+            public_origin: None,
         })
+    }
+
+    pub fn with_public_origin(mut self, raw: Option<&str>) -> Result<Self, &'static str> {
+        if let Some(raw) = raw.filter(|value| !value.is_empty()) {
+            let url = reqwest::Url::parse(raw)
+                .map_err(|_| "SCOUT_PUBLIC_ORIGIN must be a clean HTTPS origin")?;
+            if url.scheme() != "https"
+                || url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.path() != "/"
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || url.port() == Some(0)
+            {
+                return Err("SCOUT_PUBLIC_ORIGIN must be a clean HTTPS origin");
+            }
+            self.public_origin = Some(Arc::from(url.origin().ascii_serialization()));
+            self.dev_auth_bypass = false;
+        }
+        Ok(self)
+    }
+
+    pub fn scoped(&self, principal: Principal) -> Self {
+        let mut scoped = self.clone();
+        scoped.jobs = self.jobs.as_ref().map(|q| Arc::new(q.scoped(&principal)));
+        scoped.principal = principal;
+        scoped
     }
 
     /// Explicit local-development convenience. Worker and CLI bearer
     /// authentication remains available and the token is still required.
     pub fn with_dev_auth_bypass(mut self, enabled: bool) -> Self {
-        self.dev_auth_bypass = enabled;
+        self.dev_auth_bypass = enabled && self.public_origin.is_none();
         self
     }
 }
 
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
+        .route("/v1/issues", get(issues::list))
+        .route("/v1/issues/{issue_id}", get(issues::detail))
+        .route(
+            "/v1/issues/{issue_id}/verifications",
+            axum::routing::post(issues::submit),
+        )
+        .route(
+            "/v1/issue-verifications/{verification_id}",
+            get(issues::verification),
+        )
+        .route("/v1/history/sessions", get(history::list))
+        .route("/v1/history/domain", get(history::summary))
+        .route("/v1/identity", get(identity::whoami))
+        .route(
+            "/v1/workspaces",
+            axum::routing::post(identity::create_workspace),
+        )
+        .route("/v1/agents", get(identity::agents))
+        .route("/v1/oauth/authorizations/{id}", get(oauth::review))
+        .route(
+            "/v1/oauth/authorizations/{id}/decision",
+            axum::routing::post(oauth::decide),
+        )
+        .route(
+            "/v1/agents/{id}/revoke",
+            axum::routing::post(identity::revoke),
+        )
+        .route("/v1/agent-connections/{code}", get(identity::connection))
+        .route(
+            "/v1/agent-connections/{code}/decision",
+            axum::routing::post(identity::decide),
+        )
         .route("/readyz", get(ready))
-        .route("/v1/runs", get(runs))
-        .route("/v1/runs/{run_id}", get(run))
-        .route("/v1/runs/{run_id}/graph", get(graph))
+        .route("/v1/runs", get(runs::list))
+        .route("/v1/runs/{run_id}", get(runs::get))
+        .route("/v1/runs/{run_id}/graph", get(runs::graph))
         .route("/v1/runs/{run_id}/events", get(agent::events))
+        .route(
+            "/v1/runs/{run_id}/steering",
+            get(steering::get).post(steering::submit),
+        )
+        .route(
+            "/v1/runs/{run_id}/progress",
+            get(agent::report::run_progress),
+        )
+        .route(
+            "/v1/runs/{run_id}/report",
+            get(agent::report::run_report_http),
+        )
+        .route(
+            "/v1/runs/{run_id}/issues/{action_id}",
+            get(agent::report::issue_http),
+        )
         .route("/v1/agent/tools", get(agent::catalog))
-        .route("/v1/agent/tools/{name}", axum::routing::post(agent::http_call))
+        .route(
+            "/v1/agent/tools/{name}",
+            axum::routing::post(agent::http_call),
+        )
         .route(
             "/v1/actions/{action_id}/reviews",
             axum::routing::post(reviews::submit),
@@ -84,12 +175,20 @@ pub fn router(state: AppState) -> Router {
             "/v1/runs/{run_id}/automatic-reproductions/cancel",
             axum::routing::post(jobs::cancel_automatic),
         )
-        .route("/v1/captures/{capture_id}", get(capture))
+        .route("/v1/captures/{capture_id}", get(runs::capture))
         .route("/v1/captures/{capture_id}/image", get(ui::capture_image))
         .route("/v1/artifacts/{artifact_id}/content", get(ui::artifact))
         .route("/v1/operations", get(ui::operations))
         .route("/v1/browser-jobs", get(jobs::list).post(jobs::submit))
         .route("/v1/browser-jobs/{job_id}", get(jobs::get_job))
+        .route(
+            "/v1/browser-jobs/{job_id}/progress",
+            get(agent::report::job_progress),
+        )
+        .route(
+            "/v1/browser-jobs/{job_id}/report",
+            get(agent::report::job_report),
+        )
         .route(
             "/v1/exploration-settings",
             get(jobs::exploration_settings).post(jobs::save_exploration_settings),
@@ -120,54 +219,180 @@ pub fn router(state: AppState) -> Router {
         .route_layer(middleware::from_fn_with_state(state.clone(), authorize_mcp));
     Router::new()
         .route("/", get(ui::index))
-        .route("/assets/app.js", get(ui::script))
-        .route("/assets/report-export.js", get(ui::report_export_script))
-        .route("/assets/report-bundle.js", get(ui::report_bundle_script))
+        .route("/connect", get(ui::connect))
+        .route("/issues", get(ui::issues))
+        .route("/v1/agent-setup", get(oauth::setup))
+        .route("/.well-known/oauth-protected-resource", get(oauth::resource_metadata))
+        .route("/.well-known/oauth-protected-resource/mcp", get(oauth::resource_metadata))
+        .route("/.well-known/oauth-authorization-server", get(oauth::server_metadata))
+        .route("/oauth/register", axum::routing::post(oauth::register))
+        .route("/oauth/authorize", get(oauth::authorize))
+        .route("/oauth/token", axum::routing::post(oauth::token))
+        .route("/oauth/revoke", axum::routing::post(oauth::revoke))
+        .route("/v1/agent-connections", axum::routing::post(identity::begin))
+        .route("/v1/agent-connections/token", axum::routing::post(identity::poll))
+        .layer(axum::extract::DefaultBodyLimit::max(65_536))
         .route("/assets/app.css", get(ui::style))
+        .route("/assets/{name}", get(ui::script))
         .route("/v1/auth-mode", get(auth_mode))
         .route("/healthz", get(|| async { Json(json!({"status":"ok","service":"scout-api","version":env!("CARGO_PKG_VERSION")})) }))
         .merge(protected)
         .merge(mcp)
+        .layer(middleware::from_fn(no_store))
         .with_state(state)
 }
 
-// Agent clients use the explicit local developer token. The GUI's development
-// convenience never makes the MCP endpoint anonymous or cross-origin.
-async fn authorize_mcp(State(state): State<AppState>,request: Request,next: Next) -> Response {
-    if (request.headers().contains_key("origin")||request.headers().contains_key("sec-fetch-site")) && !local_development_request(&request) {
-        return error(StatusCode::FORBIDDEN,"mcp_origin_not_allowed");
-    }
-    let count=request.headers().get_all("authorization").iter().count();
-    let presented=request.headers().get("authorization").map(|v|v.as_bytes()).unwrap_or_default();
-    if count!=1||!bool::from(presented.ct_eq(state.bearer.as_bytes())) {
-        let mut response=error(StatusCode::UNAUTHORIZED,"unauthorized");
-        response.headers_mut().insert("www-authenticate","Bearer realm=\"scout-local\"".parse().unwrap());
-        response.headers_mut().insert("cache-control","no-store".parse().unwrap());
-        return response;
-    }
-    let mut response=next.run(request).await;
-    response.headers_mut().insert("cache-control","no-store".parse().unwrap());
-    response
+// Every request, including stateless MCP messages, resolves its own principal.
+async fn authorize_mcp(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    authorize_request(state, request, next, false).await
 }
-
 async fn authorize(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let authorization_count = request.headers().get_all("authorization").iter().count();
+    authorize_request(state, request, next, true).await
+}
+async fn authorize_request(
+    state: AppState,
+    mut request: Request,
+    next: Next,
+    allow_dev: bool,
+) -> Response {
+    let approval_mutation = request.method() == axum::http::Method::POST
+        && (request.uri().path().starts_with("/v1/agent-connections/")
+            || request
+                .uri()
+                .path()
+                .starts_with("/v1/oauth/authorizations/")
+            || request.uri().path().starts_with("/v1/agents/")
+            || request.uri().path() == "/v1/workspaces");
+    if (!allow_dev || approval_mutation)
+        && (request.headers().contains_key("origin")
+            || request.headers().contains_key("sec-fetch-site"))
+        && !local_development_request(&request)
+        && !configured_browser_request(&state, &request)
+    {
+        return error(StatusCode::FORBIDDEN, "request_origin_not_allowed");
+    }
+    let count = request.headers().get_all("authorization").iter().count();
     let presented = request
         .headers()
         .get("authorization")
-        .map(|h| h.as_bytes())
+        .map(|v| v.as_bytes())
         .unwrap_or_default();
-    let valid_bearer =
-        authorization_count == 1 && bool::from(presented.ct_eq(state.bearer.as_bytes()));
-    let local_development =
-        authorization_count == 0 && state.dev_auth_bypass && local_development_request(&request);
-    if !valid_bearer && !local_development {
-        return error(StatusCode::UNAUTHORIZED, "unauthorized");
+    let operator_token = count == 1 && bool::from(presented.ct_eq(state.bearer.as_bytes()));
+    let local_preview =
+        count == 0 && allow_dev && state.dev_auth_bypass && local_development_request(&request);
+    let principal = if operator_token || local_preview {
+        Some(Principal::default())
+    } else if count == 1 {
+        if let Some(token) = request
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            && token.len() <= 256
+            && token.starts_with("scout_")
+        {
+            match &state.identities {
+                Some(store) => match store.authenticate(token).await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return error(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "identity_store_unavailable",
+                        );
+                    }
+                },
+                None => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let Some(principal) = principal else {
+        let mut response = error(StatusCode::UNAUTHORIZED, "unauthorized");
+        response.headers_mut().insert(
+            "www-authenticate",
+            oauth::challenge(&state, request.headers(), request.uri().path()),
+        );
+        response
+            .headers_mut()
+            .insert("cache-control", "no-store".parse().unwrap());
+        return response;
+    };
+    if let Some(audience) = &principal.audience {
+        let resource =
+            oauth::origin(&state, request.headers()).map(|origin| format!("{origin}/mcp"));
+        if request.uri().path() != "/mcp" || resource.as_ref() != Some(audience) {
+            let mut response = error(StatusCode::UNAUTHORIZED, "invalid_token_audience");
+            response.headers_mut().insert(
+                "www-authenticate",
+                oauth::challenge(&state, request.headers(), request.uri().path()),
+            );
+            return response;
+        }
     }
+    let permitted =
+        identity::permitted(&principal, request.method().as_str(), request.uri().path());
+    // Only route templates and status enter this audit. No query strings,
+    // Authorization headers, private browser inputs or model payloads.
+    let route = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|p| p.as_str())
+        .unwrap_or("unknown");
+    let operation = format!("{} {}", request.method(), route);
+    if let Some(store) = &state.identities
+        && store
+            .audit(&principal, &operation, "started")
+            .await
+            .is_err()
+    {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "audit_unavailable");
+    }
+    request
+        .extensions_mut()
+        .insert(state.scoped(principal.clone()));
+    let mut response = if permitted {
+        next.run(request).await
+    } else {
+        error(StatusCode::FORBIDDEN, "insufficient_scope")
+    };
+    if let Some(store) = &state.identities {
+        // Admission metadata is fail-closed; read completion audit failures are
+        // surfaced without replaying or pretending a mutation was rolled back.
+        if store
+            .audit(
+                &principal,
+                &operation,
+                &response.status().as_u16().to_string(),
+            )
+            .await
+            .is_err()
+        {
+            response.headers_mut().insert(
+                "x-scout-audit-status",
+                "completion-unavailable".parse().unwrap(),
+            );
+        }
+    }
+    response
+        .headers_mut()
+        .insert("cache-control", "no-store".parse().unwrap());
+    response
+}
+
+async fn no_store(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     response
         .headers_mut()
         .insert("cache-control", "no-store".parse().unwrap());
+    response
+        .headers_mut()
+        .insert("x-content-type-options", "nosniff".parse().unwrap());
+    response
+        .headers_mut()
+        .insert("referrer-policy", "no-referrer".parse().unwrap());
     response
 }
 
@@ -193,6 +418,72 @@ fn local_authority(value: &str) -> Option<Authority> {
         }
     }
     Some(authority)
+}
+
+// A reverse proxy's forwarded headers do not enroll a browser origin. Only the
+// operator's explicit HTTPS origin can enable same-origin approval remotely.
+fn configured_browser_request(state: &AppState, request: &Request) -> bool {
+    let Some(origin) = state.public_origin.as_deref() else {
+        return false;
+    };
+    let headers = request.headers();
+    if headers.get_all("host").iter().count() != 1
+        || headers.get_all("origin").iter().count() != 1
+        || headers.get_all("sec-fetch-site").iter().count() > 1
+    {
+        return false;
+    }
+    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(origin) {
+        return false;
+    }
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|v| !matches!(v.to_str(), Ok("same-origin" | "none")))
+    {
+        return false;
+    }
+    let Ok(expected) = origin.parse::<axum::http::Uri>() else {
+        return false;
+    };
+    let Some(expected_authority) = expected.authority() else {
+        return false;
+    };
+    let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    if host.trim() != host || host.contains('@') {
+        return false;
+    }
+    let Ok(authority) = host.parse::<Authority>() else {
+        return false;
+    };
+    let Some(suffix) = host.get(authority.host().len()..) else {
+        return false;
+    };
+    if !suffix.is_empty()
+        && !suffix.strip_prefix(':').is_some_and(|port| {
+            !port.is_empty()
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && port.parse::<u16>().is_ok_and(|p| p > 0)
+        })
+    {
+        return false;
+    }
+    if !same_authority(&authority, expected_authority, "https") {
+        return false;
+    }
+    if request
+        .uri()
+        .scheme_str()
+        .is_some_and(|scheme| scheme != "https")
+        || request
+            .uri()
+            .authority()
+            .is_some_and(|host| !same_authority(host, expected_authority, "https"))
+    {
+        return false;
+    }
+    true
 }
 
 fn same_authority(left: &Authority, right: &Authority, scheme: &str) -> bool {
@@ -294,7 +585,7 @@ async fn query(
     }
 }
 
-async fn ready(State(state): State<AppState>) -> Response {
+async fn ready(ScopedState(state): ScopedState) -> Response {
     if state.gateway.as_ref().is_some_and(|g| !g.is_ready()) {
         return error(StatusCode::SERVICE_UNAVAILABLE, "gateway_not_ready");
     }
@@ -311,7 +602,7 @@ async fn ready(State(state): State<AppState>) -> Response {
     }
 }
 
-async fn capabilities(State(state): State<AppState>) -> Response {
+async fn capabilities(ScopedState(state): ScopedState) -> Response {
     let effective_settings = match &state.jobs {
         Some(queue) => match queue.effective_settings().await {
             Ok(value) => value["settings"].clone(),
@@ -333,84 +624,22 @@ async fn capabilities(State(state): State<AppState>) -> Response {
             "interactions":["navigate","click","fill","select","set_checked","scroll","submit"],"interaction_version":"browser-interactions-v2",
             "form_submission":"same_origin_search_or_operator_configured_test_form",
             "action_completion":{"version":"action-completion-v1","timeout_ms":5000,"sampled_frames":true,"network_and_console_evidence":true}},
+        "active_run_steering":{"enabled":state.jobs.is_some(),"version":"focus-v1","application_boundary":"next_planning_decision","max_messages":32,"max_focus_characters":2000,"replay_steering":false},
+        "persistent_issues":{"enabled":true,"stable_ids":true,"candidate_verification":true,"outcomes":["resolved","still_reproducible","blocked","inconclusive"],"global_fix_claim":false},
         "suspect_reproduction":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"fresh_browser":true,"attempts_per_source_action":1,"automatic_confirmation":false},
         "automatic_reproduction":{"enabled":state.jobs.is_some(),"opt_in":true,"recursive":false,"automatic_confirmation":false,"max_cases":effective_settings["maxAutoReproductions"],"max_replay_actions":effective_settings["maxAutoReplayActions"],"durable_cancellation":true},
         "exploration_settings":{"editable":state.jobs.is_some(),"revision":effective_settings["settingsRevision"],"origins_editable":false,"credentials_editable":false},
         "finding_review":{"enabled":state.reviews.is_some(),"append_only":true,"optimistic_concurrency":true,"confirmation_requires_reproduction":true,"training_approval":false},
         "workspace_ui":true,"browser_job_submission":state.jobs.is_some(),
-        "agent_interface":{"version":1,"mcp_endpoint":"/mcp","http_catalog":"/v1/agent/tools","stdio_bridge":true,"human_review_write":false,"external_browser_driver":false},
+        "agent_interface":{"version":1,"mcp_endpoint":"/mcp","http_catalog":"/v1/agent/tools","stdio_bridge":true,"coding_agent_report":true,"asynchronous_progress":true,"human_review_write":false,"external_browser_driver":false},
         "cancellation":{"queued_jobs":true,"active_explorer_runs":true,"durable":true,"resume":false,"in_flight_provider_calls":"settle_and_account"},
         "app_login":{"manual_handoff":true,"session_reuse":true,"saved_session_hours":24,"google_oauth":false,"private_login_recording":false},
         "frontier_planning":{"version":"frontier-v1","automatic_return":true,"stale_plan_recovery":true,"max_replans":3,"probability_calibrated":false},
         "viewport_profiles":["desktop","tablet","mobile"],
         "model_gateway":true,"model_inference":configured && state.gateway.as_ref().is_some_and(|g|g.is_ready()),
         "model_providers":providers,
-        "authentication":"local_bearer_token", "workspace_id":WORKSPACE_ID.to_string()
+        "authentication":"workspace_bound_credentials", "workspace_id":state.principal.workspace_id.to_string()
     })).into_response()
-}
-
-async fn runs(State(state): State<AppState>) -> Response {
-    let sql = "SELECT jsonb_build_object('runs',COALESCE(jsonb_agg(to_jsonb(r)||jsonb_build_object('summary',(
-        SELECT jsonb_build_object('actions',count(*),
-          'candidates',count(*) FILTER (WHERE a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND r.config->'replay_of'='null'::jsonb),
-          'pending_findings',count(*) FILTER (WHERE a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND r.config->'replay_of'='null'::jsonb AND COALESCE(v.disposition,'needs_review')='needs_review'),
-          'confirmed_findings',count(*) FILTER (WHERE a.assessment->>'verdict'='suspect' AND r.config->'replay_of'='null'::jsonb AND v.disposition='confirmed'),
-          'dismissed_findings',count(*) FILTER (WHERE a.assessment->>'verdict'='suspect' AND r.config->'replay_of'='null'::jsonb AND v.disposition='dismissed'))
-        FROM runtime_actions a LEFT JOIN LATERAL (
-          SELECT disposition FROM finding_reviews f WHERE f.action_id=a.action_id AND f.workspace_id=$1 AND f.user_id=$2 ORDER BY revision DESC LIMIT 1
-        ) v ON true WHERE a.run_id=r.run_id
-      )) ORDER BY r.created_at DESC,r.run_id),'[]'::jsonb))
-      FROM (SELECT run_id,target_url,lifecycle,config,created_at,finished_at,error,cancel_id,cancel_requested_at
-            FROM runtime_runs WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC,run_id LIMIT 50) r";
-    match query(&state, sql, &[&WORKSPACE_ID, &USER_ID]).await {
-        Ok(Some(value)) => Json(value).into_response(),
-        Ok(None) => Json(json!({"runs":[]})).into_response(),
-        Err(response) => response,
-    }
-}
-
-async fn run(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    // One SQL statement gives a consistent database snapshot of all relationships.
-    let sql = "SELECT jsonb_build_object('schema_version',1,'run',to_jsonb(r),
-      'actions',COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.ordinal) FROM runtime_actions a WHERE a.run_id=r.run_id),'[]'::jsonb),
-      'captures',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.created_at,c.capture_id) FROM runtime_captures c WHERE c.run_id=r.run_id),'[]'::jsonb),
-      'artifacts',COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.artifact_id) FROM runtime_artifacts a WHERE a.run_id=r.run_id),'[]'::jsonb),
-      'events',COALESCE((SELECT jsonb_agg(to_jsonb(e)-'exported_at' ORDER BY e.seq) FROM runtime_events e WHERE e.run_id=r.run_id),'[]'::jsonb),
-      'graph',(SELECT graph FROM exploration_graphs WHERE run_id=r.run_id),
-      'reproductions',COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v.created_at,v.reproduction_id) FROM runtime_reproductions v WHERE v.source_run_id=r.run_id OR v.replay_run_id=r.run_id),'[]'::jsonb),
-      'automatic_reproductions',COALESCE((SELECT jsonb_agg(to_jsonb(t)||jsonb_build_object('child_job',CASE WHEN j.job_id IS NULL THEN NULL ELSE jsonb_build_object('job_id',j.job_id,'status',j.status,'run_id',j.run_id,'error',j.error,'cancel_id',j.cancel_id,'cancel_requested_at',j.cancel_requested_at,'parent_job_id',j.parent_job_id) END,'reproduction',(SELECT to_jsonb(v) FROM runtime_reproductions v WHERE v.source_action_id=t.source_action_id AND v.source_run_id=t.source_run_id)) ORDER BY t.created_at,t.task_id) FROM automatic_reproduction_tasks t JOIN browser_jobs p ON p.job_id=t.source_job_id AND p.run_id=t.source_run_id JOIN runtime_runs s ON s.run_id=t.source_run_id LEFT JOIN browser_jobs j ON j.job_id=t.child_job_id AND j.parent_job_id=p.job_id AND j.automatic_source_action_id=t.source_action_id AND j.workspace_id=r.workspace_id AND j.user_id=r.user_id WHERE (t.source_run_id=r.run_id OR j.run_id=r.run_id) AND p.workspace_id=r.workspace_id AND p.user_id=r.user_id AND s.workspace_id=r.workspace_id AND s.user_id=r.user_id),'[]'::jsonb),
-      'finding_reviews',COALESCE((SELECT jsonb_agg(to_jsonb(f) ORDER BY f.created_at,f.review_id) FROM finding_reviews f WHERE f.workspace_id=r.workspace_id AND f.user_id=r.user_id AND (f.run_id=r.run_id OR f.action_id IN (SELECT source_action_id FROM runtime_reproductions WHERE replay_run_id=r.run_id))),'[]'::jsonb),
-      'model_requests',COALESCE((SELECT jsonb_agg(to_jsonb(mr)-'spec' ORDER BY mr.created_at,mr.request_id) FROM model_requests mr WHERE mr.run_id=r.run_id),'[]'::jsonb),
-      'model_calls',COALESCE((SELECT jsonb_agg(jsonb_build_object('call_id',c.call_id,'request_id',c.request_id,'attempt',c.attempt,'state',c.state,'started_at',c.started_at,'finished_at',c.finished_at,'elapsed_ms',c.elapsed_ms,'http_status',c.http_status,'input_tokens',c.input_tokens,'output_tokens',c.output_tokens,'cached_input_tokens',c.cached_input_tokens,'cache_write_tokens',c.cache_write_tokens,'reasoning_tokens',c.reasoning_tokens,'usage_status',c.usage_status,'cost_usd',c.cost_usd::text,'returned_model',c.returned_model,'routed_provider',c.routed_provider,'error',c.error) ORDER BY c.started_at,c.call_id) FROM model_calls c JOIN model_requests mr USING(request_id) WHERE mr.run_id=r.run_id AND mr.workspace_id=r.workspace_id AND mr.user_id=r.user_id),'[]'::jsonb),
-      'model_usage',(SELECT jsonb_build_object('attempts',count(*),'known_input_tokens',sum(c.input_tokens),'known_output_tokens',sum(c.output_tokens),'incomplete_usage_attempts',count(*) FILTER (WHERE c.usage_status<>'reported'),'pending_requests',(SELECT count(*) FROM model_requests WHERE run_id=r.run_id AND state IN ('queued','preparing','dispatched')),'provider_reported_cost_usd',sum(c.cost_usd)::text,'unpriced_attempts',count(*) FILTER (WHERE c.cost_usd IS NULL)) FROM model_calls c JOIN model_requests mr USING(request_id) WHERE mr.run_id=r.run_id))
-      FROM runtime_runs r WHERE r.run_id=$1 AND r.workspace_id=$2 AND r.user_id=$3";
-    match query(&state, sql, &[&id, &WORKSPACE_ID, &gateway::USER_ID]).await {
-        Ok(Some(value)) => Json(value).into_response(),
-        Ok(None) => error(StatusCode::NOT_FOUND, "run_not_found"),
-        Err(response) => response,
-    }
-}
-
-async fn graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    match query(
-        &state,
-        "SELECT graph FROM exploration_graphs WHERE run_id=$1 AND workspace_id=$2",
-        &[&id, &WORKSPACE_ID],
-    )
-    .await
-    {
-        Ok(Some(value)) => Json(value).into_response(),
-        Ok(None) => error(StatusCode::NOT_FOUND, "exploration_not_found"),
-        Err(response) => response,
-    }
-}
-
-async fn capture(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    match query(&state, "SELECT to_jsonb(c) FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE c.capture_id=$1 AND r.workspace_id=$2", &[&id, &WORKSPACE_ID]).await {
-        Ok(Some(value)) => Json(value).into_response(),
-        Ok(None) => error(StatusCode::NOT_FOUND, "capture_not_found"),
-        Err(response) => response,
-    }
 }
 
 #[cfg(test)]
@@ -448,6 +677,90 @@ mod tests {
         app.oneshot(builder.body(Body::empty()).unwrap())
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn configured_https_origin_enables_approval_but_never_anonymous_development_access() {
+        for raw in [
+            "http://scout.example",
+            "https://user:secret@scout.example",
+            "https://scout.example/path",
+            "https://scout.example?token=x",
+        ] {
+            assert!(
+                AppState::new(None, TOKEN)
+                    .unwrap()
+                    .with_public_origin(Some(raw))
+                    .is_err()
+            );
+        }
+        let configured = AppState::new(None, TOKEN)
+            .unwrap()
+            .with_public_origin(Some("https://scout.example"))
+            .unwrap()
+            .with_dev_auth_bypass(true);
+        assert!(
+            !configured.dev_auth_bypass,
+            "A configured public origin cannot use the local anonymous bypass"
+        );
+        for (authorization, origin, host, expected) in [
+            (
+                true,
+                "https://scout.example",
+                "scout.example",
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                false,
+                "https://scout.example",
+                "scout.example",
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                true,
+                "https://foreign.example",
+                "scout.example",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                true,
+                "https://scout.example",
+                "foreign.example",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                true,
+                "https://scout.example",
+                "scout.example:bogus",
+                StatusCode::FORBIDDEN,
+            ),
+        ] {
+            let app = router(
+                AppState::new(None, TOKEN)
+                    .unwrap()
+                    .with_dev_auth_bypass(true)
+                    .with_public_origin(Some("https://scout.example/"))
+                    .unwrap(),
+            );
+            let mut request = Request::builder()
+                .method("POST")
+                .uri("/v1/agent-connections/AAAAAAAAAAAA/decision")
+                .header("host", host)
+                .header("origin", origin)
+                .header("sec-fetch-site", "same-origin")
+                .header("content-type", "application/json");
+            if authorization {
+                request = request.header("authorization", format!("Bearer {TOKEN}"));
+            }
+            assert_eq!(
+                app.oneshot(request.body(Body::from(r#"{"approve":true}"#)).unwrap())
+                    .await
+                    .unwrap()
+                    .status(),
+                expected,
+                "{host} {origin}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -748,10 +1061,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn portable_report_modules_are_public_embedded_and_uncached() {
+    async fn browser_modules_are_public_embedded_and_uncached() {
         let app_script = request("/assets/app.js", None).await;
         let csp = app_script.headers()["content-security-policy"].clone();
         for (path, expected) in [
+            ("/assets/app.js", include_str!("../../web/app.js")),
+            ("/assets/connect.js", include_str!("../../web/connect.js")),
+            ("/assets/issues.js", include_str!("../../web/issues.js")),
+            (
+                "/assets/workspace-http.js",
+                include_str!("../../web/workspace-http.js"),
+            ),
             (
                 "/assets/report-export.js",
                 include_str!("../../web/report-export.js"),
@@ -783,6 +1103,17 @@ mod tests {
                 assert_eq!(bytes.as_ref(), expected.as_bytes(), "{path}");
                 assert!(!expected.contains(TOKEN));
             }
+        }
+        for path in [
+            "/assets/.env",
+            "/assets/test-support/source.mjs",
+            "/assets/%2e%2e%2f.env",
+        ] {
+            assert_eq!(
+                request(path, None).await.status(),
+                StatusCode::NOT_FOUND,
+                "{path}"
+            );
         }
     }
 

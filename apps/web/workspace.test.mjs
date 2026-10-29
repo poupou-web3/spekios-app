@@ -1,6 +1,6 @@
+import {uiSource} from './test-support/source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // Exercise rendered contracts and event/navigation behavior without a browser.
@@ -9,7 +9,7 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(readFileSync(new URL('./app.js',import.meta.url),'utf8')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh};',sandbox);
+  vm.runInContext(uiSource('app.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});

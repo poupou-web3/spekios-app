@@ -1,6 +1,6 @@
+import {uiSource} from './test-support/source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // Pure templates only: no browser, model request, image download or evidence mutation.
@@ -8,7 +8,7 @@ function evidenceUI(){
   const node={innerHTML:'',classList:{add(){},remove(){}},addEventListener(){},querySelectorAll(){return[];}};
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},URL};
   vm.createContext(sandbox);
-  vm.runInContext(readFileSync(new URL('./app.js',import.meta.url),'utf8')+'\nglobalThis.testing={state,actionDetail,imagePanel,drawer};',sandbox);
+  vm.runInContext(uiSource('app.js')+'\nglobalThis.testing={state,actionDetail,imagePanel,drawer};',sandbox);
   return sandbox.testing;
 }
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;

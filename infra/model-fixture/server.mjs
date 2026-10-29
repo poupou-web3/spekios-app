@@ -36,7 +36,7 @@ const server = http.createServer(async (req, res) => {
       return setTimeout(() => res.destroy(), 150);
     }
     const exploration = explorerInput(body, provider);
-    if (exploration?.task === 'assessment' && exploration.after.url.includes('/provider-outage')) return send(503, {error:{message:'fixture assessment unavailable'}});
+    if (['assessment','fix_verification_assessment'].includes(exploration?.task) && exploration.after.url.includes('/provider-outage')) return send(503, {error:{message:'fixture assessment unavailable'}});
     const text = exploration ? JSON.stringify(explorerReply(exploration)) : scenario === 'redact' ? `Do not leak ${credential}` : 'The page is ready.';
     let value;
     if (provider === 'openai') value = { id:`response-${body.model}`, model:'fixture-openai', status:'completed', output:[{type:'message',content:[{type:'output_text',text}]}], usage:{input_tokens:16,output_tokens:5,input_tokens_details:{cached_tokens:6},output_tokens_details:{reasoning_tokens:2}} };

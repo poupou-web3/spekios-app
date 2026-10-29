@@ -212,6 +212,10 @@ export function reportMarkdown(report,{exportId,generatedAt,bundle=false,evidenc
   const blocked=array(report?.graph?.frontier).filter(f=>f.status==='blocked');
   if(blocked.length)sections.push(table(['Blocked control','Reason'],blocked.slice(0,50).map(f=>[f.control?.name??f.control_id,f.reason])),...(blocked.length>50?[`${blocked.length-50} additional blocked controls remain in the raw report.`]:[]));
   sections.push('## Recorded actions',actions.length?'Every recorded action below retains its execution state and automated assessment; a finished run does not imply that every action passed.':'No actions were recorded. This is not a passing test result.');
+  const focusHistory=array(report?.steering?.messages);
+  if(focusHistory.length)sections.splice(sections.indexOf('## Action timeline'),0,'## Testing focus',
+    'Applied acknowledges input to a planning decision. Coverage and model compliance still require recorded evidence.',
+    table(['Revision','Focus','Acknowledgement','Command ID','Planning decision'],focusHistory.map(item=>[item.revision,item.focus||'Restore normal exploration',item.status,item.steering_id,item.decision_id??'Not applied to a planning decision'])));
   for(const action of actions){
     sections.push(`### Action ${integer(action.ordinal)??'?'}: ${md(action.spec?.prediction?.goal??action.spec?.command?.control?.name??action.spec?.command?.type??'Recorded action',500)}`,
       [field('Action ID',action.action_id),field('Execution state',action.state),field('Automated verdict',action.assessment?.verdict),field('Expectation uncertain',action.assessment?.expectation_uncertain??'Not recorded'),commandFields(action.spec?.command)].join('\n'),

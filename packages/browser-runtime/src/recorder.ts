@@ -2,7 +2,7 @@ import { chromium, type Page } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { comparePng } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
-import { validatePlan, workspaceId, userId, type ActionSpec, type Expectation, type Assessment, type Capture, type Observation } from './contracts.js';
+import { validatePlan, type ActionSpec, type Expectation, type Assessment, type Capture, type Observation } from './contracts.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 1000) : 'Unknown runtime failure';
 export type Hooks = {
@@ -62,7 +62,7 @@ export async function record(store: Store, targetUrl: string, input: ActionSpec[
     const runId = randomUUID();
     await store.transaction(async () => {
       await store.query("INSERT INTO runtime_runs(run_id,workspace_id,user_id,target_url,lifecycle,config) VALUES($1,$2,$3,$4,'active',$5)",
-        [runId, workspaceId, userId, targetUrl, JSON.stringify({ runtime_version: 'recorder-v1', expectation_source: 'fixture_defined',
+        [runId, store.workspaceId, store.userId, targetUrl, JSON.stringify({ runtime_version: 'recorder-v1', expectation_source: 'fixture_defined',
           viewport: { width: 800, height: 600 }, device_scale: 1, video: false, screenshot_caret:'hide', service_workers: 'block', model_connection: null,
           scope: 'controlled-local-fixture', purpose: 'runtime_validation', training_status: 'excluded_fixture' })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, planned_actions: specs.length });

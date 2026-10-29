@@ -88,3 +88,18 @@ test('return routing follows a shorter observed path through cycles without redi
   assert.equal(planner.rank('leaf',1).length,0);
   assert.deepEqual(ranked[0].path_state_ids,['root','branch']);
 });
+
+test('a new focus prefers fresh rankings while keeping routes and covered controls',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  planner.observe('root',capture('http://app/',[button('old'),button('visited')]),undefined,{},1,true);
+  planner.plan('root',[proposal('old',1),proposal('visited',1)]);
+  planner.attempted('root',command('visited'),false);
+  planner.transition({from_state_id:'blank',to_state_id:'root',command:{type:'navigate',url:'http://app/'},source_action_id:'open',expected_result:'Root appears'},'no_issue_observed');
+  planner.observe('leaf',capture('http://app/leaf',[button('new')]),'root');
+  planner.refocus();
+  planner.plan('leaf',[proposal('new',.01)]);
+  assert.deepEqual(planner.rank('leaf',3).map(p=>[p.control_id,p.focus_stale]),[['new',false],['old',true]]);
+  planner.plan('leaf',[]);
+  assert.equal(planner.rank('leaf',2)[0].control_id,'old','Unexplored recorded branches remain reachable');
+  assert.equal(planner.available('root').some(c=>c.control_id==='visited'),false);
+});

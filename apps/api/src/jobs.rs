@@ -1,7 +1,10 @@
-use crate::{AppState, WORKSPACE_ID, error, gateway::USER_ID, query};
+use crate::identity::ScopedState;
+use crate::{AppState, error, query};
+#[cfg(test)]
+use crate::{WORKSPACE_ID, gateway::USER_ID};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -12,8 +15,10 @@ use tokio::sync::Mutex;
 use tokio_postgres::Client;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct Queue {
-    db: Mutex<Client>,
+    db: Arc<Mutex<Client>>,
+    principal: crate::identity::Principal,
     pub settings: Value,
 }
 
@@ -115,9 +120,14 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
     settings
 }
 
-fn settings_retry(saved: &Value, input: &NormalizedSettings) -> Result<(), &'static str> {
-    if saved["workspace_id"] != WORKSPACE_ID.to_string()
-        || saved["user_id"] != USER_ID.to_string()
+fn settings_retry(
+    saved: &Value,
+    input: &NormalizedSettings,
+    workspace_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), &'static str> {
+    if saved["workspace_id"] != workspace_id.to_string()
+        || saved["user_id"] != user_id.to_string()
         || saved["expected_revision"] != input.expected_revision
         || saved["settings"] != input.settings
     {
@@ -137,6 +147,10 @@ fn next_settings_revision(expected: i64, current: i64) -> Result<i64, &'static s
 #[serde(deny_unknown_fields)]
 pub struct Submission {
     job_id: Uuid,
+    #[serde(default)]
+    project_id: Option<Uuid>,
+    #[serde(default)]
+    task_id: Option<Uuid>,
     kind: String,
     #[serde(default)]
     target_url: Option<String>,
@@ -150,6 +164,10 @@ pub struct Submission {
     session_id: Option<Uuid>,
     #[serde(default)]
     auto_reproduce: Option<bool>,
+    #[serde(default)]
+    issue_id: Option<Uuid>,
+    #[serde(default)]
+    deployment_ref: Option<String>,
 }
 
 fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
@@ -177,9 +195,17 @@ fn prepare_submission(
     input: &Submission,
     defaults: &Value,
 ) -> Result<(Value, Value), &'static str> {
+    if input.project_id.is_some_and(|id| id.is_nil()) || input.task_id.is_some_and(|id| id.is_nil())
+    {
+        return Err("invalid_correlation_id");
+    }
     let mut settings = defaults.clone();
     let mut request = match input.kind.as_str() {
-        "explore" if input.source_action_id.is_none() => {
+        "explore"
+            if input.source_action_id.is_none()
+                && input.issue_id.is_none()
+                && input.deployment_ref.is_none() =>
+        {
             let allowed = defaults["allowedOrigins"]
                 .as_array()
                 .ok_or("target_origin_not_allowed")?
@@ -194,9 +220,38 @@ fn prepare_submission(
                 && input.viewport_profile.is_none()
                 && input.auth_mode.is_none()
                 && input.session_id.is_none()
-                && input.auto_reproduce.is_none() =>
+                && input.auto_reproduce.is_none()
+                && input.issue_id.is_none()
+                && input.deployment_ref.is_none() =>
         {
             json!({"kind":"reproduce","source_action_id":input.source_action_id.ok_or("missing_source_action_id")?})
+        }
+        "verify_fix"
+            if input.source_action_id.is_none()
+                && input.viewport_profile.is_none()
+                && input.auto_reproduce.is_none() =>
+        {
+            let issue_id = input
+                .issue_id
+                .filter(|id| !id.is_nil())
+                .ok_or("missing_issue_id")?;
+            let allowed = defaults["allowedOrigins"]
+                .as_array()
+                .ok_or("target_origin_not_allowed")?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let deployment = input.deployment_ref.as_deref().map(str::trim);
+            if deployment
+                .is_some_and(|v| v.is_empty() || v.len() > 200 || v.chars().any(char::is_control))
+            {
+                return Err("invalid_deployment_ref");
+            }
+            if input.auth_mode.as_deref() == Some("sign_in") {
+                return Err("verification_requires_saved_session_or_public_access");
+            }
+            json!({"kind":"verify_fix","issue_id":issue_id,"target_url":target(input.target_url.as_deref().ok_or("missing_target_url")?,&allowed)?,"deployment_ref":deployment})
         }
         _ => return Err("invalid_job_kind_or_fields"),
     };
@@ -238,9 +293,44 @@ fn prepare_submission(
 }
 
 impl Queue {
+    // The main AppState connection is intentionally read-only. Focus admission
+    // shares the queue writer and performs its transaction inside PostgreSQL.
+    pub async fn submit_steering(
+        &self,
+        run_id: Uuid,
+        input: &crate::steering::Submission,
+    ) -> Result<Value, &'static str> {
+        let principal = &self.principal;
+        let row = self
+            .db
+            .lock()
+            .await
+            .query_one(
+                "SELECT scout_submit_steering($1,$2,$3,$4,$5,$6,$7)",
+                &[
+                    &run_id,
+                    &principal.workspace_id,
+                    &principal.user_id,
+                    &principal.agent_id,
+                    &input.steering_id,
+                    &input.expected_revision,
+                    &input.focus,
+                ],
+            )
+            .await
+            .map_err(|_| "database_unavailable")?;
+        Ok(row.get(0))
+    }
+    pub fn scoped(&self, principal: &crate::identity::Principal) -> Self {
+        Self {
+            db: self.db.clone(),
+            settings: self.settings.clone(),
+            principal: principal.clone(),
+        }
+    }
     pub async fn effective_settings(&self) -> Result<Value, &'static str> {
         let db = self.db.lock().await;
-        let saved = db.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+        let saved = db.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?;
         let (revision, settings) = saved
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
@@ -267,15 +357,20 @@ impl Queue {
             .map_err(|_| "database_unavailable")?
         {
             let saved: Value = row.get(0);
-            settings_retry(&saved, &input)?;
+            settings_retry(
+                &saved,
+                &input,
+                self.principal.workspace_id,
+                self.principal.user_id,
+            )?;
             let revision = saved["revision"].as_i64().ok_or("database_unavailable")?;
             return Ok(
                 json!({"revision":revision,"settings":settings_snapshot(&self.settings,Some(&saved["settings"]),revision),"reused":true}),
             );
         }
-        let current:i64=tx.query_one("SELECT COALESCE(max(revision),0) FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2",&[&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.get(0);
+        let current:i64=tx.query_one("SELECT COALESCE(max(revision),0) FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2",&[&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.get(0);
         let revision = next_settings_revision(input.expected_revision, current)?;
-        tx.execute("INSERT INTO exploration_settings_versions(request_id,workspace_id,user_id,revision,expected_revision,settings) VALUES($1,$2,$3,$4,$5,$6)",&[&input.request_id,&WORKSPACE_ID,&USER_ID,&revision,&input.expected_revision,&input.settings]).await.map_err(|_|"database_unavailable")?;
+        tx.execute("INSERT INTO exploration_settings_versions(request_id,workspace_id,user_id,revision,expected_revision,settings) VALUES($1,$2,$3,$4,$5,$6)",&[&input.request_id,&self.principal.workspace_id,&self.principal.user_id,&revision,&input.expected_revision,&input.settings]).await.map_err(|_|"database_unavailable")?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
         Ok(
             json!({"revision":revision,"settings":settings_snapshot(&self.settings,Some(&input.settings),revision),"reused":false}),
@@ -288,13 +383,13 @@ impl Queue {
         // Always lock the job before its run, matching the worker's linking
         // transaction. Dispatch/finalization serialize on the run row.
         let job_id = if by_run {
-            tx.query_opt("SELECT job_id FROM browser_jobs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 ORDER BY (status='running') DESC,created_at DESC LIMIT 1", &[&id,&WORKSPACE_ID,&USER_ID])
+            tx.query_opt("SELECT job_id FROM browser_jobs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 ORDER BY (status='running') DESC,created_at DESC LIMIT 1", &[&id,&self.principal.workspace_id,&self.principal.user_id])
                 .await.map_err(|_| "database_unavailable")?.map(|r|r.get::<_,Uuid>(0))
         } else {
             Some(id)
         };
         let job: Option<Value> = if let Some(job_id) = job_id {
-            tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE job_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&job_id,&WORKSPACE_ID,&USER_ID])
+            tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE job_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&job_id,&self.principal.workspace_id,&self.principal.user_id])
                 .await.map_err(|_| "database_unavailable")?.map(|r|r.get(0))
         } else {
             None
@@ -310,7 +405,7 @@ impl Queue {
                 .and_then(|s| Uuid::parse_str(s).ok())
         };
         let run: Option<Value> = if let Some(run_id) = run_id {
-            tx.query_opt("SELECT to_jsonb(r) FROM runtime_runs r WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&run_id,&WORKSPACE_ID,&USER_ID])
+            tx.query_opt("SELECT to_jsonb(r) FROM runtime_runs r WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE", &[&run_id,&self.principal.workspace_id,&self.principal.user_id])
                 .await.map_err(|_| "database_unavailable")?.map(|r|r.get(0))
         } else {
             None
@@ -366,8 +461,8 @@ impl Queue {
             // Match scheduler order: source job -> source run -> child jobs.
             // Persist every child stop intent in this same transaction so an
             // API crash after acknowledgement cannot leave a child running.
-            let source_job: Option<Value> = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 AND request->>'kind'='explore' ORDER BY created_at,job_id LIMIT 1 FOR UPDATE",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.map(|row|row.get(0));
-            let run: Value = tx.query_opt("SELECT to_jsonb(r) FROM runtime_runs r WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.ok_or("run_not_found")?.get(0);
+            let source_job: Option<Value> = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 AND request->>'kind'='explore' ORDER BY created_at,job_id LIMIT 1 FOR UPDATE",&[&run_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.map(|row|row.get(0));
+            let run: Value = tx.query_opt("SELECT to_jsonb(r) FROM runtime_runs r WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&run_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("run_not_found")?.get(0);
             if source_job
                 .as_ref()
                 .is_none_or(|j| j["settings"]["autoReproduce"] != true)
@@ -391,13 +486,13 @@ impl Queue {
                 let seq: i64 = tx.query_one("UPDATE runtime_runs SET event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq",&[&run_id]).await.map_err(|_|"database_unavailable")?.get(0);
                 tx.execute("INSERT INTO runtime_events(event_id,run_id,seq,event_type,action_id,payload) VALUES($1,$2,$3,'auto_reproduction.skipped',$4,$5)",&[&Uuid::new_v4(),&run_id,&seq,&action_id,&json!({"task_id":task_id,"source_action_id":action_id,"reason":"user_cancelled","cancellation_id":cancellation_id})]).await.map_err(|_|"database_unavailable")?;
             }
-            let children=tx.query("SELECT j.job_id,j.run_id,j.cancel_id FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id JOIN browser_jobs p ON p.job_id=t.source_job_id WHERE t.source_run_id=$1 AND p.workspace_id=$2 AND p.user_id=$3 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=p.job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running') ORDER BY j.created_at,j.job_id FOR UPDATE OF j",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+            let children=tx.query("SELECT j.job_id,j.run_id,j.cancel_id FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id JOIN browser_jobs p ON p.job_id=t.source_job_id WHERE t.source_run_id=$1 AND p.workspace_id=$2 AND p.user_id=$3 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=p.job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running') ORDER BY j.created_at,j.job_id FOR UPDATE OF j",&[&run_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?;
             for child in children {
                 let child_id: Uuid = child.get(0);
                 let child_run_id: Option<Uuid> = child.get(1);
                 let job_cancel_id: Option<Uuid> = child.get(2);
                 let child_run = if let Some(id) = child_run_id {
-                    tx.query_opt("SELECT lifecycle,cancel_id FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?
+                    tx.query_opt("SELECT lifecycle,cancel_id FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?
                 } else {
                     None
                 };
@@ -423,7 +518,7 @@ impl Queue {
             (cancellation_id, existing.is_some())
         };
         let db = self.db.lock().await;
-        let remaining: i64 = db.query_one("SELECT count(*) FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id WHERE t.source_run_id=$1 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=t.source_job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running')",&[&run_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.get(0);
+        let remaining: i64 = db.query_one("SELECT count(*) FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id WHERE t.source_run_id=$1 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=t.source_job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running')",&[&run_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.get(0);
         Ok(
             json!({"cancellation_id":cancellation_id,"run_id":run_id,"status":if remaining>0{"cancelling"}else{"cancelled"},"reused":reused}),
         )
@@ -442,7 +537,8 @@ impl Queue {
                 }
             });
         Arc::new(Self {
-            db: Mutex::new(db),
+            db: Arc::new(Mutex::new(db)),
+            principal: crate::identity::Principal::default(),
             settings: json!({
                 "provider":provider,"model":model,"freeOnly":provider=="openrouter" && env::var("SCOUT_EXPLORER_FREE_ONLY").as_deref()!=Ok("false"),
                 "maxActions":env::var("SCOUT_EXPLORER_MAX_ACTIONS").ok().and_then(|s|s.parse::<u32>().ok()).filter(|n|(1..=12).contains(n)).unwrap_or(6),
@@ -471,29 +567,59 @@ impl Queue {
             .map_err(|_| "database_unavailable")?
         {
             let saved: Value = row.get(0);
-            if saved["workspace_id"] != WORKSPACE_ID.to_string()
-                || saved["user_id"] != USER_ID.to_string()
+            if saved["workspace_id"] != self.principal.workspace_id.to_string()
+                || saved["user_id"] != self.principal.user_id.to_string()
             {
                 return Err("job_id_conflict");
             }
             // Reconstruct against the original snapshot. A retry cannot adopt
             // new preferences or fail because the current model changed.
             let (request, _) = prepare_submission(&input, &saved["settings"])?;
-            if saved["request"] != request {
+            if saved["request"] != request
+                || saved["project_id"] != json!(input.project_id)
+                || saved["task_id"] != json!(input.task_id)
+            {
                 return Err("job_id_conflict");
             }
             return Ok(json!({"job":saved,"reused":true}));
         }
-        let latest=tx.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+        let latest=tx.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?;
         let (revision, saved) = latest
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
         let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
         let (request, settings) = prepare_submission(&input, &defaults)?;
+        let verification_source = if let Some(issue_id) = input.issue_id {
+            let row=tx.query_opt("SELECT to_jsonb(i),r.lifecycle,r.config,scout_issue_path(a.run_id,a.ordinal),a.state,a.assessment,a.tool_error FROM issues i JOIN runtime_runs r ON r.run_id=i.source_run_id JOIN runtime_actions a ON a.action_id=i.source_action_id AND a.run_id=r.run_id WHERE i.issue_id=$1 AND i.workspace_id=$2 AND i.user_id=$3",&[&issue_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("issue_not_found")?;
+            let issue: Value = row.get(0);
+            let lifecycle: String = row.get(1);
+            let config: Value = row.get(2);
+            let path: Value = row.get(3);
+            let action_state: String = row.get(4);
+            let assessment: Value = row.get(5);
+            let tool_error: Option<String> = row.get(6);
+            if lifecycle == "active"
+                || config["runtime_version"] != "explorer-v1"
+                || !config["replay_of"].is_null()
+                || !config["fix_verification"].is_null()
+                || action_state != "completed"
+                || assessment["verdict"] != "suspect"
+                || assessment["expectation_uncertain"] == true
+                || tool_error.is_some()
+            {
+                return Err("issue_source_not_verifiable");
+            }
+            if path.as_array().is_none_or(|p| p.is_empty() || p.len() > 24) {
+                return Err("issue_source_path_not_supported");
+            }
+            Some((issue, path, config))
+        } else {
+            None
+        };
         // Automatic and manual admission share this transaction lock, so the
         // same suspect cannot start two queued/running paid replays.
         if let Some(id) = input.source_action_id
-            && let Some(row) = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE workspace_id=$1 AND user_id=$2 AND request->>'kind'='reproduce' AND request->>'source_action_id'=$3 AND status IN ('queued','running') ORDER BY created_at,job_id LIMIT 1",&[&WORKSPACE_ID,&USER_ID,&id.to_string()]).await.map_err(|_|"database_unavailable")?
+            && let Some(row) = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE workspace_id=$1 AND user_id=$2 AND request->>'kind'='reproduce' AND request->>'source_action_id'=$3 AND status IN ('queued','running') ORDER BY created_at,job_id LIMIT 1",&[&self.principal.workspace_id,&self.principal.user_id,&id.to_string()]).await.map_err(|_|"database_unavailable")?
         {
             return Ok(json!({"job":row.get::<_,Value>(0),"reused":true}));
         }
@@ -506,8 +632,8 @@ impl Queue {
             return Err("provider_not_configured");
         }
         if let Some(id) = input.source_action_id
-            && tx.query_opt("SELECT 1 FROM runtime_actions a JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 AND r.lifecycle<>'active' AND a.state='completed' AND a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND COALESCE(r.config->>'replay_of','')=''", &[&id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.is_none() { return Err("source_is_not_an_eligible_suspect"); }
-        let count: i64 = tx.query_one("SELECT count(*) FROM browser_jobs WHERE workspace_id=$1 AND status IN ('queued','running')", &[&WORKSPACE_ID]).await.map_err(|_|"database_unavailable")?.get(0);
+            && tx.query_opt("SELECT 1 FROM runtime_actions a JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 AND r.lifecycle<>'active' AND a.state='completed' AND a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND COALESCE(r.config->>'replay_of','')=''", &[&id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.is_none() { return Err("source_is_not_an_eligible_suspect"); }
+        let count: i64 = tx.query_one("SELECT count(*) FROM browser_jobs WHERE workspace_id=$1 AND status IN ('queued','running')", &[&self.principal.workspace_id]).await.map_err(|_|"database_unavailable")?.get(0);
         if count >= 10 {
             return Err("browser_queue_full");
         }
@@ -516,23 +642,31 @@ impl Queue {
         } else {
             "live"
         };
+        if let Some((_, _, config)) = &verification_source
+            && config["execution_mode"] != mode
+        {
+            return Err("verification_execution_mode_mismatch");
+        }
         if let Some(id) = input.session_id {
             let origin =
                 reqwest::Url::parse(request["target_url"].as_str().ok_or("missing_target_url")?)
                     .map_err(|_| "invalid_target_url")?
                     .origin()
                     .ascii_serialization();
-            if tx.query_opt("SELECT 1 FROM browser_sessions WHERE session_id=$1 AND workspace_id=$2 AND user_id=$3 AND origin=$4 AND execution_mode=$5 AND revoked_at IS NULL AND expires_at>now()",&[&id,&WORKSPACE_ID,&USER_ID,&origin,&mode]).await.map_err(|_|"database_unavailable")?.is_none(){return Err("saved_session_unavailable");}
+            if tx.query_opt("SELECT 1 FROM browser_sessions WHERE session_id=$1 AND workspace_id=$2 AND user_id=$3 AND origin=$4 AND execution_mode=$5 AND revoked_at IS NULL AND expires_at>now()",&[&id,&self.principal.workspace_id,&self.principal.user_id,&origin,&mode]).await.map_err(|_|"database_unavailable")?.is_none(){return Err("saved_session_unavailable");}
         }
-        let row = tx.query_one("INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING to_jsonb(browser_jobs)", &[&input.job_id,&WORKSPACE_ID,&USER_ID,&request,&settings,&mode]).await.map_err(|_|"database_unavailable")?;
+        let row = tx.query_one("INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status,agent_id,project_id,task_id) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9) RETURNING to_jsonb(browser_jobs)", &[&input.job_id,&self.principal.workspace_id,&self.principal.user_id,&request,&settings,&mode,&self.principal.agent_id,&input.project_id,&input.task_id]).await.map_err(|_|"database_unavailable")?;
         let job: Value = row.get(0);
+        if let Some((issue, path, _)) = verification_source {
+            tx.execute("INSERT INTO issue_verifications(verification_id,issue_id,workspace_id,user_id,job_id,candidate_url,deployment_ref,source_snapshot) VALUES($1,$2,$3,$4,$1,$5,$6,$7)",&[&input.job_id,&input.issue_id.unwrap(),&self.principal.workspace_id,&self.principal.user_id,&request["target_url"].as_str().unwrap(),&request["deployment_ref"].as_str(),&json!({"issue":issue["snapshot"],"source_run_id":issue["source_run_id"],"source_action_id":issue["source_action_id"],"path":path})]).await.map_err(|_|"database_unavailable")?;
+        }
         tx.commit().await.map_err(|_| "database_unavailable")?;
         Ok(json!({"job":job,"reused":false}))
     }
 }
 
 pub async fn submit(
-    State(state): State<AppState>,
+    ScopedState(state): ScopedState,
     input: Result<Json<Submission>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let Some(queue) = &state.jobs else {
@@ -559,6 +693,7 @@ pub async fn submit(
         Err(code) => error(
             match code {
                 "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+                "issue_not_found" => StatusCode::NOT_FOUND,
                 "job_id_conflict" | "provider_not_configured" | "browser_queue_full" => {
                     StatusCode::CONFLICT
                 }
@@ -569,7 +704,7 @@ pub async fn submit(
     }
 }
 
-pub async fn list(State(state): State<AppState>) -> Response {
+pub async fn list(ScopedState(state): ScopedState) -> Response {
     let effective = match &state.jobs {
         Some(queue) => match queue.effective_settings().await {
             Ok(value) => value,
@@ -577,13 +712,13 @@ pub async fn list(State(state): State<AppState>) -> Response {
         },
         None => json!({"revision":0,"settings":{}}),
     };
-    match query(&state,"SELECT jsonb_build_object('jobs',COALESCE((SELECT jsonb_agg(to_jsonb(j) ORDER BY created_at DESC) FROM (SELECT * FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50) j),'[]'::jsonb),'workers',COALESCE((SELECT jsonb_agg(to_jsonb(w)||jsonb_build_object('available',status='online' AND heartbeat_at>now()-interval '20 seconds') ORDER BY started_at DESC) FROM (SELECT * FROM browser_workers WHERE workspace_id=$1 ORDER BY started_at DESC LIMIT 10) w),'[]'::jsonb))",&[&WORKSPACE_ID,&USER_ID]).await {
+    match query(&state,"SELECT jsonb_build_object('jobs',COALESCE((SELECT jsonb_agg(to_jsonb(j) ORDER BY created_at DESC) FROM (SELECT * FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50) j),'[]'::jsonb),'workers',COALESCE((SELECT jsonb_agg(to_jsonb(w)||jsonb_build_object('available',status='online' AND heartbeat_at>now()-interval '20 seconds') ORDER BY started_at DESC) FROM (SELECT * FROM browser_workers WHERE workspace_id=$1 OR workspace_id='00000000-0000-4000-8000-000000000001'::uuid ORDER BY started_at DESC LIMIT 10) w),'[]'::jsonb))",&[&state.principal.workspace_id,&state.principal.user_id]).await {
         Ok(Some(mut value))=>{value["settings"]=effective["settings"].clone();value["settings_revision"]=effective["revision"].clone();Json(value).into_response()},
         Ok(None)=>Json(json!({})).into_response(),Err(r)=>r,
     }
 }
 
-pub async fn exploration_settings(State(state): State<AppState>) -> Response {
+pub async fn exploration_settings(ScopedState(state): ScopedState) -> Response {
     let Some(queue) = &state.jobs else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
     };
@@ -593,8 +728,8 @@ pub async fn exploration_settings(State(state): State<AppState>) -> Response {
     }
 }
 
-pub async fn get_job(State(state): State<AppState>,Path(id): Path<Uuid>) -> Response {
-    match query(&state,"SELECT jsonb_build_object('job',to_jsonb(j)) FROM browser_jobs j WHERE j.job_id=$1 AND j.workspace_id=$2 AND j.user_id=$3",&[&id,&WORKSPACE_ID,&USER_ID]).await {
+pub async fn get_job(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
+    match query(&state,"SELECT jsonb_build_object('job',to_jsonb(j)) FROM browser_jobs j WHERE j.job_id=$1 AND j.workspace_id=$2 AND j.user_id=$3",&[&id,&state.principal.workspace_id,&state.principal.user_id]).await {
         Ok(Some(value))=>Json(value).into_response(),
         Ok(None)=>error(StatusCode::NOT_FOUND,"job_not_found"),
         Err(response)=>response,
@@ -602,7 +737,7 @@ pub async fn get_job(State(state): State<AppState>,Path(id): Path<Uuid>) -> Resp
 }
 
 pub async fn save_exploration_settings(
-    State(state): State<AppState>,
+    ScopedState(state): ScopedState,
     input: Result<Json<SettingsSubmission>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let Some(queue) = &state.jobs else {
@@ -656,14 +791,14 @@ async fn cancel_response(state: AppState, id: Uuid, by_run: bool) -> Response {
         ),
     }
 }
-pub async fn cancel_job(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+pub async fn cancel_job(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
     cancel_response(state, id, false).await
 }
-pub async fn cancel_run(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+pub async fn cancel_run(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
     cancel_response(state, id, true).await
 }
 
-pub async fn cancel_automatic(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
+pub async fn cancel_automatic(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
     let Some(queue) = &state.jobs else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
     };
@@ -803,22 +938,36 @@ mod tests {
         let raw = settings_input();
         let normalized = normalize_settings(raw.clone()).unwrap();
         let saved = json!({"request_id":normalized.request_id,"workspace_id":WORKSPACE_ID,"user_id":USER_ID,"revision":1,"expected_revision":0,"settings":normalized.settings});
-        assert!(settings_retry(&saved, &normalized).is_ok());
+        assert!(settings_retry(&saved, &normalized, WORKSPACE_ID, USER_ID).is_ok());
         // A later revision prevents a new write, but never invalidates an
         // identical UUID retry of the already committed revision.
         assert_eq!(
             next_settings_revision(0, 2).unwrap_err(),
             "revision_conflict"
         );
-        assert!(settings_retry(&saved, &normalized).is_ok());
+        assert!(settings_retry(&saved, &normalized, WORKSPACE_ID, USER_ID).is_ok());
         let mut trimmed = raw.clone();
         trimmed["model"] = json!("  openrouter/free  ");
-        assert!(settings_retry(&saved, &normalize_settings(trimmed).unwrap()).is_ok());
+        assert!(
+            settings_retry(
+                &saved,
+                &normalize_settings(trimmed).unwrap(),
+                WORKSPACE_ID,
+                USER_ID
+            )
+            .is_ok()
+        );
         for (key, value) in [("expected_revision", json!(1)), ("max_actions", json!(7))] {
             let mut changed = raw.clone();
             changed[key] = value;
             assert_eq!(
-                settings_retry(&saved, &normalize_settings(changed).unwrap()).unwrap_err(),
+                settings_retry(
+                    &saved,
+                    &normalize_settings(changed).unwrap(),
+                    WORKSPACE_ID,
+                    USER_ID
+                )
+                .unwrap_err(),
                 "settings_request_id_conflict"
             );
         }
@@ -826,7 +975,7 @@ mod tests {
             let mut foreign = saved.clone();
             foreign[key] = json!(Uuid::new_v4());
             assert_eq!(
-                settings_retry(&foreign, &normalized).unwrap_err(),
+                settings_retry(&foreign, &normalized, WORKSPACE_ID, USER_ID).unwrap_err(),
                 "settings_request_id_conflict"
             );
         }
@@ -937,6 +1086,33 @@ mod tests {
             "http://other:8082/",
         ] {
             assert!(target(value, &allowed).is_err());
+        }
+    }
+
+    #[test]
+    fn fix_verification_keeps_issue_candidate_and_label_in_request_identity() {
+        let base = json!({"job_id":Uuid::new_v4(),"kind":"verify_fix","issue_id":Uuid::new_v4(),"target_url":"http://app:8082/preview","deployment_ref":" Preview 42 "});
+        let (request, settings) =
+            prepare_submission(&submission(base.clone()), &defaults()).unwrap();
+        assert_eq!(request["issue_id"], base["issue_id"]);
+        assert_eq!(request["target_url"], "http://app:8082/preview");
+        assert_eq!(request["deployment_ref"], "Preview 42");
+        assert_eq!(settings["autoReproduce"], false);
+        for (key, value) in [
+            ("viewport_profile", json!("mobile")),
+            ("source_action_id", json!(Uuid::new_v4())),
+            ("auto_reproduce", json!(false)),
+            ("auth_mode", json!("sign_in")),
+            ("issue_id", json!(Uuid::nil())),
+            ("deployment_ref", json!("\n")),
+            ("target_url", json!("https://foreign.example/")),
+        ] {
+            let mut invalid = base.clone();
+            invalid[key] = value;
+            assert!(
+                prepare_submission(&submission(invalid), &defaults()).is_err(),
+                "{key}"
+            );
         }
     }
 }

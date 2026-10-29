@@ -1,9 +1,12 @@
 //! Append-only human review overlay. A reproduced model suspicion is never an
 //! automatic product verdict or approval to use the evidence for training.
-use crate::{AppState, WORKSPACE_ID, error, gateway::USER_ID};
+use crate::error;
+use crate::identity::ScopedState;
+#[cfg(test)]
+use crate::{AppState, WORKSPACE_ID, gateway::USER_ID};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -55,11 +58,11 @@ impl Submission {
         Ok(())
     }
 
-    fn matches(&self, saved: &Value, action_id: Uuid) -> bool {
+    fn matches(&self, saved: &Value, action_id: Uuid, workspace_id: Uuid, user_id: Uuid) -> bool {
         saved["action_id"] == action_id.to_string()
-            && saved["workspace_id"] == WORKSPACE_ID.to_string()
-            && saved["user_id"] == USER_ID.to_string()
-            && saved["reviewer_id"] == USER_ID.to_string()
+            && saved["workspace_id"] == workspace_id.to_string()
+            && saved["user_id"] == user_id.to_string()
+            && saved["reviewer_id"] == user_id.to_string()
             && saved["revision"].as_u64() == Some(u64::from(self.expected_revision) + 1)
             && saved["disposition"] == self.disposition
             && saved["rationale"] == self.rationale
@@ -158,7 +161,7 @@ fn artifact_refs(value: &Value, refs: &mut BTreeMap<Uuid, Value>) -> Result<(), 
     Ok(())
 }
 
-fn capture_ready(capture: &Value, action: &Value, phase: &str) -> bool {
+fn capture_ready(capture: &Value, action: &Value, phase: &str, workspace_id: Uuid) -> bool {
     capture["capture_id"] == action[format!("{phase}_capture_id")]
         && capture["run_id"] == action["run_id"]
         && capture["action_id"] == action["action_id"]
@@ -169,13 +172,13 @@ fn capture_ready(capture: &Value, action: &Value, phase: &str) -> bool {
         && capture["observation"]["observation_error"].is_null()
         && capture["object_key"].as_str().is_some_and(|key| {
             key == format!(
-                "workspace/{WORKSPACE_ID}/blobs/sha256/{}.png",
+                "workspace/{workspace_id}/blobs/sha256/{}.png",
                 capture["sha256"].as_str().unwrap_or("")
             )
         })
         && capture["metadata_key"]
             == format!(
-                "workspace/{WORKSPACE_ID}/captures/{}.json",
+                "workspace/{workspace_id}/captures/{}.json",
                 capture["capture_id"].as_str().unwrap_or("")
             )
         && hash(&capture["sha256"])
@@ -193,7 +196,11 @@ struct Evidence {
     captures: Vec<Value>,
 }
 
-async fn action_evidence(tx: &Transaction<'_>, action: &Value) -> Result<Evidence, &'static str> {
+async fn action_evidence(
+    tx: &Transaction<'_>,
+    action: &Value,
+    workspace_id: Uuid,
+) -> Result<Evidence, &'static str> {
     if !complete_action(action) {
         return Err("incomplete_evidence");
     }
@@ -225,8 +232,8 @@ async fn action_evidence(tx: &Transaction<'_>, action: &Value) -> Result<Evidenc
         .find(|c| c["phase"] == "after")
         .ok_or("incomplete_evidence")?;
     if captures.len() != 2
-        || !capture_ready(before, action, "before")
-        || !capture_ready(after, action, "after")
+        || !capture_ready(before, action, "before", workspace_id)
+        || !capture_ready(after, action, "after", workspace_id)
     {
         return Err("incomplete_evidence");
     }
@@ -265,7 +272,7 @@ async fn action_evidence(tx: &Transaction<'_>, action: &Value) -> Result<Evidenc
                 .iter()
                 .any(|field| artifact[field] != reference[field])
             || !artifact["object_key"].as_str().is_some_and(|key| {
-                key.starts_with(&format!("workspace/{WORKSPACE_ID}/blobs/sha256/"))
+                key.starts_with(&format!("workspace/{workspace_id}/blobs/sha256/"))
             })
         {
             return Err("incomplete_evidence");
@@ -397,8 +404,8 @@ async fn confirmation_evidence(
         {
             return Err("reproduction_required");
         }
-        let original = action_evidence(tx, &saved).await?;
-        let fresh = action_evidence(tx, &replay).await?;
+        let original = action_evidence(tx, &saved, id(&source_run["workspace_id"])?).await?;
+        let fresh = action_evidence(tx, &replay, id(&replay_run["workspace_id"])?).await?;
         if step["before_fingerprint"] != original.snapshot["state_fingerprints"]["before"]
             || step["after_fingerprint"] != original.snapshot["state_fingerprints"]["after"]
             || fresh.snapshot["state_fingerprints"]["before"]
@@ -515,6 +522,7 @@ impl Reviews {
     async fn save(
         &self,
         action_id: Uuid,
+        principal: &crate::identity::Principal,
         input: Submission,
         gateway: Option<&Arc<crate::gateway::Gateway>>,
     ) -> Result<Value, &'static str> {
@@ -537,13 +545,13 @@ impl Reviews {
             .map_err(|_| "database_unavailable")?
         {
             let saved: Value = row.get(0);
-            return if input.matches(&saved, action_id) {
+            return if input.matches(&saved, action_id, principal.workspace_id, principal.user_id) {
                 Ok(json!({"review":saved,"reused":true}))
             } else {
                 Err("review_id_conflict")
             };
         }
-        let row = tx.query_opt("SELECT to_jsonb(a),to_jsonb(r) FROM runtime_actions a JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 FOR UPDATE OF a,r", &[&action_id,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?.ok_or("action_not_found")?;
+        let row = tx.query_opt("SELECT to_jsonb(a),to_jsonb(r) FROM runtime_actions a JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 FOR UPDATE OF a,r", &[&action_id,&principal.workspace_id,&principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("action_not_found")?;
         let action: Value = row.get(0);
         let run: Value = row.get(1);
         if !source_eligible(&run, &action) {
@@ -560,8 +568,8 @@ impl Reviews {
         if revision as u32 != input.expected_revision {
             return Err("revision_conflict");
         }
-        let source = action_evidence(&tx, &action).await?;
-        let reproduction = tx.query_opt("SELECT to_jsonb(v),to_jsonb(r) FROM runtime_reproductions v JOIN runtime_runs r ON r.run_id=v.replay_run_id WHERE v.source_action_id=$1 AND v.source_run_id=$2 AND r.workspace_id=$3 AND r.user_id=$4", &[&action_id,&id(&run["run_id"])?,&WORKSPACE_ID,&USER_ID]).await.map_err(|_|"database_unavailable")?;
+        let source = action_evidence(&tx, &action, principal.workspace_id).await?;
+        let reproduction = tx.query_opt("SELECT to_jsonb(v),to_jsonb(r) FROM runtime_reproductions v JOIN runtime_runs r ON r.run_id=v.replay_run_id WHERE v.source_action_id=$1 AND v.source_run_id=$2 AND r.workspace_id=$3 AND r.user_id=$4", &[&action_id,&id(&run["run_id"])?,&principal.workspace_id,&principal.user_id]).await.map_err(|_|"database_unavailable")?;
         let (reproduction, replay_run): (Value, Value) = reproduction
             .map(|r| (r.get(0), r.get(1)))
             .unwrap_or((Value::Null, Value::Null));
@@ -585,7 +593,7 @@ impl Reviews {
             "storage_verified":input.disposition=="confirmed","training":training});
         let revision = revision + 1;
         let run_id = id(&run["run_id"])?;
-        let saved: Value = tx.query_one("INSERT INTO finding_reviews(review_id,action_id,run_id,workspace_id,user_id,reviewer_id,revision,disposition,rationale,expectation_basis,severity,evidence_snapshot) VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11) RETURNING to_jsonb(finding_reviews)", &[&input.review_id,&action_id,&run_id,&WORKSPACE_ID,&USER_ID,&revision,&input.disposition,&input.rationale,&input.expectation_basis,&input.severity,&snapshot]).await.map_err(|_|"database_unavailable")?.get(0);
+        let saved: Value = tx.query_one("INSERT INTO finding_reviews(review_id,action_id,run_id,workspace_id,user_id,reviewer_id,revision,disposition,rationale,expectation_basis,severity,evidence_snapshot) VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11) RETURNING to_jsonb(finding_reviews)", &[&input.review_id,&action_id,&run_id,&principal.workspace_id,&principal.user_id,&revision,&input.disposition,&input.rationale,&input.expectation_basis,&input.severity,&snapshot]).await.map_err(|_|"database_unavailable")?.get(0);
         let sequence: i64 = tx
             .query_one(
                 "UPDATE runtime_runs SET event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq",
@@ -594,7 +602,7 @@ impl Reviews {
             .await
             .map_err(|_| "database_unavailable")?
             .get(0);
-        let event = json!({"actor":"human","reviewer_id":USER_ID,"review_id":input.review_id,"action_id":action_id,"revision":revision,"disposition":input.disposition,"review":saved,"training":training});
+        let event = json!({"actor":"human","reviewer_id":principal.user_id,"review_id":input.review_id,"action_id":action_id,"revision":revision,"disposition":input.disposition,"review":saved,"training":training});
         tx.execute("INSERT INTO runtime_events(event_id,run_id,seq,event_type,action_id,payload) VALUES($1,$2,$3,'finding.reviewed',$4,$5)", &[&Uuid::new_v4(),&run_id,&sequence,&action_id,&event]).await.map_err(|_|"database_unavailable")?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
         Ok(json!({"review":saved,"reused":false}))
@@ -602,7 +610,7 @@ impl Reviews {
 }
 
 pub async fn submit(
-    State(state): State<AppState>,
+    ScopedState(state): ScopedState,
     Path(action_id): Path<Uuid>,
     input: Result<Json<Submission>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
@@ -615,7 +623,10 @@ pub async fn submit(
     let Some(reviews) = &state.reviews else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "reviews_unavailable");
     };
-    match reviews.save(action_id, input, state.gateway.as_ref()).await {
+    match reviews
+        .save(action_id, &state.principal, input, state.gateway.as_ref())
+        .await
+    {
         Ok(value) => (
             if value["reused"] == true {
                 StatusCode::OK
@@ -705,8 +716,8 @@ mod tests {
         let input = submission();
         let action_id = Uuid::new_v4();
         let saved = json!({"action_id":action_id,"workspace_id":WORKSPACE_ID,"user_id":USER_ID,"reviewer_id":USER_ID,"revision":1,"disposition":input.disposition,"rationale":input.rationale,"expectation_basis":input.expectation_basis,"severity":input.severity});
-        assert!(input.matches(&saved, action_id));
-        assert!(!input.matches(&saved, Uuid::new_v4()));
+        assert!(input.matches(&saved, action_id, WORKSPACE_ID, USER_ID));
+        assert!(!input.matches(&saved, Uuid::new_v4(), WORKSPACE_ID, USER_ID));
         for field in [
             "user_id",
             "reviewer_id",
@@ -719,7 +730,10 @@ mod tests {
         ] {
             let mut changed = saved.clone();
             changed[field] = json!("changed");
-            assert!(!input.matches(&changed, action_id), "{field}");
+            assert!(
+                !input.matches(&changed, action_id, WORKSPACE_ID, USER_ID),
+                "{field}"
+            );
         }
     }
     #[test]

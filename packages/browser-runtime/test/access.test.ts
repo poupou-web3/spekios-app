@@ -17,6 +17,9 @@ test('app sessions are encrypted and bound to their origin, mode and immutable I
   assert.ok(!bytes.includes(Buffer.from('private-marker')));
   assert.deepEqual(openSession(bytes,scope,key),state);
   for(const altered of [{...scope,origin:'https://other.test'},{...scope,session_id:randomUUID()},{...scope,execution_mode:'protocol_fixture'}])assert.throws(()=>openSession(bytes,altered,key));
+  const owned={...scope,workspace_id:randomUUID(),user_id:randomUUID()};
+  const ownedBytes=sealSession(state,owned,key);assert.deepEqual(openSession(ownedBytes,owned,key),state);
+  for(const altered of [{...owned,workspace_id:randomUUID()},{...owned,user_id:randomUUID()}])assert.throws(()=>openSession(ownedBytes,altered,key));
   const tampered=Buffer.from(bytes);tampered[tampered.length-1]^=1;assert.throws(()=>openSession(tampered,scope,key));
 });
 test('human input is bounded and cannot carry scripts, URLs or arbitrary keys',()=>{

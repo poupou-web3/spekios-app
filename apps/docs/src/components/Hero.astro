@@ -1,0 +1,33 @@
+---
+import DefaultHero from '@astrojs/starlight/components/Hero.astro';
+import { settings } from '../../scripts/site.mjs';
+---
+<div class="home-intro">
+  <div class="home-copy">
+    <p class="eyebrow">SCOUTQA / DOCUMENTATION</p>
+    <DefaultHero />
+    <p class="home-note">A local QA explorer for your web app. Start with a URL.</p>
+  </div>
+  <aside class="finding-preview" aria-label="Illustrative finding report">
+    <div class="preview-top"><span class="preview-dot"></span> EXAMPLE FINDING <span class="preview-tag">Needs review</span></div>
+    <div class="preview-body">
+      <p class="preview-route">/settings → Save draft</p>
+      <h2>The button clicked.<br />The draft didn’t save.</h2>
+      <div class="preview-results">
+        <div><span>EXPECTED</span><p>Status changes to “Saved”</p></div>
+        <div><span>OBSERVED</span><p>Status remains “Ready”</p></div>
+      </div>
+      <div class="preview-evidence"><span>Before / after</span><span>Recorded path</span><span>Diagnostics</span></div>
+      <p class="preview-caption">Illustrative report. A suspicion needs evidence and review.</p>
+    </div>
+  </aside>
+</div>
+<div class="workflow-strip" aria-label="Scout workflow">
+  <a href={settings.href('getting-started/first-run/')}><span>01</span>Submit a URL</a>
+  <span class="flow-arrow" aria-hidden="true">→</span>
+  <a href={settings.href('product/exploration/')}><span>02</span>Explore likely paths</a>
+  <span class="flow-arrow" aria-hidden="true">→</span>
+  <a href={settings.href('agents/findings/')}><span>03</span>Inspect the evidence</a>
+  <span class="flow-arrow" aria-hidden="true">→</span>
+  <a href={settings.href('agents/workflow/')}><span>04</span>Fix & run again</a>
+</div>

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Store } from './store.js';
-import { workspaceId, userId } from './contracts.js';
+
 import { loadReplay } from './reproduction.js';
 import { COMPLETION_VERSION } from './action-outcome.js';
 
@@ -31,8 +31,8 @@ export class AutomaticReproductionScheduler {
   constructor(private store:Store){}
   private async source(sourceRunId:string) {
     return (await this.store.query(`SELECT r.*,j.job_id AS source_job_id,j.request,j.settings,j.execution_mode,j.status AS job_status,
-      j.cancel_id AS job_cancel_id FROM runtime_runs r JOIN browser_jobs j ON j.run_id=r.run_id
-      WHERE r.run_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 AND j.parent_job_id IS NULL`,[sourceRunId,workspaceId,userId])).rows[0];
+      j.cancel_id AS job_cancel_id,j.agent_id,j.project_id,j.task_id FROM runtime_runs r JOIN browser_jobs j ON j.run_id=r.run_id
+      WHERE r.run_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 AND j.parent_job_id IS NULL`,[sourceRunId,this.store.workspaceId,this.store.userId])).rows[0];
   }
   private enabled(source:any) {
     return source&&source.lifecycle==='completed'&&source.job_status==='completed'&&!source.cancel_id&&!source.job_cancel_id&&!source.auto_reproduction_cancel_id&&
@@ -53,7 +53,7 @@ export class AutomaticReproductionScheduler {
   private async existingAttempt(sourceActionId:string,ignoreJobId?:string) {
     return !!(await this.store.query(`SELECT 1 WHERE EXISTS(SELECT 1 FROM runtime_reproductions WHERE source_action_id=$1)
       OR EXISTS(SELECT 1 FROM browser_jobs WHERE workspace_id=$2 AND user_id=$3 AND request->>'kind'='reproduce'
-        AND request->>'source_action_id'=$1::text AND ($4::uuid IS NULL OR job_id<>$4))`,[sourceActionId,workspaceId,userId,ignoreJobId??null])).rowCount;
+        AND request->>'source_action_id'=$1::text AND ($4::uuid IS NULL OR job_id<>$4))`,[sourceActionId,this.store.workspaceId,this.store.userId,ignoreJobId??null])).rowCount;
   }
   private async preflight(source:any,sourceActionId:string,ignoreJobId?:string):Promise<{reason:string|null;actions:number}> {
     if(!this.enabled(source))return {reason:'source_unavailable',actions:0};
@@ -82,7 +82,7 @@ export class AutomaticReproductionScheduler {
     if(authContext){
       const sessionId=authContext.session_id;
       if(!sessionId||!(await this.store.query(`SELECT 1 FROM browser_sessions WHERE session_id=$1 AND workspace_id=$2 AND user_id=$3
-        AND origin=$4 AND execution_mode=$5 AND revoked_at IS NULL AND expires_at>now()`,[sessionId,workspaceId,userId,origin,source.execution_mode])).rowCount)
+        AND origin=$4 AND execution_mode=$5 AND revoked_at IS NULL AND expires_at>now()`,[sessionId,this.store.workspaceId,this.store.userId,origin,source.execution_mode])).rowCount)
         return {reason:'session_unavailable',actions:0};
     }
     // Replay loads immutable metadata and verifies every screenshot checksum. It
@@ -100,7 +100,7 @@ export class AutomaticReproductionScheduler {
         AND j.request->>'kind'='explore' AND j.settings->'autoReproduce'='true'::jsonb
         AND r.config->>'runtime_version'='explorer-v1' AND r.config->'replay_of'='null'::jsonb
         AND r.config->'automatic_reproduction_policy'->'enabled'='true'::jsonb
-      ORDER BY j.finished_at,j.job_id LIMIT 1`,[workspaceId,userId])).rows[0];
+      ORDER BY j.finished_at,j.job_id LIMIT 1`,[this.store.workspaceId,this.store.userId])).rows[0];
     if(!source)return;
     const original=await this.source(source.run_id);
     if(!this.enabled(original))return;
@@ -130,7 +130,7 @@ export class AutomaticReproductionScheduler {
   async enqueuePending(gateway:GatewayStatus|null) {
     const pending=(await this.store.query(`SELECT t.* FROM automatic_reproduction_tasks t JOIN runtime_runs r ON r.run_id=t.source_run_id JOIN browser_jobs p ON p.job_id=t.source_job_id
       WHERE t.status='pending' AND r.workspace_id=$1 AND r.user_id=$2
-      ORDER BY CASE WHEN p.execution_mode=$3 AND p.settings->>'provider'=ANY($4::text[]) THEN 0 ELSE 1 END,t.updated_at,t.task_id LIMIT 3`,[workspaceId,userId,gateway?.executionMode??null,gateway?.configuredProviders??[]])).rows;
+      ORDER BY CASE WHEN p.execution_mode=$3 AND p.settings->>'provider'=ANY($4::text[]) THEN 0 ELSE 1 END,t.updated_at,t.task_id LIMIT 3`,[this.store.workspaceId,this.store.userId,gateway?.executionMode??null,gateway?.configuredProviders??[]])).rows;
     for(const task of pending){
       const source=await this.source(task.source_run_id);
       const preflight=await this.preflight(source,task.source_action_id);
@@ -147,12 +147,12 @@ export class AutomaticReproductionScheduler {
         if(reason==='evidence_unavailable'){await this.decision(locked,'pending',reason);return;}
         if(reason){await this.decision(locked,'skipped',reason);return;}
         if(!providerAvailable(current,gateway)){await this.decision(locked,'pending','provider_unavailable');return;}
-        const queued=Number((await this.store.query("SELECT count(*) FROM browser_jobs WHERE workspace_id=$1 AND status IN ('queued','running')",[workspaceId])).rows[0].count);
+        const queued=Number((await this.store.query("SELECT count(*) FROM browser_jobs WHERE workspace_id=$1 AND status IN ('queued','running')",[this.store.workspaceId])).rows[0].count);
         if(queued>=10){await this.decision(locked,'pending','queue_capacity');return;}
         const childId=randomUUID(),request={kind:'reproduce',source_action_id:task.source_action_id};
         const settings={...current.settings,autoReproduce:false};
-        await this.store.query(`INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status,parent_job_id,automatic_source_action_id)
-          VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8)`,[childId,workspaceId,userId,JSON.stringify(request),JSON.stringify(settings),current.execution_mode,task.source_job_id,task.source_action_id]);
+        await this.store.query(`INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status,parent_job_id,automatic_source_action_id,agent_id,project_id,task_id)
+          VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11)`,[childId,this.store.workspaceId,this.store.userId,JSON.stringify(request),JSON.stringify(settings),current.execution_mode,task.source_job_id,task.source_action_id,current.agent_id??null,current.project_id??null,current.task_id??null]);
         await this.decision(locked,'queued','scheduled',childId);
       });
     }

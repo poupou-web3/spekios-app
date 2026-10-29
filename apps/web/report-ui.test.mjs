@@ -1,6 +1,6 @@
+import {uiSource} from './test-support/source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const runId='00000000-0000-4000-8000-000000000001';
 function ui(tools={}){
@@ -8,7 +8,7 @@ function ui(tools={}){
   const document={querySelector(){return node;},getElementById(){return null;},createElement(){const anchor={click(){downloads.push({filename:this.download,url:this.href});}};return anchor;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   class TestURL extends URL{static createObjectURL(blob){blobs.push(blob);return 'blob:download';}static revokeObjectURL(){}}
   const sandbox={document,window:{addEventListener(){}},location:{hash:'#/workspace'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},URL:TestURL,Blob,AbortController,AbortSignal,DOMException,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000090'},setInterval(){},setTimeout(){},clearTimeout(){}};
-  vm.createContext(sandbox);vm.runInContext(readFileSync(new URL('./app.js',import.meta.url),'utf8')+'\nglobalThis.testing={state,drawer,openReportExport,closeReportExport,downloadReport,exportView,tools:value=>reportToolsPromise=Promise.resolve(value)};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(uiSource('app.js')+'\nglobalThis.testing={state,drawer,openReportExport,closeReportExport,downloadReport,exportView,tools:value=>reportToolsPromise=Promise.resolve(value)};',sandbox);
   const result=sandbox.testing;result.tools(tools);Object.assign(result.state,{connected:true,developmentAccess:true,report:{run:{run_id:runId,lifecycle:'completed',target_url:'https://fixture.test'},actions:[],captures:[],artifacts:[],events:[]}});return {...result,downloads,blobs,handlers,documentHandlers,node};
 }
 test('export drawer pins a snapshot and explains selected-run scope, integrity and training limits',()=>{

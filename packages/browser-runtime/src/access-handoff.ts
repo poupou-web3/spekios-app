@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Page } from 'playwright';
 import type { Store } from './store.js';
-import { isUuid, workspaceId, userId } from './contracts.js';
+import { isUuid } from './contracts.js';
 import { AuthVault } from './auth-session.js';
 import { accessSignals, AccessStopped } from './access-detection.js';
 
@@ -40,7 +40,7 @@ export class AccessHandoff {
         let body=Buffer.alloc(0);for await(const chunk of req){body=Buffer.concat([body,chunk]);if(body.length>8192)throw new Error('invalid_input');}
         const value=body.length?JSON.parse(body.toString()):{};
         const response=await this.serial(async()=>{
-          if(match[1]==='sessions'&&match[3]==='revoke')return this.vault.revoke(match[2]).then(ok=>{if(!ok)throw new Error('not_found');return {revoked:true};});
+          if(match[1]==='sessions'&&match[3]==='revoke'){const row=(await this.store.pool.query('SELECT workspace_id,user_id FROM browser_sessions WHERE session_id=$1',[match[2]])).rows[0];if(!row)throw new Error('not_found');return this.store.withScope({workspaceId:row.workspace_id,userId:row.user_id},()=>this.vault.revoke(match[2])).then(ok=>{if(!ok)throw new Error('not_found');return {revoked:true};});}
           if(match[1]!=='access')throw new Error('not_found');
           return this.control(match[2],match[3],value,String(req.headers['x-scout-access-lease']??''));
         });
@@ -65,7 +65,7 @@ export class AccessHandoff {
     const baseline=createHash('sha256').update(JSON.stringify(await page.context().storageState())).digest('hex');
     await this.store.transaction(async()=>{
       await this.store.query(`INSERT INTO browser_access_requests(access_id,run_id,job_id,workspace_id,user_id,origin,reason,status,expires_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'waiting',now()+($8::int * interval '1 millisecond'))`,[id,runId,jobId??null,workspaceId,userId,origin,reason,timeoutMs]);
+        VALUES($1,$2,$3,$4,$5,$6,$7,'waiting',now()+($8::int * interval '1 millisecond'))`,[id,runId,jobId??null,this.store.workspaceId,this.store.userId,origin,reason,timeoutMs]);
       await this.store.event(runId,'access.requested',{access_id:id,origin,reason,private_observation:true});
     });
     return new Promise<AccessResult>((resolve,reject)=>{

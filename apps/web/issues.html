@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f4f6ef">
+  <title>Issues & fix verification · ScoutQA</title>
+  <link rel="stylesheet" href="/assets/app.css"><script type="module" src="/assets/issues.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<main id="main-content" class="content issue-page" tabindex="-1">
+  <header class="connection-top"><a class="brand" href="/">scout <small>ISSUES & FIX VERIFICATION</small></a><div class="row"><a class="button quiet" href="/connect">Connect your agent</a><a class="button" href="/">← Workspace</a></div></header>
+  <div class="issue-heading"><p class="eyebrow">FROM FINDING TO VERIFIED BEHAVIOR</p><h1>Follow the fix.</h1><p>One issue ID. The original expectation. Every candidate check, with its own evidence.</p></div>
+  <p id="issue-status" role="status" aria-live="polite"></p>
+  <section id="issue-login" class="panel connection-signin" hidden><h2>Open your workspace</h2><form id="issue-login-form" class="login-card"><label for="issue-token">Workspace access token</label><input id="issue-token" type="password" autocomplete="off" required minlength="32"><button class="button primary">Open workspace</button></form></section>
+  <div id="issue-workspace" class="issue-layout" hidden>
+    <aside class="issue-index panel" aria-label="Workspace issues"><div class="issue-index-heading"><h2>Issues</h2><span id="issue-total" class="pill"></span></div>
+      <form id="issue-filter"><label class="sr-only" for="issue-query">Search issues</label><input id="issue-query" type="search" placeholder="Search title or URL…" maxlength="200"><label class="sr-only" for="issue-outcome">Latest candidate outcome</label><select id="issue-outcome"><option value="">All candidate outcomes</option><option value="unverified">Not checked yet</option><option value="running">Queued / running</option><option value="resolved">Resolved on candidate</option><option value="still_reproducible">Still reproducible</option><option value="blocked">Blocked</option><option value="inconclusive">Inconclusive</option></select><button class="button">Search</button></form>
+      <div id="issue-list"></div><div class="row issue-pagination"><button id="issue-prev" class="button" disabled>Previous</button><button id="issue-next" class="button" disabled>Next</button></div>
+    </aside>
+    <div class="issue-main">
+      <section id="issue-empty" class="panel issue-empty"><h2>Give every finding a history.</h2><p>Choose an issue to see what Scout expected, what happened and how a candidate deployment behaves.</p><a class="button primary" href="/">Explore an app</a></section>
+      <div id="issue-detail" hidden>
+        <section id="issue-original" class="panel"></section>
+        <section class="panel issue-verification-form" aria-labelledby="verify-title"><p class="eyebrow">FRESH BROWSER CHECK</p><h2 id="verify-title">Verify a candidate fix</h2><p class="small muted">Scout follows the recorded path and checks the original expectation. Each check uses model calls and can change your test app.</p>
+          <form id="verify-form"><label for="candidate-url">Candidate deployment URL</label><input id="candidate-url" type="url" required maxlength="2048" placeholder="https://preview.your-app.com/recorded-page"><label for="deployment-ref">Deployment label <span class="muted">(optional)</span></label><input id="deployment-ref" maxlength="200" placeholder="Preview #42 / commit label"><label for="candidate-session">App access</label><select id="candidate-session"><option value="">Public access / matching saved source session</option></select><p class="small muted">For a protected candidate, sign in during an exploration in the <a href="/">workspace</a> and save the app session. Then select that candidate’s session here.</p><button id="refresh-sessions" type="button" class="button quiet">Refresh saved sessions</button><p id="verify-error" role="alert"></p><div class="row"><button id="verify-submit" class="button primary">Verify fix</button><button id="verify-new" class="button" type="button" hidden>Start a different check</button></div><p id="verify-receipt" class="small muted" role="status"></p></form>
+        </section>
+        <section class="panel"><div class="issue-section-heading"><div><p class="eyebrow">CANDIDATE HISTORY</p><h2>Checks & evidence</h2></div><button id="issue-refresh" class="button">Refresh</button></div><p class="small muted">Resolved means the recorded expected behavior was observed on that candidate. It does not confirm a production fix or complete app coverage.</p><div id="verification-list"></div><div id="candidate-evidence"></div><button id="history-more" class="button" hidden>Load more history</button></section>
+        <section class="panel"><h2>Issue activity</h2><div id="issue-events"></div></section>
+      </div>
+    </div>
+  </div>
+</main>
+</body></html>

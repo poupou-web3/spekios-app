@@ -1,6 +1,6 @@
+import {uiSource} from './test-support/source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
 const defaults={provider:'openrouter',model:'openrouter/free',maxActions:6,viewportProfile:'desktop',freeOnly:true,autoReproduce:false,maxAutoReproductions:2,maxAutoReplayActions:12,allowedOrigins:['https://app.test']};
@@ -8,7 +8,7 @@ const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
   const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/operations'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
-  vm.createContext(sandbox);vm.runInContext(readFileSync(new URL('./app.js',import.meta.url),'utf8')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,updateConfiguration,rebaseConfiguration,applyConfiguration,configurationView,saveConfiguration,navigateAction};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(uiSource('app.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,updateConfiguration,rebaseConfiguration,applyConfiguration,configurationView,saveConfiguration,navigateAction};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'operations',opsTab:'connections'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));

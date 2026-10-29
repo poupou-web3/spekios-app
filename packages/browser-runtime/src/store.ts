@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import pg from 'pg';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,6 +9,8 @@ import { workspaceId, userId, isUuid, type Capture, type Observation } from './c
 export const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const jsonBytes = (data: unknown) => Buffer.from(JSON.stringify(data, null, 2) + '\n');
 const required = (name: string) => { const value = process.env[name]; if (!value) throw new Error(`Missing ${name}`); return value; };
+const clickhouseTimestamp = (date: Date) => date.toISOString().replace('T', ' ').replace('Z', '');
+type OutboxTable = 'runtime_events' | 'identity_audit' | 'issue_events';
 
 async function durableFile(file: string, bytes: Buffer) {
   await mkdir(join(file, '..'), { recursive: true, mode: 0o700 });
@@ -21,7 +24,18 @@ async function durableFile(file: string, bytes: Buffer) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
+export type OwnerScope = { workspaceId: string; userId: string; agentId?: string|null; projectId?:string|null; taskId?:string|null };
 export class Store {
+  private readonly owner = new AsyncLocalStorage<OwnerScope>();
+  get workspaceId(){return this.owner.getStore()?.workspaceId??workspaceId;}
+  get userId(){return this.owner.getStore()?.userId??userId;}
+  get submittedByAgentId(){return this.owner.getStore()?.agentId??null;}
+  get projectId(){return this.owner.getStore()?.projectId??null;}
+  get taskId(){return this.owner.getStore()?.taskId??null;}
+  withScope<T>(scope:OwnerScope, body:()=>Promise<T>):Promise<T>{
+    if(!isUuid(scope.workspaceId)||!isUuid(scope.userId))throw new Error('Invalid workspace scope.');
+    return this.owner.run(scope,body);
+  }
   readonly pool = new pg.Pool({ host: process.env.PGHOST ?? 'postgres', user: 'scout', database: 'scout',
     password: required('POSTGRES_PASSWORD'), max: 4, connectionTimeoutMillis: 5000, statement_timeout: 15000 });
   readonly s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT ?? 'http://evidence:8333', region: 'us-east-1',
@@ -60,7 +74,7 @@ export class Store {
     catch (error) { if ((error as { $metadata?: { httpStatusCode: number } }).$metadata?.httpStatusCode !== 412) throw error; }
     if (hash(await this.get(key)) !== hash(bytes)) throw new Error('Uploaded evidence failed checksum verification.');
   }
-  blobKey(sha: string, extension: string) { return `workspace/${workspaceId}/blobs/sha256/${sha}.${extension}`; }
+  blobKey(sha: string, extension: string) { return `workspace/${this.workspaceId}/blobs/sha256/${sha}.${extension}`; }
   async artifact(runId: string, kind: string, bytes: Buffer, extension: 'png' | 'json') {
     const id = randomUUID(), sha = hash(bytes), key = this.blobKey(sha, extension);
     await durableFile(join(this.spool, runId, 'blobs', sha), bytes);
@@ -81,7 +95,7 @@ export class Store {
     const sha = hash(bytes);
     const runConfig = classification ?? (await this.query('SELECT config FROM runtime_runs WHERE run_id=$1', [runId])).rows[0].config;
     const capture: Capture = { schema_version: 1, capture_id: captureId, run_id: runId, action_id: actionId, phase,
-      sha256: sha, object_key: this.blobKey(sha, 'png'), metadata_key: `workspace/${workspaceId}/captures/${captureId}.json`,
+      sha256: sha, object_key: this.blobKey(sha, 'png'), metadata_key: `workspace/${this.workspaceId}/captures/${captureId}.json`,
       byte_length: bytes.length, observation, purpose: runConfig.purpose === 'exploration' ? 'exploration' : 'runtime_validation',
       training_status: runConfig.training_status === 'unreviewed' ? 'unreviewed' : 'excluded_fixture' };
     await durableFile(join(this.spool, runId, 'blobs', sha), bytes);
@@ -98,7 +112,7 @@ export class Store {
   }
   async captureBytes(captureId: string) {
     if (!isUuid(captureId)) throw new Error('Invalid capture ID.');
-    const { rows } = await this.query('SELECT c.* FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE c.capture_id=$1 AND r.workspace_id=$2', [captureId, workspaceId]);
+    const { rows } = await this.query('SELECT c.* FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE c.capture_id=$1 AND r.workspace_id=$2', [captureId, this.workspaceId]);
     const capture = rows[0];
     if (!capture || capture.status !== 'available') throw new Error('Capture is not available in this workspace.');
     const bytes = await this.get(capture.object_key);
@@ -107,7 +121,7 @@ export class Store {
   }
   async report(runId: string) {
     if (!isUuid(runId)) throw new Error('Invalid run ID.');
-    const run = (await this.query('SELECT * FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2', [runId, workspaceId])).rows[0];
+    const run = (await this.query('SELECT * FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2', [runId, this.workspaceId])).rows[0];
     if (!run) throw new Error('Run not found in this workspace.');
     const actions = (await this.query('SELECT * FROM runtime_actions WHERE run_id=$1 ORDER BY ordinal', [runId])).rows;
     const captures = (await this.query('SELECT * FROM runtime_captures WHERE run_id=$1 ORDER BY created_at,capture_id', [runId])).rows;
@@ -137,7 +151,10 @@ export class Store {
       FROM automatic_reproduction_tasks t LEFT JOIN browser_jobs j ON j.job_id=t.child_job_id
       LEFT JOIN runtime_reproductions v ON v.source_action_id=t.source_action_id
       WHERE t.source_run_id=$1 OR j.run_id=$1 ORDER BY t.created_at,t.task_id`,[runId])).rows.map(row=>row.item);
-    return { schema_version: 1, run, actions, captures, artifacts, events, graph, reproductions,automatic_reproductions:automaticReproductions,
+    const persistentIssues=(await this.query('SELECT to_jsonb(o)||jsonb_build_object(\'title\',i.snapshot->>\'title\') AS item FROM issue_occurrences o JOIN issues i USING(issue_id,workspace_id) WHERE o.run_id=$1',[runId])).rows.map(r=>r.item);
+    const fixVerification=(await this.query('SELECT scout_verification_summary(v) AS item FROM issue_verifications v WHERE run_id=$1 AND workspace_id=$2',[runId,this.workspaceId])).rows[0]?.item??null;
+    const steering=(await this.query('SELECT scout_steering_snapshot($1,0,32) AS item',[runId])).rows[0].item;
+    return { schema_version: 1, steering, persistent_issues:persistentIssues,fix_verification:fixVerification, run, actions, captures, artifacts, events, graph, reproductions,automatic_reproductions:automaticReproductions,
       finding_reviews:findingReviews, model_requests: modelRequests, model_calls: modelCalls, model_payloads: modelPayloads, model_usage: modelUsage };
   }
   async publish(runId: string) {
@@ -162,12 +179,29 @@ export class Store {
       const { rows } = await this.query('SELECT e.*,r.workspace_id,r.user_id FROM runtime_events e JOIN runtime_runs r USING(run_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at,e.seq LIMIT 100');
       if (!rows.length) return exported;
       const events = rows.map(e => ({ event_id: e.event_id, workspace_id: e.workspace_id, user_id: e.user_id, run_id: e.run_id,
-        seq: e.seq, event_type: e.event_type, action_id: e.action_id, occurred_at: (e.occurred_at as Date).toISOString().replace('T', ' ').replace('Z', ''), payload: JSON.stringify(e.payload) }));
-      await exportBatch('INSERT INTO scout.runtime_events FORMAT JSONEachRow\n' + events.map(e => JSON.stringify(e)).join('\n'));
-      await this.query('UPDATE runtime_events SET exported_at=now() WHERE event_id=ANY($1::uuid[])', [rows.map(e => e.event_id)]);
-      exported += rows.length;
+        seq: e.seq, event_type: e.event_type, action_id: e.action_id, occurred_at: clickhouseTimestamp(e.occurred_at), payload: JSON.stringify(e.payload) }));
+      exported += await this.deliverOutbox('runtime_events', rows, events, exportBatch);
     }
     return exported;
+  }
+  async flushIdentity() {
+    const {rows}=await this.query('SELECT event_id,workspace_id,agent_id,credential_id,operation,outcome,occurred_at,request_id FROM identity_audit WHERE exported_at IS NULL ORDER BY occurred_at,event_id LIMIT 100');
+    const events=rows.map(e=>({...e,occurred_at:clickhouseTimestamp(e.occurred_at)}));
+    return this.deliverOutbox('identity_audit', rows, events);
+  }
+  async flushIssues() {
+    const rows=(await this.query('SELECT * FROM issue_events WHERE exported_at IS NULL ORDER BY occurred_at,event_id LIMIT 100')).rows;
+    const events=rows.map(e=>({event_id:e.event_id,workspace_id:e.workspace_id,issue_id:e.issue_id,seq:Number(e.seq),event_type:e.event_type,occurred_at:clickhouseTimestamp(e.occurred_at),payload:JSON.stringify(e.payload)}));
+    return this.deliverOutbox('issue_events', rows, events);
+  }
+  private async deliverOutbox(table: OutboxTable, rows: {event_id: string}[], events: unknown[],
+    exportBatch: (query: string) => Promise<unknown> = query => this.clickhouse(query)) {
+    if (!rows.length) return 0;
+    // Table names are a closed internal union. Acknowledge only after durable
+    // delivery; a lost acknowledgement retries the same immutable event IDs.
+    await exportBatch(`INSERT INTO scout.${table} FORMAT JSONEachRow\n` + events.map(e => JSON.stringify(e)).join('\n'));
+    await this.query(`UPDATE ${table} SET exported_at=now() WHERE event_id=ANY($1::uuid[])`, [rows.map(e => e.event_id)]);
+    return rows.length;
   }
   async recover(runId: string) {
     return this.exclusive(async () => {
@@ -209,6 +243,7 @@ export class Store {
           result='{"outcome":"inconclusive","confirmed_bug":false,"reason":"Replay was interrupted; no browser action was repeated."}'::jsonb
           WHERE replay_run_id=$1 AND status='active' RETURNING reproduction_id`, [runId])).rows;
         for (const reproduction of reproductions) await this.event(runId, 'reproduction.interrupted', reproduction);
+        await this.query("UPDATE issue_verifications SET status='completed',outcome='inconclusive',result=$2,finished_at=now() WHERE run_id=$1 AND workspace_id=$3 AND outcome IS NULL",[runId,JSON.stringify({outcome:'inconclusive',reason:'Verification was interrupted. No action was repeated and no fix was established.',verified_fixed_globally:false}),this.workspaceId]);
       });
       return this.publish(runId);
     });

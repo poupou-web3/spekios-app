@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Store } from './store.js';
-import { workspaceId, userId } from './contracts.js';
-import { explore, reproduce } from './explorer.js';
+import { workspaceId } from './contracts.js';
+import { explore, reproduce, verifyFix } from './explorer.js';
 import { ModelClient } from './model-client.js';
 import { AccessHandoff } from './access-handoff.js';
 import { AutomaticReproductionScheduler, type GatewayStatus } from './automatic-reproduction.js';
@@ -50,7 +50,7 @@ try {
   heartbeat = setInterval(() => {
     void lease.query('UPDATE browser_workers SET heartbeat_at=now() WHERE worker_id=$1', [workerId]).catch(() => { stopping = true; });
   }, 5000);
-  let recovered = false,nextExportAt=0;
+  const recovered = new Set<string>();let nextExportAt=0;
   while (!stopping) {
     // Human reviews can append events after a run finishes. Export a bounded
     // batch while idle even when inference is unavailable; a ClickHouse outage
@@ -60,6 +60,8 @@ try {
       try{
         const pending=(await store.query('SELECT 1 FROM runtime_events WHERE exported_at IS NULL LIMIT 1')).rowCount;
         if(pending)await store.exclusive(()=>store.flush(undefined,1));
+        await store.flushIdentity();
+        await store.flushIssues();
       }catch{/* The next maintenance pass retries the durable outbox. */}
     }
     try {
@@ -68,8 +70,10 @@ try {
       const executionMode=gateway?.executionMode;
       // Recorder locks also serialize this worker with CLI runs and recovery.
       await store.exclusive(async () => {
-        if (!recovered) {
-          const abandoned = (await store.query("SELECT job_id,run_id,cancel_id FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND status='running'", [workspaceId, userId])).rows;
+        const workspaces=(await store.query('SELECT workspace_id,owner_user_id FROM workspaces ORDER BY created_at,workspace_id')).rows;
+        for(const workspace of workspaces)await store.withScope({workspaceId:workspace.workspace_id,userId:workspace.owner_user_id},async()=>{
+        if (!recovered.has(store.workspaceId)) {
+          const abandoned = (await store.query("SELECT job_id,run_id,cancel_id FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND status='running'", [store.workspaceId, store.userId])).rows;
           for (const job of abandoned) {
             if(job.run_id)await store.transaction(async()=>{
               const requests=(await store.query("UPDATE browser_access_requests SET status=$2,finished_at=now() WHERE run_id=$1 AND status IN ('waiting','active') RETURNING access_id",[job.run_id,job.cancel_id?'cancelled':'interrupted'])).rows;
@@ -81,14 +85,14 @@ try {
           // Recovery can append events even when no next job is queued. Drain
           // them before entering the idle loop so ClickHouse receives the trail.
           await store.flush();
-          recovered = true;
+          recovered.add(store.workspaceId);
         }
         await automatic.sweep(gateway);
         if(!executionMode)return;
         const job = (await store.query(`UPDATE browser_jobs SET status='running',worker_id=$3,started_at=now()
           WHERE status='queued' AND job_id=(SELECT job_id FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND status='queued' AND next_attempt_at<=now() AND execution_mode=$4
             AND (automatic_source_action_id IS NULL OR settings->>'provider'=ANY($5::text[])) ORDER BY created_at LIMIT 1)
-          RETURNING *`, [workspaceId, userId, workerId, executionMode,gateway?.configuredProviders??[]])).rows[0];
+          RETURNING *`, [store.workspaceId, store.userId, workerId, executionMode,gateway?.configuredProviders??[]])).rows[0];
         if (!job) return;
         try {
           if(!await automatic.beforeDispatch(job,gateway))return;
@@ -97,9 +101,9 @@ try {
             allowedOrigins: job.settings.allowedOrigins.filter((origin: string) => currentOrigins.includes(origin)), jobId: job.job_id,
             autoReproduce:job.settings.autoReproduce,maxAutoReproductions:job.settings.maxAutoReproductions,maxAutoReplayActions:job.settings.maxAutoReplayActions,
             viewportProfile: job.settings.viewportProfile,access,authMode:job.request.auth_mode??'auto',sessionId:job.request.session_id };
-          const result = job.request.kind === 'reproduce'
-            ? await reproduce(store, job.request.source_action_id, options)
-            : await explore(store, job.request.target_url, options);
+          const result = await store.withScope({workspaceId:job.workspace_id,userId:job.user_id,agentId:job.agent_id,projectId:job.project_id,taskId:job.task_id},()=>job.request.kind==='verify_fix'?verifyFix(store,job.job_id,options):job.request.kind === 'reproduce'
+            ? reproduce(store, job.request.source_action_id, options)
+            : explore(store, job.request.target_url, options));
           const failure = result.report.run.error ?? result.manifest_error ?? result.export_error;
           const wasInterrupted=stopping&&result.report.run.lifecycle==='failed';
           if(wasInterrupted)await interrupted(result.run_id);
@@ -116,9 +120,10 @@ try {
             stopping?'interrupted':'failed',stopping?'Worker stopped during execution. No browser action was repeated.':'Execution could not finish. Inspect the run evidence and provider settings.']);
         }
         await store.flush();
+        });
       });
     } catch {
-      recovered = false;
+      recovered.clear();
       // A lock holder, unavailable dependency or failed recovery is retried;
       // a running job is never dispatched again.
     }
