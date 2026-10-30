@@ -1,18 +1,18 @@
 ---
 {
-  "title": "Use the workspace and back office",
-  "description": "Navigate ScoutQA’s run timeline, flow graph, evidence inspector, review filters and operations console.",
+  "title": "Use the workspace",
+  "description": "Navigate ScoutQA’s run timeline, flow graph, evidence inspector, review filters, settings and theme.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 1
   }
 }
 ---
-The workspace helps a tester follow behavior. The back office helps an operator understand execution and delivery. Both use the same local developer identity today; switching views does not grant a separate permission role.
+The workspace helps a tester follow behavior. Operators of a Scout deployment use a separate back office for execution and delivery; it is not part of the workspace and the workspace does not link to it.
 
 ## User workspace
 
-Submit a URL, follow the durable job and open its run. The timeline records each automated action with its expectation, outcome and assessment.
+Paste a URL on the workspace home and choose **Start testing**. The scheme is optional: `app.example.com` is tested as `https://app.example.com`. The line under the field shows whether Scout is ready; **Change** opens screen size, sign-in and automatic rechecks. Follow the durable job and open its run. The timeline records each automated action with its expectation, outcome and assessment.
 
 Use **Inspect action** to see exact typed parameters and linked evidence. Compare Before/After captures, open masks and sampled frames, and move between actions. The inspector preserves native image detail so small changes remain inspectable.
 
@@ -24,15 +24,16 @@ Filters help find runs and original candidates by review state. An independent r
 
 Use [finding review](../findings/) to record a human conclusion and rationale. Export the selected run using [portable reports](../reports/).
 
-## Back office
+## Settings and appearance
 
-- **Operations:** service readiness, queue state and outbox delivery snapshots.
-- **Model activity:** request/attempt records and scoped filters.
-- **Usage:** nullable provider-reported tokens and cost.
-- **Events:** ordered runtime and review observations.
-- **Connections:** nonsecret exploration defaults and saved app-session metadata.
+- **Exploration defaults:** provider, model, action budget, viewport and automatic-check preferences for new runs.
+- **Available model providers:** which providers the server can use; credentials are never shown.
+- **Saved app sessions:** encrypted sign-ins for your test apps, with removal controls.
+- **Appearance:** match your computer’s light or dark setting, or keep one theme in this browser. The same control sits in the top bar.
 
-Outbox counters indicate delivery state. They are not direct health probes for every service.
+## Operator back office
+
+The team running Scout uses a separate back office for service readiness, the browser job queue, model requests and attempts, ordered events and read-only server configuration. Outbox counters there indicate delivery state; they are not direct health probes for every service.
 
 ## Configuration changes
 

@@ -1,8 +1,9 @@
 FROM rust:1.91.0-slim-bookworm@sha256:81c97592d519ba7397e8adccb0345fb5a91965c0a44b82af83bd1ef06c36cef5 AS build
 WORKDIR /build
-COPY apps/api/Cargo.toml apps/api/Cargo.lock ./
+COPY apps/api/Cargo.toml apps/api/Cargo.lock apps/api/build.rs ./
 COPY apps/api/src ./src
 COPY apps/web /web
+COPY packages/web-ui/src /packages/web-ui/src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo test --locked && cargo build --locked --release && cp target/release/scout-api /build/scout-api

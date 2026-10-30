@@ -19,6 +19,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      META_API_KEY: ${META_API_KEY:-}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
       MODEL_SPOOL: /data/gateway
       SCOUT_EXPLORER_PROVIDER: ${SCOUT_EXPLORER_PROVIDER:-openrouter}
       SCOUT_EXPLORER_MODEL: ${SCOUT_EXPLORER_MODEL:-}
@@ -47,6 +49,30 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 256m
     cpus: 1
+    restart: unless-stopped
+
+  # Operator back office: a separate deployment from the customer workspace on the api service.
+  backoffice:
+    image: scout-qa-backoffice:local
+    build:
+      context: .
+      dockerfile: infra/backoffice/Dockerfile
+    ports:
+      - '127.0.0.1:18083:8080'
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8080/_backoffice_health']
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.5
     restart: unless-stopped
 
   postgres:

@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {parseEnv} from 'node:util';
-import {buildEvidenceBundle} from '../apps/web/report-bundle.js';
+import {buildEvidenceBundle} from '../apps/web/src/report/bundle.js';
 
 const runId=process.argv[2];
 if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runId||''))throw new Error('Usage: node scripts/export-run-report.mjs RUN_UUID');

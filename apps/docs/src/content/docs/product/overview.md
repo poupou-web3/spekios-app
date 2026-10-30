@@ -18,7 +18,7 @@ ScoutQA is a local exploratory QA system for web applications you control. Give 
 4. **Investigate findings.** People review suspicions; an independent replay can try the recorded path in a fresh browser.
 5. **Give feedback to a coding agent.** Reports include expected versus actual behavior, locations, reproduction steps and evidence references.
 
-The user workspace follows runs and findings. The back office shows queue state, model requests, usage, delivery status and saved defaults. Both currently represent the same local developer.
+The workspace follows runs and findings, and its **Settings** page holds exploration defaults and saved app sessions. The back office, a separate deployment for the team operating Scout, shows queue state, model requests, usage and delivery status.
 
 ## Who it is for
 

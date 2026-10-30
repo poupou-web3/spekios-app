@@ -75,11 +75,17 @@ impl Gateway {
             None
         };
         let mut keys = Vec::new();
-        for p in [Provider::Openai, Provider::Anthropic, Provider::Openrouter] {
+        for p in Provider::ALL {
             let key = if fixture_url.is_some() {
                 "scout_fixture_credential_not_a_real_key".into()
             } else {
-                env::var(p.key_env()).unwrap_or_default()
+                let configured = env::var(p.key_env()).unwrap_or_default();
+                // Meta's own examples name the bearer token MODEL_API_KEY.
+                if configured.is_empty() && p == Provider::Meta {
+                    env::var("MODEL_API_KEY").unwrap_or_default()
+                } else {
+                    configured
+                }
             };
             if !key.is_empty() {
                 if key.len() < 8 || key.len() > 4096 || !key.bytes().all(|b| b.is_ascii_graphic()) {
@@ -91,6 +97,7 @@ impl Gateway {
         let mut secrets: Vec<String> = keys.iter().map(|(_, v)| v.clone()).collect();
         for key in [
             "SCOUT_API_TOKEN",
+            "MODEL_API_KEY",
             "POSTGRES_PASSWORD",
             "S3_ACCESS_KEY_ID",
             "S3_SECRET_ACCESS_KEY",
@@ -201,7 +208,7 @@ impl Gateway {
         }
     }
     pub fn providers(&self) -> Value {
-        let providers = [Provider::Openai, Provider::Anthropic, Provider::Openrouter]
+        let providers = Provider::ALL
             .iter()
             .map(|p| {
                 json!({

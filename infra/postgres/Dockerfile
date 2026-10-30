@@ -16,3 +16,4 @@ COPY 014-agent-identity.sql /docker-entrypoint-initdb.d/014-agent-identity.sql
 COPY 015-agent-oauth.sql /docker-entrypoint-initdb.d/015-agent-oauth.sql
 COPY 016-issue-verification.sql /docker-entrypoint-initdb.d/016-issue-verification.sql
 COPY 017-run-steering.sql /docker-entrypoint-initdb.d/017-run-steering.sql
+COPY 018-meta-provider.sql /docker-entrypoint-initdb.d/018-meta-provider.sql

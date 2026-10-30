@@ -41,7 +41,7 @@ function compose(...args) {
 const providers=await get('/v1/model-providers');
 assert.equal(providers.test_mode,true,'Refusing to run fixture tests against live model credentials.');
 assert.equal(providers.gateway_ready,true);
-assert.equal(providers.providers.filter(p=>p.configured).length,3);
+assert.equal(providers.providers.filter(p=>p.configured).length,4);
 const beforeUsage=await get('/v1/usage');
 const {s3,clickhouse}=await clients();
 const fixture=JSON.parse(await postgres(`SELECT json_build_object('run_id',c.run_id,'action_id',c.action_id,'capture_id',c.capture_id)
@@ -57,17 +57,19 @@ assert.equal((await fetch(base+'/v1/model-requests',{method:'POST',headers:{'con
 console.log('PASS admission, auth, free-only policy and evidence scope');
 
 const reports=[];
-for(const provider of ['openai','anthropic','openrouter']) {
+for(const provider of ['openai','anthropic','openrouter','meta']) {
   const r=spec(provider,'success',{run_id:fixture.run_id,action_id:fixture.action_id,capture_ids:[fixture.capture_id]});
   await submit(r); const report=await done(r.request_id); reports.push(report);
   assert.equal(report.request.state,'completed'); assert.equal(report.calls.length,1);
-  assert.equal(report.calls[0].input_tokens,provider==='anthropic'?60:provider==='openai'?16:3);
-  assert.equal(report.calls[0].output_tokens,provider==='anthropic'?4:provider==='openai'?5:2);
+  assert.equal(report.calls[0].input_tokens,provider==='anthropic'?60:provider==='openrouter'?3:16);
+  assert.equal(report.calls[0].output_tokens,provider==='anthropic'?4:provider==='openrouter'?2:5);
   assert.equal(report.calls[0].usage_status,'reported');
   const wire=(await stats()).find(c=>c.model===r.model); assert.equal(wire.images,true); assert.equal(wire.stream,false); assert.equal(wire.max_tokens,100);
   if(provider==='openrouter') { assert.deepEqual(wire.routing.max_price,{prompt:0,completion:0,request:0,image:0}); assert.equal(report.calls[0].cost_usd,0); }
+  if(provider==='openai'||provider==='meta') assert.equal(wire.store,false);
+  if(provider==='meta') assert.equal(report.calls[0].returned_model,'fixture-meta');
 }
-console.log('PASS all three provider protocols, screenshot retrieval, token/cache normalization');
+console.log('PASS all four provider protocols, screenshot retrieval, token/cache normalization');
 
 const same=spec();
 const admissions=await Promise.all(Array.from({length:8},async()=>{

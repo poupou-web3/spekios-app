@@ -22,7 +22,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 | Findings | Original suspicions, fresh-browser replay, optional bounded automatic replay and append-only human review. |
 | Agent identity | User setup page, standard MCP browser OAuth with PKCE/DCR and rotating renewal, native connector compatibility, private history, revocation and token attribution. |
 | Access | Human-controlled native same-origin sign-in and optional encrypted session reuse. |
-| Models | OpenAI, Anthropic and OpenRouter API-key connections; nullable token/cost accounting. |
+| Models | OpenAI, Anthropic, OpenRouter and Meta AI API-key connections; nullable token/cost accounting. |
 | Interfaces | User workspace, operations console, REST API, 26 MCP/HTTP tools and a Rust stdio bridge. |
 | Exports | JSON snapshot, Markdown report and verified evidence ZIP. |
 

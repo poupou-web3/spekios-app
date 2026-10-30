@@ -37,7 +37,7 @@ Add one provider key to the private configuration and choose an exploration mode
 bash scripts/start-local.sh
 ~~~
 
-Nonsecret defaults can then be changed from **Back office → Connections** without restarting.
+Nonsecret defaults can then be changed from the workspace **Settings** page without restarting.
 
 ## Permit a controlled target
 
@@ -53,7 +53,7 @@ This starts the target, but ordinary exploration still needs a configured model.
 
 ## Check readiness and start
 
-Use **Back office → Operations** or:
+Use the operator back office at http://127.0.0.1:18083 or:
 
 ~~~sh
 docker compose ps

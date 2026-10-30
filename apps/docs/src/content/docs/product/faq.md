@@ -18,7 +18,7 @@ No. Changes help locate the outcome. Scout compares behavior with an expectation
 
 ## Can I use my own model?
 
-You can configure an OpenAI, Anthropic or OpenRouter API key and select a compatible model. Custom provider adapters and subscription authentication are not implemented. See [model connections](../../getting-started/models/).
+You can configure an OpenAI, Anthropic, OpenRouter or Meta AI API key and select a compatible model. Meta AI uses `muse-wonder-1.0` on the Responses API. Custom provider adapters and subscription authentication are not implemented. See [model connections](../../getting-started/models/).
 
 ## Can an agent start work and come back later?
 

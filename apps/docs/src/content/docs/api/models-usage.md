@@ -43,7 +43,7 @@ The request is asynchronous: new admission returns 202, an identical retry 200. 
 
 Prompt bytes are limited to 32768; optional system text to 16384. Output-token bounds are 1–4096 and attempt bounds 1–3. Optional evidence links are **run_id**, **action_id** and up to two distinct **capture_ids**; action/capture links require a run.
 
-This gateway request does not execute browser actions. API keys stay server-side.
+This gateway request does not execute browser actions. API keys stay server-side. Supported providers are `openai`, `anthropic`, `openrouter` and `meta`. Meta uses the Responses API and model IDs such as `muse-wonder-1.0`.
 
 ## Save exploration defaults
 

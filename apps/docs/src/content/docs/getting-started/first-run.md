@@ -30,7 +30,7 @@ The UI creates a durable job. It follows the queue state into the recorded run. 
 
 Open the timeline to inspect action parameters, the predicted outcome and the assessment. Use **Inspect action** for screenshots and artifacts. Compare Before/After and inspect the pixel-difference mask at native resolution.
 
-The **Flow** view shows the recorded states and branch choices. **Back office** shows model attempts, token usage and delivery state.
+The **Flow** view shows the recorded states and branch choices. The run summary shows its model token total; operators inspect individual model attempts and delivery state in the separate back office.
 
 ## Review a finding
 

@@ -54,7 +54,7 @@ impl SettingsSubmission {
         }
         if !matches!(
             self.provider.as_str(),
-            "openai" | "anthropic" | "openrouter"
+            "openai" | "anthropic" | "openrouter" | "meta"
         ) {
             return Err("invalid_settings_provider");
         }
@@ -178,13 +178,48 @@ fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
         .unwrap_or(default)
 }
 
+/// Public websites can be tested from a pasted URL. Private, HTTP and internal
+/// hosts still need an exact entry in the operator allowlist.
+fn public_https_origin(url: &reqwest::Url) -> bool {
+    if url.scheme() != "https" || url.port().is_some() || !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    if host.is_empty()
+        || host.len() > 253
+        || !host.contains('.')
+        || host.split('.').all(|label| label.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    if host == "localhost"
+        || [".localhost", ".local", ".internal", ".localdomain", ".home.arpa"]
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+    {
+        return false;
+    }
+    host.split('.').all(|label| {
+        (1..=63).contains(&label.len())
+            && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    })
+}
+
 fn target(value: &str, allowed: &[String]) -> Result<String, &'static str> {
     let url = reqwest::Url::parse(value).map_err(|_| "invalid_target_url")?;
     if value.len() > 2048
         || !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
-        || !allowed.contains(&url.origin().ascii_serialization())
+        || !(allowed.contains(&url.origin().ascii_serialization()) || public_https_origin(&url))
     {
         return Err("target_origin_not_allowed");
     }
@@ -529,12 +564,10 @@ impl Queue {
         let model = env::var("SCOUT_EXPLORER_MODEL")
             .ok()
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| {
-                if provider == "openrouter" {
-                    "openrouter/free".into()
-                } else {
-                    String::new()
-                }
+            .unwrap_or_else(|| match provider.as_str() {
+                "openrouter" => "openrouter/free".into(),
+                "meta" => "muse-wonder-1.0".into(),
+                _ => String::new(),
             });
         Arc::new(Self {
             db: Arc::new(Mutex::new(db)),
@@ -906,7 +939,7 @@ mod tests {
 
     #[test]
     fn settings_normalize_models_and_direct_provider_free_flags_without_model_calls() {
-        for provider in ["openai", "anthropic"] {
+        for provider in ["openai", "anthropic", "meta"] {
             let mut input = settings_input();
             input["provider"] = json!(provider);
             input["model"] = json!("  valid-model  ");
@@ -1084,9 +1117,24 @@ mod tests {
             "file:///tmp/a",
             "http://user:pass@app:8082/",
             "http://other:8082/",
+            "http://bubblemaps.io/",
+            "https://127.0.0.1/",
+            "https://10.0.0.8/admin",
+            "https://app.internal/",
+            "https://localhost/",
+            "https://bubblemaps.io:8443/",
+            "https://user:pass@bubblemaps.io/",
         ] {
-            assert!(target(value, &allowed).is_err());
+            assert!(target(value, &allowed).is_err(), "{value}");
         }
+        assert_eq!(
+            target("https://bubblemaps.io/map", &allowed).unwrap(),
+            "https://bubblemaps.io/map"
+        );
+        assert_eq!(
+            target("https://www.bubblemaps.io/", &allowed).unwrap(),
+            "https://www.bubblemaps.io/"
+        );
     }
 
     #[test]
@@ -1105,7 +1153,7 @@ mod tests {
             ("auth_mode", json!("sign_in")),
             ("issue_id", json!(Uuid::nil())),
             ("deployment_ref", json!("\n")),
-            ("target_url", json!("https://foreign.example/")),
+            ("target_url", json!("https://10.0.0.8/preview")),
         ] {
             let mut invalid = base.clone();
             invalid[key] = value;

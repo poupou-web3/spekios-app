@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Store } from './store.js';
 
+import { publicHttpsOrigin } from './exploration-policy.js';
 import { loadReplay } from './reproduction.js';
 import { COMPLETION_VERSION } from './action-outcome.js';
 
@@ -62,7 +63,9 @@ export class AutomaticReproductionScheduler {
     if(await this.existingAttempt(sourceActionId,ignoreJobId))return {reason:'existing_attempt',actions:0};
     let origin:string;
     try {origin=new URL(source.target_url).origin;}catch{return {reason:'scope_unavailable',actions:0};}
-    if(!Array.isArray(source.settings?.allowedOrigins)||!source.settings.allowedOrigins.includes(origin)||!origins().includes(origin))return {reason:'scope_unavailable',actions:0};
+    if(!Array.isArray(source.settings?.allowedOrigins))return {reason:'scope_unavailable',actions:0};
+    let permitted=false;try{permitted=publicHttpsOrigin(new URL(origin))||(source.settings.allowedOrigins.includes(origin)&&origins().includes(origin));}catch{permitted=false;}
+    if(!permitted)return {reason:'scope_unavailable',actions:0};
     const target=(await this.store.query('SELECT * FROM runtime_actions WHERE action_id=$1 AND run_id=$2',[sourceActionId,source.run_id])).rows[0];
     if(!target||target.state!=='completed'||target.assessment?.verdict!=='suspect'||target.assessment.expectation_uncertain||target.tool_error)
       return {reason:'ineligible_assessment',actions:0};

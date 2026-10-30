@@ -4,11 +4,56 @@ import type { Capture, ControlAction, ObservedControl } from './contracts.js';
 import { actionRisk, controlAction } from './interaction-contract.js';
 import { authorizeForm, testFormRules, type TestFormRule } from './form-policy.js';
 
-// These are guardrails for operator-owned test apps, not a hostile-site sandbox.
+function publicHostname(hostname: string): boolean {
+  const host = hostname.replace(/\.$/, '').toLowerCase();
+  if (!host || host.length > 253 || !host.includes('.') || host.includes(':')) return false;
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return false;
+  if (host === 'localhost' || ['.localhost', '.local', '.internal', '.localdomain', '.home.arpa'].some(suffix => host.endsWith(suffix))) return false;
+  return host.split('.').every(label => /^(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/.test(label));
+}
+
+// Public https sites can be pasted and tested. Private, HTTP and internal hosts
+// still need an exact entry in the operator allowlist. Hostname checks are not
+// a resolved-address boundary.
+export function publicHttpsOrigin(url: URL): boolean {
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
+  return publicHostname(url.hostname);
+}
+
+function publicWebOrigin(url: URL): boolean {
+  if ((url.protocol !== 'https:' && url.protocol !== 'wss:') || url.username || url.password || url.port) return false;
+  return publicHostname(url.hostname);
+}
+
+function networkOrigin(url: URL): string | null {
+  if (url.protocol === 'https:' || url.protocol === 'wss:') return `https://${url.host}`;
+  if (url.protocol === 'http:' || url.protocol === 'ws:') return `http://${url.host}`;
+  return null;
+}
+
+// Subresources follow the page the operator opened: its own origin, public
+// HTTPS, and public WSS. Sibling APIs, fonts and hosted backends are part of
+// that page. The top-level document stays on the entry origin. A public page
+// does not gain the operator's private allowlist.
+export function permitBrowserRequest(pageOrigin: string, rawUrl: string, scope: 'main' | 'subresource', allowedOrigins: readonly string[] = []): boolean {
+  let url: URL;
+  try { url = new URL(rawUrl); } catch { return false; }
+  if (url.username || url.password) return false;
+  if (scope === 'main') return url.href === 'about:blank' || networkOrigin(url) === pageOrigin;
+  if (url.protocol === 'data:' || url.protocol === 'blob:') return true;
+  if (url.href === 'about:blank' || url.href === 'about:srcdoc') return true;
+  if (networkOrigin(url) === pageOrigin || publicWebOrigin(url)) return true;
+  let page: URL;
+  try { page = new URL(pageOrigin); } catch { return false; }
+  if (publicHttpsOrigin(page)) return false;
+  const target = networkOrigin(url);
+  return target !== null && allowedOrigins.includes(target);
+}
+
 export function validateTarget(input: string, origins: string[]): string {
   const url = new URL(input);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || input.length > 2048 ||
-      !origins.includes(url.origin)) throw new Error('Target must belong to an explicitly configured controlled-app origin.');
+      !(origins.includes(url.origin) || publicHttpsOrigin(url))) throw new Error('Target must belong to an explicitly configured controlled-app origin.');
   return url.href;
 }
 

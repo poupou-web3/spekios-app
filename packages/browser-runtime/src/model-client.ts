@@ -1,10 +1,10 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter'; model: string; freeOnly: boolean };
+export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean };
 export function modelSettings(): ModelSettings {
   const provider = process.env.SCOUT_EXPLORER_PROVIDER ?? 'openrouter';
-  if (!['openai', 'anthropic', 'openrouter'].includes(provider)) throw new Error('Unsupported explorer provider.');
-  const model = process.env.SCOUT_EXPLORER_MODEL || (provider === 'openrouter' ? 'openrouter/free' : '');
+  if (!['openai', 'anthropic', 'openrouter', 'meta'].includes(provider)) throw new Error('Unsupported explorer provider.');
+  const model = process.env.SCOUT_EXPLORER_MODEL || (provider === 'openrouter' ? 'openrouter/free' : provider === 'meta' ? 'muse-wonder-1.0' : '');
   if (!model || model.length > 200 || !/^[a-zA-Z0-9._:/-]+$/.test(model)) throw new Error('Configure SCOUT_EXPLORER_MODEL for the selected provider.');
   return { provider: provider as ModelSettings['provider'], model, freeOnly: process.env.SCOUT_EXPLORER_FREE_ONLY !== 'false' };
 }

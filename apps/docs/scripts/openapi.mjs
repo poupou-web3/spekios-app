@@ -232,12 +232,12 @@ export function openapi(catalog) {
         ToolResult: { type: 'object', properties: { content: { type: 'array', items: object }, structuredContent: object, isError: bool }, required: ['content'], additionalProperties: true },
         SettingsSubmission: strict({
           request_id: uuid, expected_revision: { type: 'integer', minimum: 0, description: 'Signed 64-bit integer below 9223372036854775807.' },
-          provider: choice('openai','anthropic','openrouter'), model: { type: 'string', minLength: 1, maxLength: 200, description: 'Trimmed model ID with ASCII letters, digits and / : . _ - only.' },
+          provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, description: 'Trimmed model ID with ASCII letters, digits and / : . _ - only.' },
           max_actions: bounded(1,12), viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
           auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,24),
         }, ['request_id','expected_revision','provider','model','max_actions','viewport_profile','free_only','auto_reproduce','max_auto_reproductions','max_auto_replay_actions']),
         ModelRequest: strict({
-          request_id: uuid, provider: choice('openai','anthropic','openrouter'), model: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[A-Za-z0-9/:._-]+$' },
+          request_id: uuid, provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[A-Za-z0-9/:._-]+$' },
           prompt: { type: 'string', minLength: 1, maxLength: 32768, description: 'Nonblank, no NUL, at most 32768 UTF-8 bytes.' },
           system: { type: 'string', maxLength: 16384, default: '', description: 'No NUL; at most 16384 UTF-8 bytes.' },
           run_id: uuid, action_id: uuid, capture_ids: { type: 'array', maxItems: 2, uniqueItems: true, items: uuid, default: [] },

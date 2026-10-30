@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { parseEnv } from 'node:util';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
+import { linkSource } from '../packages/web-ui/testing/link.mjs';
 
 // Render persisted API snapshots as strings. No browser is launched or controlled.
 const env = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8'));
@@ -14,26 +15,32 @@ const get = async path => {
   assert.equal(response.status, 200, path);
   return response.json();
 };
-const source = await readFile(new URL('../apps/web/app.js', import.meta.url), 'utf8');
-const served = await (await fetch('http://127.0.0.1:18080/assets/app.js')).text();
+const source = await readFile(new URL('../apps/web/src/main.js', import.meta.url), 'utf8');
+const served = await (await fetch('http://127.0.0.1:18080/assets/app/main.js')).text();
 const sha = value => createHash('sha256').update(value).digest('hex');
 assert.equal(sha(served), sha(source), 'Rebuild the API to serve the current interface.');
-const root = { innerHTML: '', addEventListener() {}, querySelectorAll() { return []; } };
-const sandbox = {
-  document: { querySelector() { return root; }, addEventListener() {} },
-  window: { addEventListener() {} }, sessionStorage: { getItem() { return null; } },
-  setInterval() {}, URL,
+// The customer workspace and the operator back office are linked and rendered separately.
+const link = (app, names) => {
+  const root = { innerHTML: '', addEventListener() {}, querySelectorAll() { return []; } };
+  const sandbox = {
+    document: { querySelector() { return root; }, addEventListener() {} },
+    window: { addEventListener() {} }, sessionStorage: { getItem() { return null; } },
+    setInterval() {}, URL,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(linkSource(new URL(`../apps/${app}/src/`, import.meta.url), 'main.js') + `\nglobalThis.ui={${names}};`, sandbox);
+  return sandbox.ui;
 };
-vm.createContext(sandbox);
-vm.runInContext(source + '\nglobalThis.ui={state,home,runView,operations,drawer};', sandbox);
-const { state, home, runView, operations, drawer } = sandbox.ui;
+const { state, home, runView } = link('web', 'state,home,runView');
+const backoffice = link('backoffice', 'state,operations,drawer');
 const [runs, jobs, providers, overview, usage] = await Promise.all([
   '/v1/runs', '/v1/browser-jobs', '/v1/model-providers', '/v1/operations', '/v1/usage',
 ].map(get));
-Object.assign(state, { runs: runs.runs, jobs: jobs.jobs, workers: jobs.workers,
+Object.assign(state, { runs: runs.runs, jobs: jobs.jobs, workers: jobs.workers, settings: jobs.settings, providers });
+Object.assign(backoffice.state, { runs: runs.runs, jobs: jobs.jobs, workers: jobs.workers,
   settings: jobs.settings, providers, operations: overview, usage });
 state.access=await get('/v1/browser-access');
-assert.match(home(), /Your QA workspace/);
+assert.match(home(), /Paste a URL/);assert.match(home(), /id="target-url"/);assert.match(home(), /Start testing/);
 const fixture = JSON.parse(await readFile(new URL('../artifacts/workspace/verification.json', import.meta.url), 'utf8'));
 let plannerIds = [];
 try {
@@ -104,14 +111,17 @@ for (const id of ids) {
     }
     rendered++;
   }
+  Object.assign(backoffice.state, { runId: id, report: state.report });
   for (const tab of ['overview', 'jobs', 'models', 'events', 'connections']) {
-    state.opsTab = tab;
-    assert.match(operations(), /Operations/);
+    backoffice.state.opsTab = tab;
+    const view = backoffice.operations();
+    assert.match(view, /Operations/);
+    assert.doesNotMatch(view, /#\/workspace/);
     rendered++;
   }
   if (state.report.model_requests.length) {
-    state.drawer = { model: await get('/v1/model-requests/' + state.report.model_requests[0].request_id) };
-    assert.match(drawer(), /Stored request \/ response payloads/);
+    backoffice.state.drawer = { model: await get('/v1/model-requests/' + state.report.model_requests[0].request_id) };
+    assert.match(backoffice.drawer(), /Stored request \/ response payloads/);
     rendered++;
   }
 }

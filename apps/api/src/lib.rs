@@ -232,8 +232,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/agent-connections", axum::routing::post(identity::begin))
         .route("/v1/agent-connections/token", axum::routing::post(identity::poll))
         .layer(axum::extract::DefaultBodyLimit::max(65_536))
-        .route("/assets/app.css", get(ui::style))
-        .route("/assets/{name}", get(ui::script))
+        .route("/assets/{*path}", get(ui::asset_file))
         .route("/v1/auth-mode", get(auth_mode))
         .route("/healthz", get(|| async { Json(json!({"status":"ok","service":"scout-api","version":env!("CARGO_PKG_VERSION")})) }))
         .merge(protected)
@@ -1062,32 +1061,32 @@ mod tests {
 
     #[tokio::test]
     async fn browser_modules_are_public_embedded_and_uncached() {
-        let app_script = request("/assets/app.js", None).await;
-        let csp = app_script.headers()["content-security-policy"].clone();
-        for (path, expected) in [
-            ("/assets/app.js", include_str!("../../web/app.js")),
-            ("/assets/connect.js", include_str!("../../web/connect.js")),
-            ("/assets/issues.js", include_str!("../../web/issues.js")),
-            (
-                "/assets/workspace-http.js",
-                include_str!("../../web/workspace-http.js"),
-            ),
-            (
-                "/assets/report-export.js",
-                include_str!("../../web/report-export.js"),
-            ),
-            (
-                "/assets/report-bundle.js",
-                include_str!("../../web/report-bundle.js"),
-            ),
+        let entry = request("/assets/app/main.js", None).await;
+        let csp = entry.headers()["content-security-policy"].clone();
+        for required in [
+            "app/main.js",
+            "app/connect.js",
+            "app/issues.js",
+            "app/report/bundle.js",
+            "app/styles/workspace.css",
+            "ui/http.js",
+            "ui/theme-init.js",
+            "ui/styles/tokens.css",
         ] {
+            assert!(
+                ui::ASSETS.iter().any(|(path, _, _)| *path == required),
+                "{required}"
+            );
+        }
+        assert!(!ui::ASSETS.iter().any(|(path, _, _)| path.contains("backoffice")
+            || path.contains(".test.")
+            || path.contains("testing/")));
+        for (asset, content_type, expected) in ui::ASSETS {
+            let path = format!("/assets/{asset}");
             for authorization in [None, Some("Bearer wrong")] {
-                let response = request(path, authorization).await;
+                let response = request(&path, authorization).await;
                 assert_eq!(response.status(), StatusCode::OK, "{path}");
-                assert_eq!(
-                    response.headers()["content-type"],
-                    "text/javascript; charset=utf-8"
-                );
+                assert_eq!(response.headers()["content-type"], *content_type);
                 assert_eq!(response.headers()["cache-control"], "no-store");
                 assert_eq!(response.headers()["content-security-policy"], csp);
                 assert_eq!(response.headers()["x-content-type-options"], "nosniff");
@@ -1106,8 +1105,12 @@ mod tests {
         }
         for path in [
             "/assets/.env",
-            "/assets/test-support/source.mjs",
+            "/assets/app/../../.env",
             "/assets/%2e%2e%2f.env",
+            "/assets/app/%2e%2e/test/support.mjs",
+            "/assets/ui/../testing/link.mjs",
+            "/assets/backoffice/main.js",
+            "/assets/app.js",
         ] {
             assert_eq!(
                 request(path, None).await.status(),

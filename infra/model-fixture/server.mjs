@@ -39,7 +39,7 @@ const server = http.createServer(async (req, res) => {
     if (['assessment','fix_verification_assessment'].includes(exploration?.task) && exploration.after.url.includes('/provider-outage')) return send(503, {error:{message:'fixture assessment unavailable'}});
     const text = exploration ? JSON.stringify(explorerReply(exploration)) : scenario === 'redact' ? `Do not leak ${credential}` : 'The page is ready.';
     let value;
-    if (provider === 'openai') value = { id:`response-${body.model}`, model:'fixture-openai', status:'completed', output:[{type:'message',content:[{type:'output_text',text}]}], usage:{input_tokens:16,output_tokens:5,input_tokens_details:{cached_tokens:6},output_tokens_details:{reasoning_tokens:2}} };
+    if (provider === 'openai' || provider === 'meta') value = { id:`response-${body.model}`, model:provider === 'meta' ? 'fixture-meta' : 'fixture-openai', status:'completed', output:[{type:'message',content:[{type:'output_text',text}]}], usage:{input_tokens:16,output_tokens:5,input_tokens_details:{cached_tokens:6},output_tokens_details:{reasoning_tokens:2}} };
     if (provider === 'anthropic') value = { id:`message-${body.model}`, model:'fixture-claude', type:'message', stop_reason:'end_turn', content:[{type:'text',text}], usage:{input_tokens:10,cache_creation_input_tokens:30,cache_read_input_tokens:20,output_tokens:4} };
     if (provider === 'openrouter') value = { id:`generation-${body.model}`, model:'fixture-returned-model', provider:'fixture-provider', choices:[{message:{role:'assistant',content:text},finish_reason:'stop'}], usage:{prompt_tokens:3,completion_tokens:2,cost:0} };
     if (!value) return send(404, { error:{message:'unknown provider fixture'} });

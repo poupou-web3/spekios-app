@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {parseEnv} from 'node:util';
 import {spawnSync} from 'node:child_process';
-import {buildEvidenceBundle,reportMarkdown,reportEvidence} from '../apps/web/report-bundle.js';
+import {buildEvidenceBundle,reportMarkdown,reportEvidence} from '../apps/web/src/report/bundle.js';
 
 const env=parseEnv(await readFile(new URL('../.env',import.meta.url),'utf8'));
 const fetchFile=(path,{signal}={})=>fetch('http://127.0.0.1:18080'+path,{headers:{Authorization:`Bearer ${env.SCOUT_API_TOKEN}`},signal:signal||AbortSignal.timeout(20000),redirect:'error'});

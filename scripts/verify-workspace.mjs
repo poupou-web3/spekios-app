@@ -22,7 +22,7 @@ const html=await request('/',undefined,false);
 assert.equal(html.status,200);
 assert.match(html.headers.get('content-security-policy'),/script-src 'self'/);
 assert.ok(!(await html.text()).includes(env.SCOUT_API_TOKEN));
-for(const path of ['/assets/app.js','/assets/app.css'])assert.equal((await request(path,undefined,false)).status,200);
+for(const path of ['/assets/app/main.js','/assets/ui/styles/tokens.css'])assert.equal((await request(path,undefined,false)).status,200);
 for(const path of ['/v1/browser-jobs','/v1/operations','/v1/captures/'+randomUUID()+'/image','/v1/artifacts/'+randomUUID()+'/content'])assert.equal((await request(path,undefined,false)).status,401);
 assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url:'http://exploration-fixture:8082/'},false)).status,401);
 for(const target_url of ['file:///tmp/test','http://example.com/','http://user:secret@exploration-fixture:8082/'])assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url})).status,400);

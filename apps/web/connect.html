@@ -2,14 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f4f6ef">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f6f7f4" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#0f1411" media="(prefers-color-scheme: dark)"><meta name="color-scheme" content="light dark">
   <title>Connect your agent · ScoutQA</title>
-  <link rel="stylesheet" href="/assets/app.css"><script type="module" src="/assets/connect.js"></script>
+  <script src="/assets/ui/theme-init.js"></script>
+  <link rel="stylesheet" href="/assets/ui/styles/tokens.css"><link rel="stylesheet" href="/assets/ui/styles/base.css"><link rel="stylesheet" href="/assets/ui/styles/components.css"><link rel="stylesheet" href="/assets/ui/styles/shell.css"><link rel="stylesheet" href="/assets/app/styles/pages.css"><script type="module" src="/assets/app/connect.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <main id="main-content" class="content connection-page">
-  <header class="connection-top"><a class="brand" href="/">scout <small>QA FOR YOU & YOUR AGENT</small></a><a class="button quiet" href="/">← Your workspace</a></header>
+  <header class="connection-top"><a class="brand" href="/"><span class="mark"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/></svg></span>scout <small>QA FOR YOU & YOUR AGENT</small></a><div class="row"><div data-theme-slot></div><a class="button quiet" href="/">← Your workspace</a></div></header>
   <div class="connection-heading"><p class="eyebrow">YOUR WORKSPACE. YOUR AGENT.</p><h1 id="connection-title">Bring your agent to Scout.</h1><p id="connection-description">Connect once. Ask your agent to test a URL, follow the run and bring back findings with evidence.</p></div>
   <div id="connection-status" class="connection-status" role="status" aria-live="polite"></div>
   <section id="manager-login" class="panel connection-signin" hidden>

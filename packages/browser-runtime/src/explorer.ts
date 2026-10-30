@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright';
 import { comparePng, changedPixelsInRects } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
-import { capture, type Hooks } from './recorder.js';
+import { capture, installNetworkGate, type Hooks } from './recorder.js';
 import { isUuid, type Capture, type ObservedControl } from './contracts.js';
 import { ModelClient, modelSettings } from './model-client.js';
 import { blockedReason, observeControls, parseAssessment, parsePlan, parsePrediction, stateFingerprint, validateTarget } from './exploration-policy.js';
@@ -79,7 +79,8 @@ export async function verifyFix(store:Store,verificationId:string,options:Explor
 
 // All entry points hold the recorder lock for the entire browser lifetime.
 async function execute(store: Store, inputUrl: string, options: ExplorationOptions, replay?: Replay) {
-  const targetUrl = validateTarget(inputUrl, options.allowedOrigins ?? (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim()));
+  const allowedOrigins = options.allowedOrigins ?? (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
+  const targetUrl = validateTarget(inputUrl, allowedOrigins);
   const maxActions = replay?.steps.length ?? options.maxActions ?? Number(process.env.SCOUT_EXPLORER_MAX_ACTIONS ?? '6');
   if (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > 12) throw new Error('The local explorer action limit must be between 1 and 12.');
   const automaticPolicy=automaticReproductionPolicy({...options,autoReproduce:!replay&&options.autoReproduce===true});
@@ -216,8 +217,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       const browserContext = await browser.newContext({ viewport, deviceScaleFactor: 1,
         ...(savedState?{storageState:savedState}:{}),
         serviceWorkers: 'block', acceptDownloads: false, locale: 'en-US', reducedMotion: 'no-preference' });
-      await browserContext.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
-      await browserContext.routeWebSocket('**/*', socket => socket.close());
+      await installNetworkGate(browserContext, origin, allowedOrigins);
       const page = await browserContext.newPage();
       page.setDefaultTimeout(2000);
       page.on('dialog', dialog => void dialog.dismiss());
@@ -370,7 +370,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             }
           }
           after = await capture(store, page, runId, actionId, 'after', ordinal, null, hooks);
-          if(completion.status==='settled' && (completion.frames.at(-1)?.sha256!==after.capture.sha256||diagnostics.pending.size)) {
+          if(completion.status==='settled' && (completion.frames.at(-1)?.sha256!==after.capture.sha256||diagnostics.blockingPending())) {
             completion.status='timed_out';completion.reason='The page changed or a request began between the quiet sample and the final capture.';
           }
           const outcome=await saveOutcome(store,runId,actionId,completion,diagnostics);

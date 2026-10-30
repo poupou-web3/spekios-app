@@ -10,13 +10,16 @@ pub enum Provider {
     Openai,
     Anthropic,
     Openrouter,
+    Meta,
 }
 impl Provider {
+    pub const ALL: [Self; 4] = [Self::Openai, Self::Anthropic, Self::Openrouter, Self::Meta];
     pub fn name(self) -> &'static str {
         match self {
             Self::Openai => "openai",
             Self::Anthropic => "anthropic",
             Self::Openrouter => "openrouter",
+            Self::Meta => "meta",
         }
     }
     pub fn endpoint(self) -> &'static str {
@@ -24,6 +27,7 @@ impl Provider {
             Self::Openai => "https://api.openai.com/v1/responses",
             Self::Anthropic => "https://api.anthropic.com/v1/messages",
             Self::Openrouter => "https://openrouter.ai/api/v1/chat/completions",
+            Self::Meta => "https://api.meta.ai/v1/responses",
         }
     }
     pub fn key_env(self) -> &'static str {
@@ -31,6 +35,7 @@ impl Provider {
             Self::Openai => "OPENAI_API_KEY",
             Self::Anthropic => "ANTHROPIC_API_KEY",
             Self::Openrouter => "OPENROUTER_API_KEY",
+            Self::Meta => "META_API_KEY",
         }
     }
 }
@@ -116,7 +121,9 @@ impl ModelRequest {
 /// never accepted. The order of images follows capture_ids in the audit spec.
 pub fn wire_request(spec: &ModelRequest, images: &[Vec<u8>]) -> Value {
     match spec.provider {
-        Provider::Openai => {
+        // Meta's Responses API accepts this same input shape. store:false keeps
+        // the turn off Meta's server so prompts and screenshots are not retained.
+        Provider::Openai | Provider::Meta => {
             let mut content = vec![json!({"type":"input_text","text":spec.prompt})];
             content.extend(images.iter().map(|b| json!({"type":"input_image","image_url":format!("data:image/png;base64,{}",STANDARD.encode(b)),"detail":"high"})));
             json!({"model":spec.model,"instructions":spec.system,"input":[{"role":"user","content":content}],"max_output_tokens":spec.max_output_tokens,"store":false,"stream":false})
@@ -164,7 +171,7 @@ pub fn usage(provider: Provider, response: &Value) -> Usage {
         ..Usage::default()
     };
     match provider {
-        Provider::Openai => {
+        Provider::Openai | Provider::Meta => {
             result.input_tokens = count(&raw["input_tokens"]);
             result.output_tokens = count(&raw["output_tokens"]);
             result.cached_input_tokens = count(&raw["input_tokens_details"]["cached_tokens"]);
@@ -280,7 +287,7 @@ pub fn interpret(provider: Provider, body: &[u8], result: &mut CallResult) {
         return;
     }
     let (text, finish, complete) = match provider {
-        Provider::Openai => {
+        Provider::Openai | Provider::Meta => {
             let text = v["output"]
                 .as_array()
                 .into_iter()
@@ -368,12 +375,53 @@ mod tests {
     }
     #[test]
     fn image_and_output_limits_map_to_each_provider() {
-        for p in [Provider::Openai, Provider::Anthropic, Provider::Openrouter] {
+        for p in Provider::ALL {
             let wire = wire_request(&spec(p), &[vec![1, 2, 3]]);
             assert!(wire.to_string().contains("AQID"));
             assert_eq!(wire["stream"], false);
         }
         assert_eq!(wire_request(&spec(Provider::Openai), &[])["store"], false);
+        assert_eq!(wire_request(&spec(Provider::Meta), &[])["store"], false);
+    }
+    #[test]
+    fn meta_responses_keep_prompts_stateless_and_read_reported_tokens() {
+        let mut request = spec(Provider::Meta);
+        request.model = "muse-wonder-1.0".into();
+        request.system = "Inspect screenshots.".into();
+        assert!(request.validate().is_ok());
+        assert_eq!(
+            Provider::Meta.endpoint(),
+            "https://api.meta.ai/v1/responses"
+        );
+        assert_eq!(Provider::Meta.key_env(), "META_API_KEY");
+        let wire = wire_request(&request, &[vec![1, 2, 3]]);
+        assert_eq!(wire["model"], "muse-wonder-1.0");
+        assert_eq!(wire["instructions"], "Inspect screenshots.");
+        assert_eq!(wire["stream"], false);
+        assert_eq!(wire["store"], false);
+        assert!(wire.get("provider").is_none());
+        assert_eq!(wire["input"][0]["role"], "user");
+        assert_eq!(wire["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(wire["input"][0]["content"][1]["type"], "input_image");
+        assert!(
+            wire["input"][0]["content"][1]["image_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+        let mut result = CallResult::unknown(Uuid::new_v4(), "pending");
+        result.http_status = Some(200);
+        interpret(Provider::Meta,br#"{"id":"resp_1","status":"completed","model":"muse-wonder-1.0","output":[{"type":"message","content":[{"type":"output_text","text":"The page is ready."}]}],"usage":{"input_tokens":69,"output_tokens":163,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":20}}}"#,&mut result);
+        assert_eq!(result.state, "completed");
+        assert_eq!(result.output_text.as_deref(), Some("The page is ready."));
+        assert_eq!(result.returned_model.as_deref(), Some("muse-wonder-1.0"));
+        assert_eq!(result.provider_request_id.as_deref(), Some("resp_1"));
+        assert_eq!(result.usage.input_tokens, Some(69));
+        assert_eq!(result.usage.output_tokens, Some(163));
+        assert_eq!(result.usage.cached_input_tokens, Some(4));
+        assert_eq!(result.usage.reasoning_tokens, Some(20));
+        assert_eq!(result.usage.cost_usd, None);
+        assert_eq!(result.usage.usage_status, "reported");
     }
     #[test]
     fn cache_and_reasoning_tokens_are_not_double_counted() {

@@ -1,6 +1,6 @@
 // Scripted answers for transport/integration verification, not an AI quality test.
 export function explorerInput(body, provider) {
-  const content = provider === 'openai' ? body.input?.[0]?.content : body.messages?.find(m => m.role === 'user')?.content;
+  const content = provider === 'openai' || provider === 'meta' ? body.input?.[0]?.content : body.messages?.find(m => m.role === 'user')?.content;
   const text = typeof content === 'string' ? content : content?.find(c => c.type === 'text' || c.type === 'input_text')?.text;
   try { const value = JSON.parse(text); return ['navigation_prediction', 'route_prediction', 'plan', 'assessment', 'fix_verification_assessment'].includes(value.task) ? value : null; }
   catch { return null; }

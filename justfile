@@ -43,9 +43,18 @@ up:
 
 dev: up
 
+# Recreate the API so it loads the current .env. Does not rebuild the image.
+reload-env:
+    docker compose up -d --no-deps --force-recreate --wait api
+
 # Start the local workspace and print its URL.
 ui: up
     @echo "Scout workspace: http://127.0.0.1:18080"
+    @echo "Scout back office (operators): http://127.0.0.1:18083"
+
+# The operator console runs in its own container, separate from the customer workspace.
+backoffice: up
+    @echo "Scout back office (operators): http://127.0.0.1:18083"
 
 # Real GUI API/worker integration with simulated models; restores normal mode.
 workspace-test:
@@ -56,7 +65,7 @@ outcomes-test:
     bash scripts/test-explorer.sh test/outcomes.test.ts
 
 web-test:
-    node --test apps/web/*.test.mjs
+    node --test apps/web/test/*.test.mjs packages/web-ui/test/*.test.mjs apps/backoffice/test/*.test.mjs
 
 # Durable editable defaults, admission snapshots and retries without inference.
 settings-test:

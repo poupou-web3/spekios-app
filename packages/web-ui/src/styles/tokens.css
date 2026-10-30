@@ -1,0 +1,75 @@
+/* Design tokens for every Scout page.
+   Each value is defined once as light-dark(light, dark). The resolved side follows
+   color-scheme: the operating system by default, or data-theme="light|dark" on <html>
+   when the person picks a theme (see theme.js). The page CSP allows no remote assets. */
+:root {
+  color-scheme: light dark;
+  --font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* Surfaces and text: cool neutrals. */
+  --bg: light-dark(#f6f7f9, #0e1015);
+  --surface: light-dark(#fff, #151820);
+  --surface-2: light-dark(#f3f4f7, #1a1e27);
+  --surface-3: light-dark(#e9ebf0, #232836);
+  --sidebar: light-dark(#eff1f5, #11141b);
+  --border: light-dark(#e1e4ea, #272c38);
+  --border-strong: light-dark(#cbd0da, #3a4152);
+  --text: light-dark(#151922, #e6e9f0);
+  --text-2: light-dark(#3b4252, #b6bccb);
+  --muted: light-dark(#5b6375, #8f96a8);
+
+  /* Brand: cobalt. Kept away from green, which the status palette reserves for passing checks. */
+  --brand: light-dark(#3047d6, #8b9cff);
+  --brand-hover: light-dark(#2539bd, #a2b0ff);
+  --on-brand: light-dark(#fff, #0c1033);
+  --brand-soft: light-dark(#eef1fe, #1b2142);
+  --brand-line: light-dark(#d3daf9, #2d3768);
+  --brand-text: light-dark(#2c41c4, #a7b4ff);
+  --brand-strong: light-dark(#3a51e0, #8b9cff);
+  --on-brand-strong: light-dark(#fff, #0c1033);
+  --mark-bg: #3047d6;
+  --mark-fg: #fff;
+  --accent-btn: light-dark(#e8ecfe, #1f2650);
+  --accent-btn-line: light-dark(#c9d2fb, #34408a);
+  --accent-btn-text: light-dark(#2537b0, #c3ccff);
+  --focus: light-dark(#3a51e0, #8b9cff);
+  --focus-ring: light-dark(rgb(58 81 224 / 20%), rgb(139 156 255 / 30%));
+
+  /* Status. "Running" uses cyan so it never reads as the cobalt brand. */
+  --green: light-dark(#1f6b3f, #7fd29b);
+  --green-bg: light-dark(#e9f6ee, #13281b);
+  --green-line: light-dark(#cbe7d5, #22442e);
+  --green-dot: light-dark(#2f9e5c, #4fc27a);
+  --amber: light-dark(#87570b, #f1c46b);
+  --amber-bg: light-dark(#fdf5e2, #2d2412);
+  --amber-line: light-dark(#f1dfb0, #4a3a17);
+  --amber-dot: light-dark(#d29a2a, #e0a93f);
+  --red: light-dark(#a8322a, #f4968b);
+  --red-bg: light-dark(#fdeeed, #331816);
+  --red-line: light-dark(#f5d0cc, #542621);
+  --red-dot: light-dark(#d6564a, #e3685b);
+  --blue: light-dark(#0c6683, #79cdea);
+  --blue-bg: light-dark(#e5f5fa, #0d2731);
+  --blue-line: light-dark(#c2e5f0, #194252);
+  --blue-dot: light-dark(#1592c0, #3db3dc);
+
+  /* Supporting surfaces. */
+  --checker: light-dark(#eef0f4, #1b1f28);
+  --code-bg: light-dark(#f6f7fa, #11141b);
+  --code-text: light-dark(#2f3a52, #c3cad8);
+  --hero-glow: light-dark(#e7ebfd, #19203f);
+  --row-hover: light-dark(#f9fafb, #191d26);
+  --overlay: light-dark(rgb(16 20 30 / 40%), rgb(0 0 0 / 55%));
+  --toast-bg: light-dark(#161b2a, #e6e9f0);
+  --toast-text: light-dark(#fff, #10131b);
+  --shadow-sm: 0 1px 2px light-dark(rgb(16 24 40 / 5%), rgb(0 0 0 / 30%));
+  --shadow-md: 0 8px 28px light-dark(rgb(16 24 40 / 8%), rgb(0 0 0 / 35%));
+  --shadow-lg: 0 24px 64px light-dark(rgb(16 24 40 / 18%), rgb(0 0 0 / 50%));
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }

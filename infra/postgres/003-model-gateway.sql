@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS model_requests (
   user_id uuid NOT NULL,
   run_id uuid REFERENCES runtime_runs(run_id),
   action_id uuid,
-  provider text NOT NULL CHECK (provider IN ('openai','anthropic','openrouter')),
+  provider text NOT NULL CHECK (provider IN ('openai','anthropic','openrouter','meta')),
   model text NOT NULL,
   execution_mode text NOT NULL DEFAULT 'live' CHECK (execution_mode IN ('live','protocol_fixture')),
   spec jsonb NOT NULL,

@@ -40,7 +40,7 @@ Normal screenshots resume after login and can contain app-displayed personal dat
 
 Saved cookies, local storage and supported IndexedDB state are encrypted in a separate local vault. Session reuse ends after 24 hours, revocation or earlier app-side expiry.
 
-Remove saved sessions from **Back office → Connections**. Revocation prevents future loading; a browser that already loaded a session may remain signed in until it closes.
+Remove saved sessions from the workspace under **Settings → Saved app sessions**. Revocation prevents future loading; a browser that already loaded a session may remain signed in until it closes.
 
 The worker pauses during the handoff. Requests expire after ten minutes, with at most three handoffs per run. Interruption does not replay private human inputs.
 

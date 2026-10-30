@@ -6,7 +6,7 @@ import { explore } from '../src/explorer.js';
 import { image } from '../src/recorder.js';
 import { ModelClient, modelSettings } from '../src/model-client.js';
 import { explorationFixture } from '../src/exploration-fixture.js';
-import { blockedReason, parseAssessment, parsePlan, validateTarget } from '../src/exploration-policy.js';
+import { blockedReason, parseAssessment, parsePlan, permitBrowserRequest, validateTarget } from '../src/exploration-policy.js';
 import type { ObservedControl } from '../src/contracts.js';
 
 const control: ObservedControl = { control_id: 'a'.repeat(24), role: 'button', name: 'Preview', href: null, disabled: false, submits_form: false, ambiguous: false };
@@ -20,6 +20,9 @@ test('provider selection cannot accidentally reuse the default OpenRouter model'
     assert.throws(() => modelSettings(), /Configure SCOUT_EXPLORER_MODEL/);
     process.env.SCOUT_EXPLORER_PROVIDER = 'openai';
     assert.throws(() => modelSettings(), /Configure SCOUT_EXPLORER_MODEL/);
+    process.env.SCOUT_EXPLORER_PROVIDER = 'meta';
+    assert.equal(modelSettings().model, 'muse-wonder-1.0');
+    assert.equal(modelSettings().provider, 'meta');
   } finally {
     if (savedProvider === undefined) delete process.env.SCOUT_EXPLORER_PROVIDER; else process.env.SCOUT_EXPLORER_PROVIDER = savedProvider;
     if (savedModel === undefined) delete process.env.SCOUT_EXPLORER_MODEL; else process.env.SCOUT_EXPLORER_MODEL = savedModel;
@@ -40,6 +43,39 @@ test('model output cannot add tools, invent controls or forge evidence', () => {
   assert.equal(blockedReason({...control,role:'link',href:'http://postgres:5432/'},'http://fixture'), 'outside_allowed_origin');
   assert.throws(() => validateTarget('http://name:secret@fixture/', ['http://fixture']), /controlled-app/);
   assert.throws(() => validateTarget('http://unconfigured/', ['http://fixture']), /controlled-app/);
+  assert.equal(validateTarget('https://bubblemaps.io/map', ['http://fixture']), 'https://bubblemaps.io/map');
+  assert.throws(() => validateTarget('http://bubblemaps.io/', ['http://fixture']), /controlled-app/);
+  assert.throws(() => validateTarget('https://127.0.0.1/', ['http://fixture']), /controlled-app/);
+  assert.throws(() => validateTarget('https://app.internal/', ['http://fixture']), /controlled-app/);
+});
+test('public pages load public subresources and stay on the entry document', () => {
+  const page = 'https://v2.bubblemaps.io';
+  const allow = ['http://exploration-fixture:8082', 'http://127.0.0.1:3000', page];
+  for (const url of [page + '/assets/app.js', 'https://api.bubblemaps.io/screener/tokens', 'https://shop.bubblemaps.io/token-ads',
+    'https://fonts.googleapis.com/css2?family=Inter', 'https://www.googletagmanager.com/gtm.js',
+    'https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel', 'https://eu-assets.i.posthog.com/static/array.js',
+    'wss://firestore.googleapis.com/ws', 'wss://v2.bubblemaps.io/live', 'data:image/png;base64,aaaa', 'blob:https://v2.bubblemaps.io/8c1d', 'about:blank', 'about:srcdoc'])
+    assert.equal(permitBrowserRequest(page, url, 'subresource', allow), true, url);
+  for (const url of ['http://api.bubblemaps.io/tokens', 'http://169.254.169.254/latest/meta-data', 'http://127.0.0.1/', 'https://127.0.0.1/',
+    'http://localhost/admin', 'https://metadata.google.internal/computeMetadata/v1/', 'https://app.internal/', 'https://printer.local/',
+    'https://user:pass@api.bubblemaps.io/tokens', 'https://api.bubblemaps.io:8443/tokens', 'ws://api.bubblemaps.io/socket', 'javascript:alert(1)',
+    'file:///etc/passwd', 'http://exploration-fixture:8082/secret', 'http://127.0.0.1:3000/', 'https://2130706433/'])
+    assert.equal(permitBrowserRequest(page, url, 'subresource', allow), false, url);
+  assert.equal(permitBrowserRequest(page, page + '/map', 'main', allow), true);
+  assert.equal(permitBrowserRequest(page, 'about:blank', 'main', allow), true);
+  for (const url of ['https://api.bubblemaps.io/', 'https://accounts.google.com/o/oauth2/auth', 'data:text/html,hi', 'http://exploration-fixture:8082/'])
+    assert.equal(permitBrowserRequest(page, url, 'main', allow), false, url);
+  const fixture = 'http://exploration-fixture:8082';
+  assert.equal(permitBrowserRequest(fixture, fixture + '/journeys/result', 'subresource', allow), true);
+  assert.equal(permitBrowserRequest(fixture, 'ws://exploration-fixture:8082/ws', 'subresource', allow), true);
+  assert.equal(permitBrowserRequest(fixture, 'https://fonts.googleapis.com/css', 'subresource', allow), true);
+  assert.equal(permitBrowserRequest(fixture, 'http://127.0.0.1:3000/api', 'subresource', allow), true);
+  assert.equal(permitBrowserRequest(fixture, 'http://postgres:5432/', 'subresource', allow), false);
+  assert.equal(permitBrowserRequest(fixture, 'http://169.254.169.254/', 'subresource', allow), false);
+  assert.equal(permitBrowserRequest(fixture, fixture + '/journeys/search', 'main', allow), true);
+  assert.equal(permitBrowserRequest(fixture, 'https://fonts.googleapis.com/', 'main', allow), false);
+  assert.equal(permitBrowserRequest(fixture, 'http://127.0.0.1:3000/', 'main', allow), false);
+  assert.equal(permitBrowserRequest(page, 'not a url', 'subresource', allow), false);
 });
 
 test('model-driven browser loop preserves evidence, graph and uncertainty', {

@@ -1,6 +1,6 @@
 # ScoutQA documentation
 
-Independent, self-hostable documentation built with Astro 7 and Starlight. It provides 37 original guides and 24 generated tool pages across product, getting started, workspace, agents, API and operations sections. Public content is curated separately from the repository’s internal plans and recordings.
+Independent, self-hostable documentation built with Astro 7 and Starlight. It provides 37 original guides and 24 generated tool pages across product, getting started, workspace, agents, API and operations sections. Public content is curated separately from the repository’s internal plans in [docs/](../../docs/README.md).
 
 ## Run with Docker
 

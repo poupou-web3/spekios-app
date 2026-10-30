@@ -1,7 +1,8 @@
-import { chromium, type Page } from 'playwright';
+import { chromium, type BrowserContext, type Page } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { comparePng } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
+import { permitBrowserRequest } from './exploration-policy.js';
 import { validatePlan, type ActionSpec, type Expectation, type Assessment, type Capture, type Observation } from './contracts.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 1000) : 'Unknown runtime failure';
@@ -15,6 +16,28 @@ export type Hooks = {
 
 export async function image(page: Page, timeout = 5000) {
   return page.screenshot({ type: 'png', fullPage: false, animations: 'allow', caret: 'hide', scale: 'device', timeout });
+}
+
+export async function installNetworkGate(context: BrowserContext, pageOrigin: string, allowedOrigins: readonly string[] = []) {
+  await context.route('**/*', async route => {
+    try {
+      const request = route.request();
+      const main = request.isNavigationRequest() && !request.frame()?.parentFrame();
+      const allowed = permitBrowserRequest(pageOrigin, request.url(), main ? 'main' : 'subresource', allowedOrigins);
+      if (allowed) await route.continue();
+      else await route.abort('blockedbyclient');
+    } catch {
+      try { await route.abort('blockedbyclient'); } catch { /* The browser already finished this request. */ }
+    }
+  });
+  await context.routeWebSocket('**/*', async socket => {
+    try {
+      if (permitBrowserRequest(pageOrigin, socket.url(), 'subresource', allowedOrigins)) socket.connectToServer();
+      else await socket.close();
+    } catch {
+      try { await socket.close(); } catch { /* The socket is already closed. */ }
+    }
+  });
 }
 async function expectedValue(page: Page, expected: Expectation): Promise<string | null> {
   if (expected.kind === 'url_equals') return page.url();
@@ -81,8 +104,8 @@ export async function record(store: Store, targetUrl: string, input: ActionSpec[
       const context = await browser.newContext({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1,
         serviceWorkers: 'block', acceptDownloads: false, locale: 'en-US', reducedMotion: 'no-preference' });
       const origin = new URL(targetUrl).origin;
-      await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
-      await context.routeWebSocket('**/*', socket => socket.close());
+      const allowedOrigins = (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
+      await installNetworkGate(context, origin, allowedOrigins);
       const page = await context.newPage();
       page.setDefaultTimeout(2000);
       page.on('dialog', dialog => void dialog.dismiss());

@@ -10,13 +10,15 @@ const get=async path=>{
   assert.equal(r.status,200,path);return r.json();
 };
 const sha=value=>createHash('sha256').update(value).digest('hex');
-for(const file of ['app.js','app.css','report-export.js','report-bundle.js']){
+// Served path below /assets/ → source file. The back office is a separate container and must not be served here.
+for(const [file,source] of [['app/main.js','apps/web/src/main.js'],['app/views/run.js','apps/web/src/views/run.js'],['app/styles/workspace.css','apps/web/src/styles/workspace.css'],['app/report/export.js','apps/web/src/report/export.js'],['app/report/bundle.js','apps/web/src/report/bundle.js'],['ui/styles/tokens.css','packages/web-ui/src/styles/tokens.css'],['ui/theme.js','packages/web-ui/src/theme.js']]){
   const served=await fetch(origin+'/assets/'+file);assert.equal(served.status,200);
   assert.equal(served.headers.get('cache-control'),'no-store',file);
   assert.equal(served.headers.get('x-content-type-options'),'nosniff',file);
   assert.equal(served.headers.get('content-type'),file.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8',file);
-  assert.equal(sha(await served.text()),sha(await readFile(new URL('../apps/web/'+file,import.meta.url),'utf8')),'Current '+file+' must be served.');
+  assert.equal(sha(await served.text()),sha(await readFile(new URL('../'+source,import.meta.url),'utf8')),'Current '+file+' must be served.');
 }
+assert.equal((await fetch(origin+'/assets/app/../../../apps/backoffice/src/main.js')).status,404,'The back office is not part of the workspace deployment.');
 const {runs}=await get('/v1/runs');let calls=0,reviews=0;
 assert.ok(runs.length>0,'Run the local fixture suite before this verification.');
 for(const run of runs){
