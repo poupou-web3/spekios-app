@@ -22,7 +22,7 @@ Before dispatch, a fresh observation must match the planning state. The worker r
 
 Each action retains its exact typed parameters, prediction, action UUID, before/after capture UUIDs, image differences, model assessment and usage. Text values, selected option values, checkbox/radio state and scroll position participate in state identity. A lack of visible change still triggers assessment.
 
-Screenshots now hide the blinking text caret using Playwright's screenshot setting. The run records `screenshot_caret: "hide"`; the remaining screenshot pixels and one-pixel differences are preserved. This prevents a caret blink alone from repeatedly invalidating a text-entry plan. Other animations remain visible; continuous changes can now reach the completion deadline and stop exploration as inconclusive.
+Screenshots hide the caret and hold CSS animations on their initial frame. The run records `screenshot_caret: "hide"`, `screenshot_animations: "disabled"`, reduced motion, and a clock paused for the screenshot and DOM read. The stored frame keeps its exact pixels, including one-pixel differences. A caret blink or a CSS spinner does not by itself invalidate a plan. Visible text that keeps changing can still reach the completion deadline and stop exploration as inconclusive.
 
 Fresh reproduction preserves the original values, booleans, scroll targets, expected results and viewport. It validates each control against fresh evidence, runs the recorded path once and separately assesses every step. Changed preconditions remain inconclusive. Reproduction does not guess replacement inputs or add submissions to repair a path. Recorded permitted submissions replay their exact parameters, subject to current permissions.
 

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { Page } from 'playwright';
 import { hash, jsonBytes } from './store.js';
 import type { Capture, ControlAction, ObservedControl } from './contracts.js';
@@ -139,7 +140,7 @@ export async function observeControls(page: Page, rules: TestFormRule[] = testFo
   });
   const controls: ObservedControl[] = candidates.controls.map(c => authorizeForm({ ...c,
     ...(c.form?{form:{...c.form,signature:hash(Buffer.from(c.form.signature))}}:{}),
-    control_id: hash(jsonBytes({ url: page.url(), role: c.role, name: c.name, href: c.href })).slice(0, 24) }, new URL(page.url()).origin,rules));
+    control_id: hash(jsonBytes({ url: page.url(), role: c.role, name: stabilizeText(c.name), href: c.href })).slice(0, 24) }, new URL(page.url()).origin,rules));
   return { controls: [...new Map(controls.map(c => [c.control_id, c])).values()], controls_truncated: candidates.truncated };
 }
 
@@ -164,13 +165,114 @@ export function blockedReason(control: ObservedControl, origin: string): string 
   return null;
 }
 
-// No rounding, visual threshold, or semantic similarity merge: a one-pixel
-// difference produces a different node. Timing is excluded from state identity.
-export function stateFingerprint(capture: Capture) {
+// Clocks, dates and relative labels are the same page a moment later. The
+// replacement is a token so "2s ago" and "5 minutes ago" share an identity
+// while "Ready" and "Saved" do not.
+const VOLATILE_TEXT: readonly RegExp[] = [
+  /\b\d{4}-\d{2}-\d{2}(?:[tT ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g,
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b/gi,
+  /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?,?\s+\d{4}\b/gi,
+  /\b(?:an?|\d+)\s+(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?)\s+ago\b/gi,
+  /\b\d+\s*[smhd]\s+ago\b/gi,
+  /\bjust now\b|\bmoments? ago\b/gi,
+  /\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?\b/gi,
+];
+export const GEOMETRY_TOLERANCE_PX = 8;
+
+export function stabilizeText(value: string): string {
+  let text = value.normalize('NFKC');
+  for (const pattern of VOLATILE_TEXT) {
+    pattern.lastIndex = 0;
+    text = text.replace(pattern, '<time>');
+  }
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function stabilizeField(value: string | null | undefined): string | null {
+  if (value == null) return value ?? null;
+  return stabilizeText(value);
+}
+
+function quantize(value: number): number {
+  return Math.round(value / GEOMETRY_TOLERANCE_PX) * GEOMETRY_TOLERANCE_PX;
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])]));
+}
+
+function mapAddress(url: string | null, mapUrl: (url: string) => string): string | null {
+  if (!url || url === 'about:blank') return url;
+  return mapUrl(url);
+}
+
+// Screenshot bytes stay on the capture. State identity is the route, the
+// control set and the visible copy, with clock text and a few pixels of
+// scroll tolerated. Rectangles and control ids are not part of that set.
+function projectControl(control: ObservedControl, mapUrl: (url: string) => string) {
+  const { control_id: _controlId, rect: _rect, form, scroll_target: scrollTarget, options, ...rest } = control;
+  const projected: Record<string, unknown> = {
+    ...rest,
+    name: stabilizeText(control.name),
+    href: mapAddress(control.href, mapUrl),
+    occluded: control.occluded ?? false,
+  };
+  if (scrollTarget) projected.scroll_target = { direction: scrollTarget.direction, x: quantize(scrollTarget.x), y: quantize(scrollTarget.y) };
+  if (options) projected.options = options.map(option => ({ ...option, label: stabilizeText(option.label) }));
+  if (control.read_only && typeof control.value === 'string') projected.value = stabilizeText(control.value);
+  if (control.validation_message != null) projected.validation_message = stabilizeText(control.validation_message);
+  if (form) {
+    const { signature: _signature, ...formRest } = form;
+    projected.form = { ...formRest, action: mapAddress(form.action, mapUrl) };
+  }
+  return projected;
+}
+
+export function projectState(capture: Capture, mapUrl: (url: string) => string = url => url, auth: 'id' | 'presence' = 'id') {
   const o = capture.observation;
-  return hash(jsonBytes({ ...(o.auth_context_id?{auth_context_id:o.auth_context_id}:{}), screenshot_sha256: capture.sha256, url: o.url, title: o.title, text: o.text,
-    text_truncated: o.text_truncated, viewport: o.viewport, scroll: o.scroll,
-    controls: (o.controls ?? []).map(({rect: _rect, occluded, ...control}) => ({...control, occluded: occluded ?? false})), controls_truncated: o.controls_truncated ?? false }));
+  return {
+    ...(auth === 'id' && o.auth_context_id ? { auth_context_id: o.auth_context_id } : {}),
+    ...(auth === 'presence' ? { authenticated: !!o.auth_context_id } : {}),
+    url: mapAddress(o.url, mapUrl),
+    title: stabilizeField(o.title),
+    text: stabilizeField(o.text),
+    text_truncated: o.text_truncated,
+    viewport: o.viewport,
+    device_scale: o.device_scale,
+    scroll: o.scroll ? { x: quantize(o.scroll.x), y: quantize(o.scroll.y) } : o.scroll,
+    controls: (o.controls ?? []).map(control => projectControl(control, mapUrl)),
+    controls_truncated: o.controls_truncated ?? false,
+  };
+}
+
+export function stateFingerprint(capture: Capture) {
+  return hash(jsonBytes(canonical(projectState(capture))));
+}
+
+export function findObservedControl(recorded: ObservedControl, controls: readonly ObservedControl[]): ObservedControl | undefined {
+  const same = (control: ObservedControl) => isDeepStrictEqual(projectControl(control, url => url), projectControl(recorded, url => url));
+  const exact = controls.find(control => control.control_id === recorded.control_id);
+  if (exact) return same(exact) ? exact : undefined;
+  const matches = controls.filter(same);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function statesMatch(left: Capture, right: Capture): boolean {
+  return !left.observation.observation_error && !right.observation.observation_error && stateFingerprint(left) === stateFingerprint(right);
+}
+
+// Fix verification and same-app reproduction share this comparison. Pixels,
+// control ids and form signatures may differ. Authentication is presence, so a
+// candidate can use its own saved session.
+export function sameObservedState(left: Capture, right: Capture, mapLeftUrl: (url: string) => string = url => url): boolean {
+  if (left.observation.observation_error || right.observation.observation_error) return false;
+  return isDeepStrictEqual(projectState(left, mapLeftUrl, 'presence'), projectState(right, url => url, 'presence'));
+}
+
+export function observedCopyIdentity(parts: { url: string; title: string | null; text: string | null }): string {
+  return hash(jsonBytes(canonical({ url: parts.url, title: stabilizeField(parts.title), text: stabilizeField(parts.text) })));
 }
 
 type Obj = Record<string, unknown>;

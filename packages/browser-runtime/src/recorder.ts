@@ -14,8 +14,32 @@ export type Hooks = {
   observe?: (page: Page) => Promise<Pick<Observation, 'controls' | 'controls_truncated'>>;
 };
 
+export const CAPTURE_POLICY = {
+  screenshot_caret: 'hide',
+  screenshot_animations: 'disabled',
+  reduced_motion: 'reduce',
+  capture_clock: 'paused_during_capture',
+} as const;
+
+// CSS animations are held on the initial frame for the PNG only. The bytes
+// stored afterwards are still the exact device pixels of that frame.
 export async function image(page: Page, timeout = 5000) {
-  return page.screenshot({ type: 'png', fullPage: false, animations: 'allow', caret: 'hide', scale: 'device', timeout });
+  return page.screenshot({ type: 'png', fullPage: false, animations: 'disabled', caret: 'hide', scale: 'device', timeout });
+}
+
+// Installed before navigation, then left running. Capture pauses it so a clock
+// or timer-driven frame cannot move between the screenshot and the DOM read.
+export async function prepareCaptureContext(context: BrowserContext) {
+  await context.clock.install({ time: Date.now() });
+  await context.clock.resume();
+}
+
+export async function withFrozenClock<T>(page: Page, body: () => Promise<T>): Promise<T> {
+  let now = Date.now();
+  try { now = await page.evaluate(() => Date.now()); } catch { /* Navigation can replace the page world before the read. */ }
+  await page.clock.pauseAt(now);
+  try { return await body(); }
+  finally { await page.clock.resume().catch(() => {}); }
 }
 
 export async function installNetworkGate(context: BrowserContext, pageOrigin: string, allowedOrigins: readonly string[] = []) {
@@ -50,28 +74,31 @@ export async function capture(store: Store, page: Page, runId: string, actionId:
   await hooks.beforeCapture?.(page);
   const id = await store.beginCapture(runId, actionId, phase);
   try {
-    const started = new Date().toISOString();
-    const bytes = await (hooks.screenshot ? hooks.screenshot(page, phase, ordinal) : image(page));
-    await hooks.beforeCapture?.(page);
-    const finished = new Date().toISOString();
-    let state: Pick<Observation, 'title' | 'text' | 'text_truncated' | 'scroll' | 'device_scale'> = { title: null, text: null, text_truncated: null, scroll: null, device_scale: null };
-    let value: string | null = null;
-    let observationError: string | null = null;
-    let controls: Pick<Observation, 'controls' | 'controls_truncated'> = {};
-    try {
-      state = await page.evaluate(() => {
-        const text = document.body?.innerText ?? '';
-        return { title: document.title, text: text.slice(0, 8000), text_truncated: text.length > 8000,
-          scroll: { x: window.scrollX, y: window.scrollY }, device_scale: window.devicePixelRatio };
-      });
-      value = expected ? await expectedValue(page, expected) : null;
-      controls = await hooks.observe?.(page) ?? {};
-    } catch (error) { observationError = message(error); }
-    // A failed DOM read must not discard a screenshot that was already taken.
-    const observation: Observation = { ...state, ...controls, ...hooks.observationContext?.(), url: page.url(), viewport: page.viewportSize()!,
-      observed_value: value, observation_error: observationError, observed_at: new Date().toISOString(),
-      screenshot_started_at: started, screenshot_finished_at: finished };
-    return { capture: await store.saveCapture(runId, actionId, id, phase, bytes, observation), bytes };
+    const shot = await withFrozenClock(page, async () => {
+      const started = new Date().toISOString();
+      const bytes = await (hooks.screenshot ? hooks.screenshot(page, phase, ordinal) : image(page));
+      await hooks.beforeCapture?.(page);
+      const finished = new Date().toISOString();
+      let state: Pick<Observation, 'title' | 'text' | 'text_truncated' | 'scroll' | 'device_scale'> = { title: null, text: null, text_truncated: null, scroll: null, device_scale: null };
+      let value: string | null = null;
+      let observationError: string | null = null;
+      let controls: Pick<Observation, 'controls' | 'controls_truncated'> = {};
+      try {
+        state = await page.evaluate(() => {
+          const text = document.body?.innerText ?? '';
+          return { title: document.title, text: text.slice(0, 8000), text_truncated: text.length > 8000,
+            scroll: { x: window.scrollX, y: window.scrollY }, device_scale: window.devicePixelRatio };
+        });
+        value = expected ? await expectedValue(page, expected) : null;
+        controls = await hooks.observe?.(page) ?? {};
+      } catch (error) { observationError = message(error); }
+      // A failed DOM read must not discard a screenshot that was already taken.
+      const observation: Observation = { ...state, ...controls, ...hooks.observationContext?.(), url: page.url(), viewport: page.viewportSize()!,
+        observed_value: value, observation_error: observationError, observed_at: new Date().toISOString(),
+        screenshot_started_at: started, screenshot_finished_at: finished };
+      return { bytes, observation };
+    });
+    return { capture: await store.saveCapture(runId, actionId, id, phase, shot.bytes, shot.observation), bytes: shot.bytes };
   } catch (error) {
     // Keep pending_upload when a durable capture can be recovered from the spool.
     await store.query("UPDATE runtime_captures SET status=CASE WHEN status='capturing' THEN 'failed' ELSE status END,error=$2 WHERE capture_id=$1", [id, message(error)]);
@@ -86,7 +113,7 @@ export async function record(store: Store, targetUrl: string, input: ActionSpec[
     await store.transaction(async () => {
       await store.query("INSERT INTO runtime_runs(run_id,workspace_id,user_id,target_url,lifecycle,config) VALUES($1,$2,$3,$4,'active',$5)",
         [runId, store.workspaceId, store.userId, targetUrl, JSON.stringify({ runtime_version: 'recorder-v1', expectation_source: 'fixture_defined',
-          viewport: { width: 800, height: 600 }, device_scale: 1, video: false, screenshot_caret:'hide', service_workers: 'block', model_connection: null,
+          viewport: { width: 800, height: 600 }, device_scale: 1, video: false, ...CAPTURE_POLICY, service_workers: 'block', model_connection: null,
           scope: 'controlled-local-fixture', purpose: 'runtime_validation', training_status: 'excluded_fixture' })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, planned_actions: specs.length });
     });
@@ -102,7 +129,8 @@ export async function record(store: Store, targetUrl: string, input: ActionSpec[
         await store.event(runId, 'browser.ready', { browser_version: browserVersion });
       });
       const context = await browser.newContext({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1,
-        serviceWorkers: 'block', acceptDownloads: false, locale: 'en-US', reducedMotion: 'no-preference' });
+        serviceWorkers: 'block', acceptDownloads: false, locale: 'en-US', reducedMotion: CAPTURE_POLICY.reduced_motion });
+      await prepareCaptureContext(context);
       const origin = new URL(targetUrl).origin;
       const allowedOrigins = (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
       await installNetworkGate(context, origin, allowedOrigins);

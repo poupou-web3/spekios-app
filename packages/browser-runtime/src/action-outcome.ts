@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { Page, Request, Response, ConsoleMessage } from 'playwright';
 import { hash, jsonBytes, type Store } from './store.js';
-import { image, type Hooks } from './recorder.js';
+import { GEOMETRY_TOLERANCE_PX, observedCopyIdentity, stabilizeText } from './exploration-policy.js';
+import { image, withFrozenClock, type Hooks } from './recorder.js';
 import { PrivateLoginSurface } from './access-detection.js';
 import { RunCancelled } from './run-control.js';
 
@@ -12,7 +13,8 @@ type Artifact = Awaited<ReturnType<Store['artifact']>>;
 type Event = { event_id:string; kind:string; offset_ms:number; [key:string]:unknown };
 export type Completion = { version:string; status:'settled'|'timed_out'|'observation_failed'; elapsed_ms:number;
   limits:typeof COMPLETION_LIMITS; samples:number; observation_failures:number; visual_changes:number; dom_changes:number; url_changes:number;
-  pending_requests:number; busy:boolean; reason:string; frames:{frame_id:string;observed_at:string;offset_ms:number;sha256:string;artifact:Artifact}[] };
+  pending_requests:number; busy:boolean; reason:string; settled_observation_sha256?: string;
+  frames:{frame_id:string;observed_at:string;offset_ms:number;sha256:string;artifact:Artifact}[] };
 export function incompleteCompletion(reason:string):Completion {
   return {version:COMPLETION_VERSION,status:'observation_failed',elapsed_ms:0,limits:{...COMPLETION_LIMITS},samples:0,observation_failures:0,
     visual_changes:0,dom_changes:0,url_changes:0,pending_requests:0,busy:false,reason,frames:[]};
@@ -108,10 +110,10 @@ function observationBoundary(error:unknown) {
 }
 
 // Stability is bounded evidence, not proof the app has no future work. Exact
-// pixels are retained; continuous animation reaches the deadline instead of
-// spawning an unbounded sequence of exploration nodes. A screenshot uses the
-// time left in the window: a one-second cap turns a slow readback into zero
-// frames. A connection open for long_lived_request_ms is a background channel.
+// pixels are retained. CSS animation is held still for each sample, and clock
+// text does not keep the page from going quiet. A screenshot uses the time
+// left in the window: a one-second cap turns a slow readback into zero frames.
+// A connection open for long_lived_request_ms is a background channel.
 export async function settleAction(store:Store,page:Page,runId:string,actionId:string,diagnostics:ActionDiagnostics,hooks:Hooks):Promise<Completion> {
   const started=performance.now(),limits={...COMPLETION_LIMITS};
   let lastVisual:string|undefined,lastDom:string|undefined,lastUrl:string|undefined,quietSince=started;
@@ -125,26 +127,41 @@ export async function settleAction(store:Store,page:Page,runId:string,actionId:s
     quietSince=performance.now();
   };
   const pause=()=>new Promise(resolve=>setTimeout(resolve,Math.min(limits.sample_interval_ms,Math.max(0,limits.timeout_ms-(performance.now()-started)))));
-  const readDom=()=>boundedRead(page.evaluate(()=>({url:location.href,busy:document.readyState==='loading'||Array.from(document.querySelectorAll('[aria-busy="true"],[role="progressbar"]')).some(node=>{
-    const rect=node.getBoundingClientRect(),style=getComputedStyle(node);return !!(rect.width&&rect.height)&&style.visibility==='visible'&&style.display!=='none';
-  }),signature:JSON.stringify([document.title,document.body?.innerText?.slice(0,12000),scrollX,scrollY,
-    Array.from(document.querySelectorAll('input,select,textarea,button,a[href],[role="status"],[role="alert"]')).slice(0,200).map(node=>{
-      const field=node as HTMLInputElement;return [node.tagName,node.textContent?.slice(0,200),field.type==='password'?'[private]':field.value?.slice(0,500),field.checked,field.disabled,node.getAttribute('aria-expanded'),node.getAttribute('aria-invalid')];
-    })])})),Math.min(1000,budget()));
+  const readDom=()=>boundedRead(page.evaluate(tolerance=>{
+    const text=document.body?.innerText??'';
+    const scroll={x:Math.round(scrollX/tolerance)*tolerance,y:Math.round(scrollY/tolerance)*tolerance};
+    const busy=document.readyState==='loading'||Array.from(document.querySelectorAll('[aria-busy="true"],[role="progressbar"]')).some(node=>{
+      const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
+      return !!(rect.width&&rect.height)&&style.visibility==='visible'&&style.display!=='none';
+    });
+    const signature=JSON.stringify([document.title,text.slice(0,12000),scroll,
+      Array.from(document.querySelectorAll('input,select,textarea,button,a[href],[role="status"],[role="alert"]')).slice(0,200).map(node=>{
+        const field=node as HTMLInputElement;
+        return [node.tagName,node.textContent?.slice(0,200),field.type==='password'?'[private]':field.value?.slice(0,500),field.checked,field.disabled,node.getAttribute('aria-expanded'),node.getAttribute('aria-invalid')];
+      })]);
+    return {url:location.href,title:document.title,text:text.slice(0,8000),busy,signature};
+  }, GEOMETRY_TOLERANCE_PX),Math.min(1000,budget()));
   while(performance.now()-started<limits.timeout_ms&&result.samples<limits.max_frames) {
     try{await hooks.beforeCapture?.(page);}
     catch(error){
       if(observationBoundary(error))throw error;
       noteFailure();await pause();continue;
     }
-    let dom:{url:string;signature:string;busy:boolean}|undefined,bytes:Buffer|undefined;
-    try{dom=await readDom();}catch(error){if(observationBoundary(error))throw error;}
-    if(performance.now()-started<limits.timeout_ms){
-      try{bytes=await image(page,budget());}
-      catch(error){if(observationBoundary(error))throw error;}
-    }
-    if(bytes&&!dom&&performance.now()-started<limits.timeout_ms){
-      try{dom=await readDom();}catch(error){if(observationBoundary(error))throw error;}
+    let dom:{url:string;title:string;text:string;signature:string;busy:boolean}|undefined,bytes:Buffer|undefined;
+    try {
+      await withFrozenClock(page, async () => {
+        try{dom=await readDom();}catch(error){if(observationBoundary(error))throw error;}
+        if(performance.now()-started<limits.timeout_ms){
+          try{bytes=await image(page,budget());}
+          catch(error){if(observationBoundary(error))throw error;}
+        }
+        if(bytes&&!dom&&performance.now()-started<limits.timeout_ms){
+          try{dom=await readDom();}catch(error){if(observationBoundary(error))throw error;}
+        }
+      });
+    } catch(error) {
+      if(observationBoundary(error))throw error;
+      noteFailure();await pause();continue;
     }
     if(!dom||!bytes){
       // Navigation can replace the execution context between samples. A later
@@ -157,7 +174,7 @@ export async function settleAction(store:Store,page:Page,runId:string,actionId:s
       if(observationBoundary(error))throw error;
       noteFailure();await pause();continue;
     }
-    const now=performance.now(),visual=hash(bytes),domHash=hash(Buffer.from(dom.signature));
+    const now=performance.now(),visual=hash(bytes),domHash=hash(Buffer.from(stabilizeText(dom.signature)));
     if(lastVisual&&visual!==lastVisual){result.visual_changes++;quietSince=now;}
     if(lastDom&&domHash!==lastDom){result.dom_changes++;quietSince=now;}
     if(lastUrl&&dom.url!==lastUrl){result.url_changes++;quietSince=now;}
@@ -170,7 +187,8 @@ export async function settleAction(store:Store,page:Page,runId:string,actionId:s
     // their originating action. These events also flow to ClickHouse.
     await store.transaction(()=>store.event(runId,'action.settling_frame',frame,actionId));
     if(now-started>=limits.minimum_ms&&now-Math.max(quietSince,diagnostics.lastActivity)>=limits.quiet_ms&&!dom.busy&&!diagnostics.blockingPending()) {
-      result.status='settled';result.reason='Pixels, observed DOM, URL and tracked requests were quiet within the bounded observation window.';break;
+      result.status='settled';result.settled_observation_sha256=observedCopyIdentity(dom);
+      result.reason='Screenshot, observed copy, URL and tracked requests were quiet within the bounded observation window.';break;
     }
     result.status='timed_out';
     await pause();

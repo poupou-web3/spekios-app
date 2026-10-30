@@ -8,7 +8,7 @@ The current decision is the latest review revision. Dismissed findings remain av
 
 The API verifies that the source is a completed suspect action from a terminal, original explorer run, with a supported frozen expectation, complete observations and available evidence. Tool errors, uncertain expectations and unresolved action completion cannot support confirmation. Deterministic recorder checks and replay actions cannot be reviewed as new source findings.
 
-Confirmation additionally requires the existing independent reproduction to have completed with `reproduced` and a matching final state. The service checks the saved path, source/replay action and capture IDs, frozen expectations, geometry and state fingerprints. It reads back screenshots and comparison/completion/diagnostic artifacts from private storage and verifies their byte lengths and SHA-256 hashes. A missing or invalid object prevents confirmation.
+Confirmation additionally requires the existing independent reproduction to have completed with `reproduced` and a matching final state. The service checks the saved path, source/replay action and capture IDs, frozen expectations, geometry and state fingerprints. Those fingerprints identify the route, controls and visible text. It reads back screenshots and comparison/completion/diagnostic artifacts from private storage and verifies each object's byte length and SHA-256. A missing or invalid object prevents confirmation.
 
 A reviewer may dismiss or reopen a complete candidate before reproduction succeeds. A human decision requires no new model call and remains available when no model provider is configured. The current local bearer token identifies one developer; separate reviewer accounts and hosted reviewer permissions remain future work.
 

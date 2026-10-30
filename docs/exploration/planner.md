@@ -7,7 +7,7 @@ This is a bounded exploration algorithm. Model scores are hypotheses about the n
 ## Observe, rank, act, assess
 
 1. Save a screenshot and observed native controls, including viewport rectangles and whether another element covers the control. Document scroll affordances also become candidates. Every occurrence has a capture UUID, even when identical PNG bytes share a bucket object.
-2. Identify the exact state from screenshot bytes, URL, text, controls, viewport and scroll. Keep all states and transitions; a one-pixel change can produce a distinct state.
+2. Identify the state from the URL, text, controls, viewport and scroll bucket. Clock and date labels, and screenshot bytes, do not split the state. A one-pixel mask is still stored with the action.
 3. Compare the previous and new screenshots. Count changed mask pixels inside each observed control, rather than treating the entire difference bounding box as changed. On the same URL, flag controls that became visible or enabled. Across URLs, the model interprets the new page without these change bonuses.
 4. Give the model the current discovery path, recent actions and outcomes, current screenshot, eligible controls and change signals. Ask for up to eight likely next actions, each with a goal, score and expected result. A fresh decision replaces older proposals at that state. Other states retain their pending proposals until revisited.
 5. Rank eligible, unattempted controls across all reachable states. Select a local action or the first recorded step needed to return to another branch. The remaining action budget must cover the return plus an unexplored action.

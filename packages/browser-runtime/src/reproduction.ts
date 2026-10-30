@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Store } from './store.js';
 import { isUuid, type BrowserCommand, type Capture } from './contracts.js';
-import { stateFingerprint } from './exploration-policy.js';
+import { sameObservedState, stateFingerprint } from './exploration-policy.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
 import { observedCommand } from './browser-interactions.js';
 import type { FixVerification } from './fix-verification.js';
@@ -88,7 +88,7 @@ export async function finishReplay(store: Store, replay: Replay, runId: string) 
       report.actions.every(a => !a.tool_error && a.assessment?.verdict !== 'inconclusive') &&
       target.spec.replay_source_action_id === replay.source_action_id) {
     const fresh = await readCapture(store, report.captures.find(c => c.capture_id === target.after_capture_id)!);
-    outcomeMatches = stateFingerprint(source.after) === stateFingerprint(fresh);
+    outcomeMatches = sameObservedState(source.after, fresh);
     if (target.assessment.verdict === 'suspect' && outcomeMatches) {
       outcome = 'reproduced';
       reason = 'Fresh replay reached matching preconditions and the same observed outcome; a separate assessment also found the frozen expectation unmet. The candidate still requires review.';

@@ -18,7 +18,7 @@ The planner combines model intent, novelty, changed pixels within controls and t
 
 ## Avoid stale and duplicate actions
 
-State fingerprints include the page, control state and authentication context. Previously attempted state/action combinations are tracked so the explorer can favor new work.
+State fingerprints are the page URL, visible text, control state and authentication context. Screenshot bytes stay on the capture and are diffed exactly. Previously attempted state/action combinations are tracked so the explorer can favor new work.
 
 Before dispatch, a fresh observation must match the planning state. The worker revalidates the selected control and exact parameters. A changed screen triggers replanning instead of executing a stale selector.
 
