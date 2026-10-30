@@ -8,7 +8,7 @@
   }
 }
 ---
-Use the workspace’s private login handoff when a controlled app requires an account. A person operates the same test browser, then hands it back to the explorer.
+Use the workspace’s private login handoff when an app requires an account. A person operates the same test browser, then hands it back to the explorer.
 
 ## Choose an access mode
 

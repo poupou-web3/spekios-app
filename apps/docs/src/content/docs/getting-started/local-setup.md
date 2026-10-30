@@ -39,9 +39,9 @@ bash scripts/start-local.sh
 
 Nonsecret defaults can then be changed from the workspace **Settings** page without restarting.
 
-## Permit a controlled target
+## Allow a local or private target
 
-Set **SCOUT_ALLOWED_ORIGINS** to the exact origin of an app you control. The browser worker runs inside Docker; its localhost is the container, not your laptop. For a host app, use a Docker-reachable hostname and configure that exact origin.
+Public https sites need no configuration. For a local, private or plain-http app, set **SCOUT_ALLOWED_ORIGINS** to its exact origin. The browser runs inside Docker, in the browser sandbox container; its localhost is that container, not your laptop. For a host app, use a Docker-reachable hostname such as **host.docker.internal** and configure that exact origin.
 
 The built-in fixture uses **http://exploration-fixture:8082**. With just installed:
 

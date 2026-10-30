@@ -1,6 +1,6 @@
 ---
 name: scout-qa
-description: "Use ScoutQA to explore a controlled app URL, retrieve evidence-backed issues or verify a requested fix on a candidate deployment using its permanent issue ID."
+description: "Use ScoutQA to explore a web app URL, retrieve evidence-backed issues or verify a requested fix on a candidate deployment using its permanent issue ID."
 ---
 
 # ScoutQA
@@ -15,7 +15,7 @@ Use **scout_list_sessions** or **scout_get_domain_summary** for relevant URL/dom
 
 ## Explore, return later, read evidence
 
-1. Save a new non-nil UUID (locally or **scout_new_request_id**) before **scout_start_exploration {job_id, url}**. No brief is needed. Work can change the controlled app and consume Scout's configured model usage.
+1. Save a new non-nil UUID (locally or **scout_new_request_id**) before **scout_start_exploration {job_id, url}**. No brief is needed. Work can change data on the target site and consume Scout's configured model usage.
 2. Retry uncertain admission with the same UUID and identical arguments. Reuse an existing job/run ID when asked about existing work.
 3. Poll **scout_get_progress** with exactly one job_id or run_id at **poll_after_ms** while doing other authorized work. Direct sign-in blockers to the person's private Scout GUI; agents cannot retrieve private login frames or session contents.
 4. Read **scout_get_report**. Follow **pagination.next** as the complete next call. Restart at offset zero on snapshot conflict. Reports can be partial.

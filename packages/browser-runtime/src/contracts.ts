@@ -63,8 +63,8 @@ export const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 
 export function validatePlan(url: string, specs: ActionSpec[]): ActionSpec[] {
   const target = new URL(url);
-  // This increment is deliberately confined to the in-process fixture. Network
-  // isolation for arbitrary target apps is a separate implementation gate.
+  // This recorder is confined to the in-process fixture and launches Chromium
+  // beside it. Target apps run through the explorer and the browser sandbox.
   if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || !target.port || target.username || target.password) {
     throw new Error('This development recorder accepts only a local controlled fixture URL.');
   }

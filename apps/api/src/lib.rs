@@ -634,7 +634,7 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         .is_some_and(|p| p.iter().any(|p| p["configured"] == true));
     Json(json!({
         "mode":"local_qa_workspace", "unbounded_exploration":false,
-        "bounded_url_exploration":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"scope":"operator_controlled_apps","requires_configured_model":true,"coverage_complete":false,
+        "bounded_url_exploration":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"scope":"public_https_or_allowed_origins","requires_configured_model":true,"coverage_complete":false,
             "interactions":["navigate","click","fill","select","set_checked","scroll","submit"],"interaction_version":"browser-interactions-v2",
             "form_submission":"same_origin_search_or_operator_configured_test_form",
             "action_completion":{"version":"action-completion-v1","timeout_ms":5000,"sampled_frames":true,"network_and_console_evidence":true}},
@@ -647,6 +647,7 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         "workspace_ui":true,"browser_job_submission":state.jobs.is_some(),
         "agent_interface":{"version":1,"mcp_endpoint":"/mcp","http_catalog":"/v1/agent/tools","stdio_bridge":true,"coding_agent_report":true,"asynchronous_progress":true,"human_review_write":false,"external_browser_driver":false},
         "cancellation":{"queued_jobs":true,"active_explorer_runs":true,"durable":true,"resume":false,"in_flight_provider_calls":"settle_and_account"},
+        "browser_isolation":{"sandbox_container":true,"scout_credentials":false,"saved_login_vault":false,"storage_network":false,"chromium_sandbox":"default_on","fresh_container_per_run":true},
         "app_login":{"manual_handoff":true,"session_reuse":true,"saved_session_hours":24,"google_oauth":false,"private_login_recording":false},
         "frontier_planning":{"version":"frontier-v2","automatic_return":true,"stale_plan_recovery":true,"max_replans":3,"probability_calibrated":false,
             "max_actions":jobs::MAX_EXPLORATION_ACTIONS,"document_controls":true,"reveal_before_action":true,"max_observed_controls":120,"max_prompt_bytes":65536,"max_duration_minutes_env":"SCOUT_EXPLORER_MAX_MINUTES"},

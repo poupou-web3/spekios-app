@@ -26,7 +26,7 @@ Generate a non-nil UUID locally, or call **scout_new_request_id** if the client 
 
 The UUID here is illustrative. Generate a new one for a new task. A retry uses the same UUID and identical inputs. Changed inputs with an existing ID conflict rather than starting duplicate work.
 
-Starting exploration can change the controlled app and consume its configured provider allowance.
+Starting exploration can change data on the target site and consume its configured provider allowance.
 
 ## 2. Continue other work and pull progress
 

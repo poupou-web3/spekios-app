@@ -30,7 +30,7 @@ Scout explores your web app from a URL, checks each action against a recorded ex
 ## Start with your next task
 
 - **[Run Scout locally](getting-started/local-setup/)** — Start the workspace, browser worker and storage services with Docker Compose.
-- **[Test your first URL](getting-started/first-run/)** — Submit a controlled app, follow the run and inspect its recorded actions.
+- **[Test your first URL](getting-started/first-run/)** — Submit a site, follow the run and inspect its recorded actions.
 - **[Connect a coding agent](agents/connect/)** — Use MCP or HTTP to submit work, return for a report and investigate a finding.
 - **[Install the agent skill](agents/skill/)** — Give your agent a small, reusable Scout workflow without adding an SDK.
 - **[Integrate the API](api/overview/)** — Work with durable jobs, progress, reports and verified evidence.
@@ -45,6 +45,6 @@ An unchanged screenshot can still reveal a failure. A changed screenshot can be 
 
 ## Know the current scope
 
-Scout is a local developer preview for operator-controlled web apps. It uses Chromium, bounded action budgets and API-key model connections. A completed run is a recorded exploration, not a claim that the entire app works.
+Scout is a local developer preview. It tests public https sites and the local or private apps its operator allows, using Chromium in an isolated browser sandbox, bounded action budgets and API-key model connections. A completed run is a recorded exploration, not a claim that the entire app works.
 
 Read [capabilities and limits](product/capabilities/) before using it with a new target. The documentation reflects implemented behavior; proposed features are labeled explicitly.

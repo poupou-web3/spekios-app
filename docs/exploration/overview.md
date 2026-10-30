@@ -27,6 +27,7 @@ The same loop is available from the [workspace](../platform/workspace.md) at **h
 | `SCOUT_EXPLORER_APP_MEMORY` | `true` | Default for remembering explored pages and controls across runs; see [memory across runs](./planner.md#memory-across-runs) |
 | `SCOUT_EXPLORER_VIEWPORT` | `desktop` | `desktop` (800×600), `tablet` (768×1024), or `mobile` (390×844) |
 | `SCOUT_ALLOWED_ORIGINS` | `http://exploration-fixture:8082` | Extra origins for private, HTTP and internal apps. Public https sites do not need an entry |
+| `SCOUT_CHROMIUM_SANDBOX` | `true` | Chromium's own sandbox inside the browser sandbox container. Set `false` only on hosts where Chromium cannot start it |
 
 ```sh
 .tools/bin/just dev
@@ -61,7 +62,7 @@ PostgreSQL stores states, action edges, a frontier of observed controls, and mod
 
 State identity includes exact PNG bytes, URL, text, controls, viewport and scroll. No threshold merges tiny changes. Previously attempted controls in the same state are not selected again. The planner ranks pending branches across known states, follows successful recorded routes or reopens the original URL, and verifies each return. Reopening the URL does not reset browser storage or server data. Unvisited and unreachable controls remain explicit. Animated or frequently changing pages can create many distinct states; action and replanning limits bound that growth. The discovery tree preserves first-parent ancestry while the graph retains cycles and return edges.
 
-Ambiguous, disabled or covered controls, unapproved form submissions, off-origin links and recognizable credential, payment or destructive controls are recorded as blocked. Accessible branches continue. These are conservative heuristics for controlled apps, not a security guarantee. Model-driven credential entry, account creation and payment submission remain blocked. The queued worker now offers a private, human-controlled login handoff and optional encrypted app-session reuse; see [private app login](./private-login.md).
+Ambiguous, disabled or covered controls, unapproved form submissions, off-origin links and recognizable credential, payment or destructive controls are recorded as blocked. Accessible branches continue. These are conservative heuristics, not a guarantee that a permitted control cannot change data. Model-driven credential entry, account creation and payment submission remain blocked. The queued worker now offers a private, human-controlled login handoff and optional encrypted app-session reuse; see [private app login](./private-login.md).
 
 A completed run means the bounded execution finished. It does **not** mean all flows were tested or all behavior is correct. Every graph has `coverage_complete: false`; stop reasons distinguish action/model budgets, unstable pages, model stopping, and unreachable or unaffordable remaining branches.
 
@@ -81,7 +82,7 @@ The worker supports visible native buttons/links, text/search fields, single-sel
 
 Queued explorations can opt into [bounded automatic rechecks](./automatic-reproduction.md) from the URL form. These start after the source completes, use its frozen expectations and viewport in a fresh browser, and retain human review as the confirmation step. CLI and historical runs are not retroactively scheduled.
 
-**Only use operator-controlled test apps.** The Playwright container still has Chromium sandboxing disabled, shares the local service network, and its worker process has storage credentials. Browser child environment variables are stripped, but this is not isolation for hostile public sites. Kubernetes manifests should follow the scoped worker protocol and actual network isolation; Compose remains the working single-machine path.
+Target sites run in the `browser-sandbox` container, which the worker and CLI reach at `SCOUT_BROWSER_ENDPOINT` (set by Compose). The sandbox has no Scout credentials, volumes or saved logins, joins only the browser network, runs Chromium with its own sandbox and restarts after every run. The worker keeps storage credentials and the saved-login vault and refuses to start without the endpoint. In-process test fixtures, which listen inside the recorder container, still launch Chromium there. `just isolation-test` verifies the boundary; [access and recording boundaries](../../apps/docs/src/content/docs/operators/security.md) lists what the sandbox can still reach. Kubernetes manifests and per-tenant isolation are not implemented; Compose remains the working single-machine path.
 
 The queued worker now supports [private manual app login](./private-login.md). Recognized login pages are omitted from model observation, and authentication changes restart planning under a distinct context. Optional login can be skipped; unavailable access is reported as blocked.
 

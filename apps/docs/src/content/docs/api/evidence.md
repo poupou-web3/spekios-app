@@ -40,4 +40,4 @@ An image hash is an integrity check, not proof that an inferred expectation is c
 
 Private human-login frames and saved-session contents are not ordinary evidence and cannot be retrieved with these tools. They are outside the model/training recording boundary.
 
-Normal post-login screenshots can still show sensitive app data. Use controlled test data and limit who can access exports.
+Normal post-login screenshots can still show sensitive app data. Prefer test accounts and limit who can access exports.

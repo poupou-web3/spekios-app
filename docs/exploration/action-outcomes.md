@@ -37,7 +37,7 @@ SCOUT_TEST_FORM_RULES='[{"action_url":"http://exploration-fixture:8082/journeys/
 
 The target must already belong to `SCOUT_ALLOWED_ORIGINS`. The default rules are `[]`; no POST forms are enabled by default. The CLI and queued worker share this configuration. No new launch brief is required.
 
-Sensitive fields, file uploads, credential/payment/destructive actions, off-origin destinations and new-window targets remain blocked even with a matching rule. Hidden fields participate in sensitive-field checks. The effective destination, method, target, field signature and permission are captured and checked again immediately before dispatch. A changed form contract fails closed. These are conservative heuristics for controlled apps, not proof that a GET handler is read-only or a browser script cannot perform a side effect.
+Sensitive fields, file uploads, credential/payment/destructive actions, off-origin destinations and new-window targets remain blocked even with a matching rule. Hidden fields participate in sensitive-field checks. The effective destination, method, target, field signature and permission are captured and checked again immediately before dispatch. A changed form contract fails closed. These are conservative heuristics, not proof that a GET handler is read-only or a browser script cannot perform a side effect.
 
 Fresh reproduction retains the exact submission command and filled values, with the current operator rules still required. Replay does not reset backend data: permit write forms only in disposable test environments where repetition is appropriate.
 

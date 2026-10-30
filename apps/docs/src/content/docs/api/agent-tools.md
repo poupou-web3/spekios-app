@@ -50,4 +50,4 @@ Through MCP, invalid arguments/protocol errors are JSON-RPC errors, while domain
 
 Request bodies are limited to 64 KiB; structured replies to 128 KiB. Strict input schemas reject unknown fields and runtime validation enforces cross-field selector rules.
 
-Reads do not call a model. Starting exploration or reproduction can change the controlled target and consume configured model usage. Human review and private-login control are intentionally absent from the agent tool set.
+Reads do not call a model. Starting exploration or reproduction can change data on the target site and consume configured model usage. Human review and private-login control are intentionally absent from the agent tool set.

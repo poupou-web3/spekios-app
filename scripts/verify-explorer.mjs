@@ -26,6 +26,7 @@ assert.equal(output.model_usage.known_output_tokens,20);
 assert.equal(output.manifest_error,null);
 assert.equal(output.export_error,null);
 const report=await request('/v1/runs/'+output.run_id);
+assert.equal(report.run.config.browser_isolation,'sandbox','CLI explorations must use the browser sandbox.');
 const graph=await request('/v1/runs/'+output.run_id+'/graph');
 assert.deepEqual(report.graph,graph);
 assert.equal(graph.states.length,4);

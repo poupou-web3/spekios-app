@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
 import { comparePng, changedPixelsInRects } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
 import { capture, installNetworkGate, type Hooks } from './recorder.js';
@@ -16,6 +16,7 @@ import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyCon
 import { AppMemory, MEMORY_VERSION, type MemoryScope } from './app-memory.js';
 import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged } from './access-detection.js';
 import { AuthVault } from './auth-session.js';
+import { openBrowser } from './browser-sandbox.js';
 import { testFormRules, type TestFormRule } from './form-policy.js';
 import { ActionDiagnostics, settleAction, saveOutcome, outcomeContext, incompleteCompletion, COMPLETION_VERSION, COMPLETION_LIMITS, type Completion } from './action-outcome.js';
 import type { AccessHandoff, AccessResult, AccessReason } from './access-handoff.js';
@@ -144,7 +145,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           limits: { max_actions: maxActions, max_replans: replay ? 0 : MAX_REPLANS, max_reveal_failures: replay ? 0 : MAX_REVEAL_FAILURES, max_model_requests: maxModelRequests,
             max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, context_budgets: CONTEXT_BUDGETS },
           app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] },
-          scope: 'operator-controlled-app', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
+          scope: allowedOrigins.includes(origin) ? 'operator-allowed-origin' : 'public-https', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
       await openMemory();
       planner = new FrontierPlanner(targetUrl, memory.snapshot);
@@ -226,7 +227,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         return id;
       });
     }
-    let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+    let browser: Browser | undefined;
     let browserClosing:Promise<void>|undefined;
     const stopBrowser=()=>browser?(browserClosing??=browser.close().catch(()=>{})):Promise.resolve();
     const abortBrowser=()=>{void stopBrowser();};
@@ -237,12 +238,12 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     try {
       await control.check();
       if(replay?.fix_verification?.requires_session&&!authContext?.session_id)throw new AccessStopped('candidate_sign_in_required');
-      browser = await chromium.launch({ headless: true, chromiumSandbox: false,
-        env: { PATH: process.env.PATH ?? '', HOME: '/tmp', LANG: 'C.UTF-8' } });
+      const opened = await openBrowser(control.signal);
+      browser = opened.browser;
       await control.check();
       await store.transaction(async () => {
-        await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ browser: 'chromium', browser_version: browser!.version(), playwright_version: '1.64.0' })]);
-        await store.event(runId, 'browser.ready', { browser_version: browser!.version() });
+        await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ browser: 'chromium', browser_version: browser!.version(), playwright_version: '1.64.0', browser_isolation: opened.isolation })]);
+        await store.event(runId, 'browser.ready', { browser_version: browser!.version(), browser_isolation: opened.isolation });
       });
       let savedState;
       if(authContext?.session_id){try{savedState=await new AuthVault(store).load(authContext.session_id,origin,executionMode);}catch(error){if(replay?.fix_verification)throw new AccessStopped('saved_candidate_session_unavailable');throw error;}}

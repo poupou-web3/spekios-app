@@ -44,7 +44,7 @@ Session snapshots include cookies, local storage and supported IndexedDB state. 
 
 ## Current compatibility limits
 
-This first handoff supports the existing controlled-app scope and same-origin native login forms, including manually supplied email/password and verification codes. Google/OAuth and external identity-provider redirects remain blocked; there is no embedded Google sign-in or transfer of the user's ordinary browser cookies. Google's supported-browser flow requires separate work and verification ([Google OAuth browser policy](https://developers.google.com/identity/protocols/oauth2/policies#browsers)).
+This first handoff supports admitted targets and same-origin native login forms, including manually supplied email/password and verification codes. Google/OAuth and external identity-provider redirects remain blocked; there is no embedded Google sign-in or transfer of the user's ordinary browser cookies. Google's supported-browser flow requires separate work and verification ([Google OAuth browser policy](https://developers.google.com/identity/protocols/oauth2/policies#browsers)).
 
 Detection is heuristic: visible native password/one-time-code fields, email login forms, and sign-in/sign-out labels. Custom widgets, multilingual labels, passkeys, native popups and unusual authentication may not be detected or usable. **Sign in before exploration** explicitly requests the handoff when automatic detection is insufficient. The human can submit a login form; general model-driven form submission remains unsupported. Direct CLI exploration does not expose a manual-control server; launch interactive sign-in from the GUI/job worker.
 

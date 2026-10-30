@@ -149,6 +149,8 @@ services:
       context: .
       dockerfile: infra/recorder/Dockerfile
     entrypoint: [./node_modules/.bin/tsx, src/fixture-cli.ts]
+    networks:
+      browser: {}
     ports:
       - '127.0.0.1:18082:8082'
     healthcheck:
@@ -178,6 +180,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Run node scripts/setup-local.mjs}
       RECORDER_SPOOL: /data/recorder
       SCOUT_API_URL: http://api:8080
+      SCOUT_BROWSER_ENDPOINT: ws://browser-sandbox:3000/browser
       SCOUT_AUTH_VAULT: /data/auth
       SCOUT_API_TOKEN: ${SCOUT_API_TOKEN:?Run node scripts/setup-local.mjs}
       SCOUT_EXPLORER_PROVIDER: ${SCOUT_EXPLORER_PROVIDER:-openrouter}
@@ -196,6 +199,10 @@ services:
       postgres: { condition: service_healthy }
       evidence: { condition: service_healthy }
       clickhouse: { condition: service_healthy }
+      browser-sandbox: { condition: service_started }
+    networks:
+      default: {}
+      browser: {}
     volumes:
       - recorder-spool:/data/recorder
       - auth-vault:/data/auth
@@ -203,12 +210,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
+    # Demo and in-process test fixtures still launch Chromium here.
     shm_size: 256m
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 1g
     cpus: 2
 
+  # Holds the credentials and saved logins; drives the browser in browser-sandbox.
   browser-worker:
     image: scout-qa-recorder:local
     build:
@@ -221,9 +230,41 @@ services:
       api: { condition: service_healthy }
       evidence: { condition: service_healthy }
       clickhouse: { condition: service_healthy }
+      browser-sandbox: { condition: service_healthy }
+    networks:
+      default: {}
+      browser: {}
     volumes:
       - recorder-spool:/data/recorder
       - auth-vault:/data/auth
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 2
+    restart: unless-stopped
+
+  # Runs every target site. No Scout credentials, volumes or storage network:
+  # it reaches the internet, the fixture app and the worker's token-protected
+  # login port only. It serves one run, then exits and restarts fresh.
+  browser-sandbox:
+    image: scout-qa-recorder:local
+    build:
+      context: .
+      dockerfile: infra/recorder/Dockerfile
+    entrypoint: [./node_modules/.bin/tsx, src/browser-server.ts]
+    environment:
+      SCOUT_CHROMIUM_SANDBOX: ${SCOUT_CHROMIUM_SANDBOX:-true}
+    networks:
+      browser: {}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
     init: true
     read_only: true
     tmpfs:
@@ -234,6 +275,11 @@ services:
     mem_limit: 1g
     cpus: 2
     restart: unless-stopped
+
+networks:
+  default: {}
+  # Target sites and the browser. Scout's storage, API and model gateway are not on it.
+  browser: {}
 
 volumes:
   postgres-data:

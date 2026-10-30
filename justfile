@@ -177,6 +177,10 @@ reproduce action_id: build-recorder
 explorer-test:
     bash scripts/test-explorer.sh
 
+# Browser sandbox: no Scout credentials or storage network, Chromium sandbox on, one run per container.
+isolation-test:
+    bash scripts/test-browser-isolation.sh
+
 # Persistent issue → candidate fix: API/MCP, real Chromium/evidence, simulated models.
 fix-verification-test:
     bash scripts/test-fix-verification.sh
@@ -205,7 +209,7 @@ graph run_id:
 
 runtime-test: build-recorder
     docker compose run --rm --no-deps --entrypoint npm recorder run check
-    docker compose run --rm --no-deps --entrypoint npm recorder test
+    docker compose run --rm --no-deps -e SCOUT_BROWSER_ENDPOINT= --entrypoint npm recorder test
 
 # The stack must already be running; all generated fixture evidence is retained.
 test: api-test runtime-test web-test

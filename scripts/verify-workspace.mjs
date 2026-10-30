@@ -41,6 +41,7 @@ assert.equal(source.actions.length,2);
 assert.equal(source.actions[1].assessment.verdict,'suspect');
 assert.equal(source.run.config.viewport_profile,'mobile');
 assert.deepEqual(source.run.config.viewport,{width:390,height:844});
+assert.equal(source.run.config.browser_isolation,'sandbox','Worker runs must use the browser sandbox.');
 for(const capture of source.captures){
   const image=await request('/v1/captures/'+capture.capture_id+'/image');assert.equal(image.status,200);
   assert.equal(image.headers.get('content-type'),'image/png');assert.equal(image.headers.get('cache-control'),'no-store');
@@ -57,6 +58,7 @@ assert.equal(replay.reproductions[0].result.outcome,'reproduced');
 assert.equal(replay.reproductions[0].result.confirmed_bug,false);
 assert.equal(replay.model_usage.attempts,2);
 assert.equal(replay.run.config.viewport_profile,'mobile');
+assert.equal(replay.run.config.browser_isolation,'sandbox');
 assert.equal((await request('/v1/browser-jobs',reproduction)).status,200);
 
 const interaction={job_id:randomUUID(),kind:'explore',target_url:'http://exploration-fixture:8082/interactions',viewport_profile:'tablet'};

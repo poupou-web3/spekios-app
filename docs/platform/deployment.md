@@ -26,7 +26,8 @@ just model-test      # Fake providers, journal/outage/restart checks; restores n
 just runtime-test    # Chromium, storage, evidence failure and export tests
 just explorer-test   # URL loop with simulated models, graph/evidence/usage verification
 just fixture         # Start the controlled app; host preview on 127.0.0.1:18082
-just explore URL     # Bounded exploration of an allowed app using configured models
+just explore URL     # Bounded exploration of a public https site or allowed app using configured models
+just isolation-test  # Browser sandbox: no credentials or storage network, Chromium sandbox, one run per container
 just explore-matrix URL # Separate desktop, tablet and mobile runs, executed sequentially
 just graph RUN_UUID  # Inspect states, edges, frontier and model decisions
 just test            # Core tests; model-test is separate because it restarts services
@@ -37,11 +38,11 @@ just stop            # Stop services while keeping named volumes
 
 All published service ports bind to host loopback. The API is at `http://127.0.0.1:18080`, S3 at `http://127.0.0.1:18333`, and ClickHouse at `http://127.0.0.1:18123`. PostgreSQL is reachable only inside Compose. The API token is generated once in the private `.env`; `just runs` uses it without echoing it. No model key is required for fixture testing.
 
-The API has a persistent `gateway-spool` volume for response journals. Provider API keys are optional private `.env` entries; they go only to the Rust service. The browser worker receives a local API token, not provider credentials. The explicit model test overlay adds a local fake-provider server on loopback port 18081 and ignores real keys. Its cleanup removes that test container and restores normal gateway configuration. Explorer tests additionally leave a controlled target on loopback port 18082. See [model gateway](./model-gateway.md) and [URL exploration](../exploration/overview.md).
+The API has a persistent `gateway-spool` volume for response journals. Provider API keys are optional private `.env` entries; they go only to the Rust service. The browser worker receives a local API token, not provider credentials. Chromium runs in the separate `browser-sandbox` service, which receives no credentials or volumes and is attached only to the browser network; see [URL exploration](../exploration/overview.md). The explicit model test overlay adds a local fake-provider server on loopback port 18081 and ignores real keys. Its cleanup removes that test container and restores normal gateway configuration. Explorer tests additionally leave a controlled target on loopback port 18082. See [model gateway](./model-gateway.md) and [URL exploration](../exploration/overview.md).
 
 ## Why Compose first
 
-For this one-machine phase, Compose describes the processes, health checks, resource caps, network and volumes without an additional cluster. `just` makes the common workflow one command while preserving the underlying scripts. This is a development choice; it does not establish a hardened environment for visiting arbitrary websites.
+For this one-machine phase, Compose describes the processes, health checks, resource caps, network and volumes without an additional cluster. `just` makes the common workflow one command while preserving the underlying scripts. This is a development choice. The browser sandbox is container isolation on one shared host kernel, not a virtual-machine or multi-tenant boundary.
 
 Kubernetes is useful when we need deployment parity, independently scheduled workers, rollout controls or several hosts. It also requires decisions about cluster networking, persistent storage, ingress, secrets and operations. Switching now would not improve browser or model-call latency. The recommendation is to keep the verified Compose loop and add Kubernetes parity once the worker/API boundary and isolation contract are stable. [Compose application model](https://docs.docker.com/compose/intro/compose-application-model/), [kind local clusters](https://kind.sigs.k8s.io/docs/user/quick-start/)
 

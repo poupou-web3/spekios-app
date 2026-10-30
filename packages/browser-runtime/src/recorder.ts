@@ -93,7 +93,8 @@ export async function record(store: Store, targetUrl: string, input: ActionSpec[
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     try {
       // The browser receives no database, bucket, model, or target credentials.
-      // This trusted-fixture container is not a hostile-site security sandbox.
+      // validatePlan confines this recorder to the in-process fixture, so it runs
+      // Chromium locally; target sites run in the browser sandbox instead.
       browser = await chromium.launch({ headless: true, chromiumSandbox: false,
         env: { PATH: process.env.PATH ?? '', HOME: '/tmp', LANG: 'C.UTF-8' } });
       const browserVersion = browser.version();

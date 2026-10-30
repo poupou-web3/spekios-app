@@ -53,7 +53,7 @@ export function permitBrowserRequest(pageOrigin: string, rawUrl: string, scope: 
 export function validateTarget(input: string, origins: string[]): string {
   const url = new URL(input);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || input.length > 2048 ||
-      !(origins.includes(url.origin) || publicHttpsOrigin(url))) throw new Error('Target must belong to an explicitly configured controlled-app origin.');
+      !(origins.includes(url.origin) || publicHttpsOrigin(url))) throw new Error('Target must be a public https site or an explicitly allowed origin.');
   return url.href;
 }
 

@@ -52,6 +52,6 @@ Unknown fields and nil UUIDs are rejected. Selector rules such as “exactly one
 
 Structured replies are capped at 128 KiB, requests at 64 KiB, returned PNGs at 4 MiB and JSON artifacts at 128 KiB including metadata. Reduce page sizes after an oversized response. Use ordinary download endpoints for larger evidence.
 
-Starting exploration or reproduction can change the controlled app and consume configured model usage. Read tools make no model calls. Tool annotations describe those properties; they are not a security policy.
+Starting exploration or reproduction can change data on the target site and consume configured model usage. Read tools make no model calls. Tool annotations describe those properties; they are not a security policy.
 
 Continue with the [agent workflow](../workflow/) or [HTTP call contract](../../api/agent-tools/).

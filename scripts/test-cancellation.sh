@@ -15,4 +15,4 @@ docker compose -f compose.yaml -f compose.model-test.yaml up -d --build --wait -
 node scripts/wait-api.mjs
 node scripts/verify-cancellation.mjs
 docker compose stop browser-worker
-docker compose run --rm --no-deps -e SCOUT_EXPLORER_INTEGRATION=1 --entrypoint ./node_modules/.bin/tsx recorder --test test/cancellation.test.ts
+docker compose run --rm --no-deps -e SCOUT_EXPLORER_INTEGRATION=1 -e SCOUT_BROWSER_ENDPOINT= --entrypoint ./node_modules/.bin/tsx recorder --test test/cancellation.test.ts

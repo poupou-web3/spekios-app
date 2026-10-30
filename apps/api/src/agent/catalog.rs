@@ -75,7 +75,7 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_verify_fix",
-            "Verify the frozen behavior of an issue on a candidate URL in a fresh browser. Can change the controlled app and consume model usage. Save verification_id before sending and reuse identical inputs after uncertainty. Results are resolved, still_reproducible, blocked or inconclusive for this candidate only.",
+            "Verify the frozen behavior of an issue on a candidate URL in a fresh browser. Can change data on the candidate site and consume model usage. Save verification_id before sending and reuse identical inputs after uncertainty. Results are resolved, still_reproducible, blocked or inconclusive for this candidate only.",
             schema(
                 json!({"issue_id":id_schema(),"verification_id":id_schema(),"candidate_url":{"type":"string","maxLength":2048},"deployment_ref":{"type":"string","minLength":1,"maxLength":200},"auth_mode":choice(&["auto","public"]),"session_id":id_schema(),"project_id":id_schema(),"task_id":id_schema()}),
                 &["issue_id", "verification_id", "candidate_url"],
@@ -153,7 +153,7 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_start_exploration",
-            "Queue URL-only exploration. Can interact with and change the controlled target app; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default.",
+            "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default.",
             schema(
                 json!({"job_id":id_schema(),"project_id":id_schema(),"task_id":id_schema(),"url":{"type":"string","maxLength":2048},"viewport_profile":choice(&["desktop","tablet","mobile"]),"auth_mode":choice(&["auto","sign_in","public"]),"session_id":id_schema(),"auto_reproduce":{"type":"boolean"},"app_memory":{"type":"boolean"}}),
                 &["job_id", "url"],
@@ -273,7 +273,7 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_reproduce_candidate",
-            "Queue the existing fresh-browser suspect reproduction. Can change the controlled target app and may consume configured model usage. Stable job_id required; server eligibility/deduplication rules still apply.",
+            "Queue the existing fresh-browser suspect reproduction. Can change data on the target site and may consume configured model usage. Stable job_id required; server eligibility/deduplication rules still apply.",
             schema(
                 json!({"job_id":id_schema(),"source_action_id":id_schema()}),
                 &["job_id", "source_action_id"],

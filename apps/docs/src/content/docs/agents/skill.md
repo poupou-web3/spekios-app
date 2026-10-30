@@ -70,7 +70,7 @@ If MCP is unavailable, the skill's optional HTTP reference explains the same too
 In Codex:
 
 ~~~text
-Use $scout-qa to explore http://your-controlled-app/.
+Use $scout-qa to explore https://your-app.example/.
 Submit the URL, check progress when useful, and return a report
 with expected versus actual behavior and evidence IDs.
 ~~~
@@ -78,7 +78,7 @@ with expected versus actual behavior and evidence IDs.
 In Claude Code:
 
 ~~~text
-/scout-qa Explore http://your-controlled-app/ and report the findings.
+/scout-qa Explore https://your-app.example/ and report the findings.
 ~~~
 
 Replace the example URL with an exact permitted origin reachable by Scout's browser worker. To inspect existing work, give the saved job/run ID instead of asking for another exploration.

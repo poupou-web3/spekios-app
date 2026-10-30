@@ -28,7 +28,7 @@ services:
     cpus: 1
   exploration-fixture:
     networks:
-      default:
+      browser:
         aliases: [candidate-fixture]
   browser-worker:
     environment:

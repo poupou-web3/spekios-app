@@ -4,7 +4,7 @@ The `reproduce` command replays a suspected explorer action and its preceding pa
 
 ## Run it
 
-Start the stack with `just dev`. Configure a model and an allowed controlled-app origin as described in [URL exploration](./overview.md), then:
+Start the stack with `just dev`. Configure a model, and allow the origin if the app is local or private, as described in [URL exploration](./overview.md), then:
 
 ```sh
 .tools/bin/just explore http://exploration-fixture:8082/broken-session
@@ -48,7 +48,7 @@ For automatic checks, the live report also includes `automatic_reproductions` wi
 
 `reproduction.started`, `reproduction.completed` and interruption events export through the existing outbox to ClickHouse. Model requests/responses, screenshots, masks and usage use the same durable evidence pipeline as exploration. Replay makes at most one assessment request per recorded action, with 2,048 output tokens and one provider attempt per request. Original prediction requests are referenced, not executed or charged again. The replay has its own usage totals; `just usage` includes both original and replay calls. Unknown usage remains unknown.
 
-Source fixture exclusions carry forward, and simulated-provider or bundled-fixture runs are always `excluded_fixture`. Other controlled-app evidence remains `unreviewed`; reproduction does not automatically make data eligible for training.
+Source fixture exclusions carry forward, and simulated-provider or bundled-fixture runs are always `excluded_fixture`. Other target evidence remains `unreviewed`; reproduction does not automatically make data eligible for training.
 
 ## Verification and limits
 
@@ -56,6 +56,6 @@ Run `just explorer-test` for the exploration and reproduction integration suite.
 
 Run `just auto-reproduction-test` for the automatic scheduler and queued-worker integration suite. It uses real Chromium and storage services with simulated models and restores ordinary provider configuration afterward. This command does not establish live-model QA quality or GUI layout correctness; those remain unverified.
 
-This version replays at most 50 executed actions using the explorer's [typed interaction contract](./interactions.md) and the source run's desktop/tablet/mobile viewport. It preserves fill/option values, checkbox/radio booleans, document scroll targets, scrolls that revealed a lower control, recorded returns to the original entry URL and recorded resumes of a same-origin page remembered from earlier runs. Replays never read or write [app memory](./planner.md#memory-across-runs). Up to three skipped stale plans can appear in the source history; they are not dispatched again. Dynamic screens can fail the exact-state check. Fresh browser storage does not reset server data, establish an equivalent backend state or isolate workers from a hostile site. Use the same operator-controlled apps supported by the current explorer. Live-model accuracy, external identity-provider handoff and multiple verification attempts remain unfinished.
+This version replays at most 50 executed actions using the explorer's [typed interaction contract](./interactions.md) and the source run's desktop/tablet/mobile viewport. It preserves fill/option values, checkbox/radio booleans, document scroll targets, scrolls that revealed a lower control, recorded returns to the original entry URL and recorded resumes of a same-origin page remembered from earlier runs. Replays never read or write [app memory](./planner.md#memory-across-runs). Up to three skipped stale plans can appear in the source history; they are not dispatched again. Dynamic screens can fail the exact-state check. Fresh browser storage does not reset server data or establish an equivalent backend state. It runs in the same browser sandbox and accepts the same targets as the current explorer. Live-model accuracy, external identity-provider handoff and multiple verification attempts remain unfinished.
 
 Authenticated paths use the exact saved app session and replay only the segment in that authentication context. Private login actions are excluded. Expired, removed or unsaved sessions require a new signed-in run; see [app login](./private-login.md).

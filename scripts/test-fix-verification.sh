@@ -15,7 +15,7 @@ docker compose build recorder api
 docker compose -f compose.yaml -f compose.model-test.yaml up -d --build --wait --wait-timeout 90 api model-fixture exploration-fixture browser-worker
 node scripts/wait-api.mjs
 docker compose run --rm --no-deps --entrypoint npm recorder run check
-docker compose run --rm --no-deps --entrypoint ./node_modules/.bin/tsx recorder --test test/fix-verification.test.ts
+docker compose run --rm --no-deps -e SCOUT_BROWSER_ENDPOINT= --entrypoint ./node_modules/.bin/tsx recorder --test test/fix-verification.test.ts
 node scripts/verify-fix-verification.mjs
 restore
 trap - EXIT

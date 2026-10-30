@@ -47,6 +47,8 @@ Completed reliable suspicions receive stable issue IDs. Users and agents share a
 
 Automated integration uses real Chromium and local storage with simulated model providers. That validates contracts, evidence handling and recovery. Live-model exploration quality and correctness on arbitrary real apps remain separate validation work. Browser OAuth is integration-tested locally; individual vendor apps and external HTTPS deployments still need interoperability validation.
 
-An origin allowlist and container restrictions are not a complete sandbox for hostile websites. Keep the backend local and test apps you control.
+Any public https site can be tested. Its pages run in a separate browser sandbox container that holds no Scout credentials or saved logins and cannot reach Scout's database, evidence store, analytics, API or model gateway. Chromium's own sandbox is on, and the container restarts after every run. See [access and recording boundaries](../../operators/security/) for what the sandbox can still reach.
+
+Explorations act like a user and can change data on the site. Prefer a test account on apps with real data.
 
 For setup problems, use [troubleshooting](../../operators/troubleshooting/).

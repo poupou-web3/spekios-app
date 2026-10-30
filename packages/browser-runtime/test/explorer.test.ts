@@ -41,12 +41,12 @@ test('model output cannot add tools, invent controls or forge evidence', () => {
   assert.equal(blockedReason({...control,name:'Delete all'},'http://fixture'), 'potentially_destructive_or_external_action');
   assert.equal(blockedReason({...control,submits_form:true},'http://fixture'), 'form_submission_requires_handoff');
   assert.equal(blockedReason({...control,role:'link',href:'http://postgres:5432/'},'http://fixture'), 'outside_allowed_origin');
-  assert.throws(() => validateTarget('http://name:secret@fixture/', ['http://fixture']), /controlled-app/);
-  assert.throws(() => validateTarget('http://unconfigured/', ['http://fixture']), /controlled-app/);
+  assert.throws(() => validateTarget('http://name:secret@fixture/', ['http://fixture']), /explicitly allowed origin/);
+  assert.throws(() => validateTarget('http://unconfigured/', ['http://fixture']), /explicitly allowed origin/);
   assert.equal(validateTarget('https://bubblemaps.io/map', ['http://fixture']), 'https://bubblemaps.io/map');
-  assert.throws(() => validateTarget('http://bubblemaps.io/', ['http://fixture']), /controlled-app/);
-  assert.throws(() => validateTarget('https://127.0.0.1/', ['http://fixture']), /controlled-app/);
-  assert.throws(() => validateTarget('https://app.internal/', ['http://fixture']), /controlled-app/);
+  assert.throws(() => validateTarget('http://bubblemaps.io/', ['http://fixture']), /explicitly allowed origin/);
+  assert.throws(() => validateTarget('https://127.0.0.1/', ['http://fixture']), /explicitly allowed origin/);
+  assert.throws(() => validateTarget('https://app.internal/', ['http://fixture']), /explicitly allowed origin/);
 });
 test('public pages load public subresources and stay on the entry document', () => {
   const page = 'https://v2.bubblemaps.io';

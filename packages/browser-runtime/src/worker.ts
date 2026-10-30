@@ -6,7 +6,10 @@ import { explore, reproduce, verifyFix } from './explorer.js';
 import { ModelClient } from './model-client.js';
 import { AccessHandoff } from './access-handoff.js';
 import { AutomaticReproductionScheduler, type GatewayStatus } from './automatic-reproduction.js';
+import { browserEndpoint } from './browser-sandbox.js';
 
+// Target sites never run beside the credentials and saved logins this worker holds.
+if (!browserEndpoint()) throw new Error('The browser worker needs SCOUT_BROWSER_ENDPOINT so target sites run in the browser sandbox.');
 const store = await new Store().open();
 const lease = await store.pool.connect();
 const workerId = randomUUID();

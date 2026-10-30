@@ -197,7 +197,7 @@ export function openapi(catalog) {
     info: {
       title: 'ScoutQA local integration API', version: '0.2.0',
       summary: 'Durable URL-first QA jobs and evidence-backed feedback for people and coding agents.',
-      description: 'Source-reviewed local developer preview. This document covers the integration routes listed here; private human-login control, human review mutation and MCP JSON-RPC transport are documented separately. Extensible stored projections are intentionally not exhaustive generated-client models. Request bodies are capped at 64 KiB. Commands can change the controlled app and consume provider usage. API-key model access only; no subscription allowance transfer.',
+      description: 'Source-reviewed local developer preview. This document covers the integration routes listed here; private human-login control, human review mutation and MCP JSON-RPC transport are documented separately. Extensible stored projections are intentionally not exhaustive generated-client models. Request bodies are capped at 64 KiB. Commands can change data on the target site and consume provider usage. API-key model access only; no subscription allowance transfer.',
     },
     servers: [{ url: 'http://127.0.0.1:18080', description: 'Default private local API. Replace with your trusted deployment origin.' }],
     security: [{ bearerAuth: [] }],
