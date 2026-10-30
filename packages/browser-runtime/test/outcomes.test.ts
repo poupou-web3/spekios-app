@@ -106,18 +106,30 @@ test('real-browser action completion, diagnostics and safe form journeys',{
       assert.equal(action.outcome.status,'observation_failed');assert.ok(action.outcome.diagnostics.http_errors>0);
       assert.ok(result.report.events.some(e=>e.action_id===action.action_id&&e.event_type==='action.settling_frame'));
     });
-    await t.test('continuous activity times out once, remains inconclusive and never plans another action',async()=>{
-      for(const path of ['/journeys/busy','/journeys/animation']){
-        const result=await explore(store,fixture.url+path,{...options,maxActions:4});saved[path.split('/').at(-1)!]=result.run_id;
-        assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
-        assert.equal(result.report.run.config.stop_reason,'action_completion_unresolved');
-        assert.equal(result.report.actions.length,2);
-        const action=result.report.actions[1];
-        assert.equal(action.assessment.verdict,'inconclusive');assert.equal(action.outcome.status,'timed_out');
-        assert.ok(action.outcome.elapsed_ms<COMPLETION_LIMITS.timeout_ms+3000);
-        assert.ok(action.outcome.samples<=COMPLETION_LIMITS.max_frames);
-        assert.equal(result.report.graph.edges.length,2);
-      }
+    await t.test('a persistent busy state times out once and never plans another action',async()=>{
+      const result=await explore(store,fixture.url+'/journeys/busy',{...options,maxActions:4});saved.busy=result.run_id;
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      assert.equal(result.report.run.config.stop_reason,'action_completion_unresolved');
+      assert.equal(result.report.actions.length,2);
+      const action=result.report.actions[1];
+      assert.equal(action.assessment.verdict,'inconclusive');assert.equal(action.outcome.status,'timed_out');
+      assert.ok(action.outcome.elapsed_ms<COMPLETION_LIMITS.timeout_ms+3000);
+      assert.ok(action.outcome.samples<=COMPLETION_LIMITS.max_frames);
+      assert.equal(result.report.graph.edges.length,2);
+    });
+    await t.test('a CSS animation settles and stays one state while its pixels remain stored',async()=>{
+      const result=await explore(store,fixture.url+'/journeys/animation',{...options,maxActions:4});saved.animation=result.run_id;
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      assert.notEqual(result.report.run.config.stop_reason,'action_completion_unresolved');
+      const action=result.report.actions[1];
+      assert.equal(action.spec.command.control.name,'Start activity');
+      assert.equal(action.outcome.status,'settled');
+      assert.equal(action.assessment.verdict,'no_issue_observed');
+      const before=result.report.captures.find(c=>c.capture_id===action.before_capture_id)!;
+      const after=result.report.captures.find(c=>c.capture_id===action.after_capture_id)!;
+      assert.equal(hash(await store.captureBytes(before.capture_id)),before.sha256);
+      assert.equal(hash(await store.captureBytes(after.capture_id)),after.sha256);
+      assert.equal(result.report.graph.edges[1].from_state_id,result.report.graph.edges[1].to_state_id);
     });
     await t.test('sensitive fields, external submitter overrides and changed destinations cannot bypass dispatch checks',async()=>{
       const browser=await chromium.launch({headless:true,chromiumSandbox:false});

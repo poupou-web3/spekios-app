@@ -40,6 +40,9 @@ try{
     assert.deepEqual(normalize(manifest.actions),normalize(report.actions));
     assert.equal(manifest.run.config.interaction_version,'browser-interactions-v2');
     assert.equal(manifest.run.config.screenshot_caret,'hide');
+    assert.equal(manifest.run.config.screenshot_animations,'disabled');
+    assert.equal(manifest.run.config.reduced_motion,'reduce');
+    assert.equal(manifest.run.config.capture_clock,'paused_during_capture');
     assert.equal(report.model_usage.incomplete_usage_attempts,0);
     for(const capture of report.captures)assert.equal(sha256(await getObject(s3,capture.object_key)),capture.sha256);
     for(const artifact of report.artifacts)assert.equal(sha256(await getObject(s3,artifact.object_key)),artifact.sha256);

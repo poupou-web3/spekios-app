@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Browser } from 'playwright';
 import { comparePng, changedPixelsInRects } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
-import { capture, installNetworkGate, type Hooks } from './recorder.js';
+import { CAPTURE_POLICY, capture, installNetworkGate, prepareCaptureContext, type Hooks } from './recorder.js';
 import { DEFAULT_EXPLORATION_ACTIONS, MAX_EXPLORATION_ACTIONS, isUuid, type Capture, type ObservedControl } from './contracts.js';
 import { ModelClient, modelSettings } from './model-client.js';
-import { blockedReason, documentFingerprint, observeControls, parseAssessment, parsePlan, parsePrediction, stateFingerprint, validateTarget } from './exploration-policy.js';
+import { blockedReason, documentFingerprint, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
 import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reproduction.js';
 import {loadVerification,bindVerificationCommand,parseFixAssessment,finishVerification} from './fix-verification.js';
 import { FrontierPlanner, PLANNER_VERSION, type BrowserCommand, type ChangeSignal, type RouteStep } from './frontier-planner.js';
@@ -138,7 +138,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       await store.query("INSERT INTO runtime_runs(run_id,workspace_id,user_id,target_url,lifecycle,config) VALUES($1,$2,$3,$4,'active',$5)",
         [runId, store.workspaceId, store.userId, targetUrl, JSON.stringify({ runtime_version: 'explorer-v1', expectation_source: replay ? 'recorded_replay' : 'model',
           worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId,project_id:store.projectId,task_id:store.taskId,visibility:'team_private', viewport, viewport_profile: profile, device_scale: 1, video: false, planner_version: PLANNER_VERSION, steering_version: replay?null:'focus-v1',
-          interaction_version:INTERACTION_VERSION,screenshot_caret:'hide',completion_version:COMPLETION_VERSION,completion_limits:COMPLETION_LIMITS,test_form_rules:formRules,
+          interaction_version:INTERACTION_VERSION,...CAPTURE_POLICY,completion_version:COMPLETION_VERSION,completion_limits:COMPLETION_LIMITS,test_form_rules:formRules,
           model_connection: client.settings, execution_mode: executionMode,automatic_reproduction_policy:automaticPolicy,
           replay_of: replay ? { ...(replay.fix_verification?{verification_id:replay.fix_verification.verification_id}:{reproduction_id: replay.reproduction_id}), source_run_id: replay.source_run_id, source_action_id: replay.source_action_id } : null,
           fix_verification:replay?.fix_verification?{verification_id:replay.fix_verification.verification_id,issue_id:replay.fix_verification.issue_id,source_entry:replay.fix_verification.source_entry,candidate_url:replay.fix_verification.candidate_url}:null,
@@ -249,7 +249,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       if(authContext?.session_id){try{savedState=await new AuthVault(store).load(authContext.session_id,origin,executionMode);}catch(error){if(replay?.fix_verification)throw new AccessStopped('saved_candidate_session_unavailable');throw error;}}
       const browserContext = await browser.newContext({ viewport, deviceScaleFactor: 1,
         ...(savedState?{storageState:savedState}:{}),
-        serviceWorkers: 'block', acceptDownloads: false, locale: 'en-US', reducedMotion: 'no-preference' });
+        serviceWorkers: 'block', acceptDownloads: false, locale: 'en-US', reducedMotion: CAPTURE_POLICY.reduced_motion });
+      await prepareCaptureContext(browserContext);
       await installNetworkGate(browserContext, origin, allowedOrigins);
       const page = await browserContext.newPage();
       page.setDefaultTimeout(2000);
@@ -385,12 +386,13 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               await store.query('UPDATE runtime_actions SET spec=$2 WHERE action_id=$1',[actionId,JSON.stringify(spec)]);
               await store.event(runId,'verification.preconditions_matched',{source_action_id:replayStep.source_action_id,source_before_capture_id:replayStep.before.capture_id,candidate_before_capture_id:before!.capture.capture_id,matching:'DOM_route_native_control_state_and_auth_presence',pixels_may_differ:true},actionId);
             });
-          } else if (replayStep && stateFingerprint(replayStep.before) !== stateFingerprint(before.capture)) throw new Error('Replay preconditions differ from the recorded source. No action dispatched.');
+          } else if (replayStep && !sameObservedState(replayStep.before, before.capture)) throw new Error('Replay preconditions differ from the recorded source. No action dispatched.');
           // A plan against an old screen must never silently act against a new one.
           // Scrolling to a chosen control changes only the visible part of the
           // same document; anything else that changed still forces a new plan.
+          // Pixel drift stays evidence and does not, by itself, make the plan stale.
           const revealedOnly = !!revealed && !!last && documentFingerprint(last.capture) === documentFingerprint(before.capture);
-          if (last && stateFingerprint(last.capture) !== stateFingerprint(before.capture) && !revealedOnly) {
+          if (last && !statesMatch(last.capture, before.capture) && !revealedOnly) {
             if (replay) throw new Error('Page changed during replay; prediction is stale. No action dispatched.');
             const drift = comparePng(last.bytes, before.bytes, {beforeCaptureId:last.capture.capture_id,afterCaptureId:before.capture.capture_id});
             const mask = await store.artifact(runId,'replanning_mask',drift.rawMaskPng,'png');
@@ -425,7 +427,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             if (++revealFailures >= MAX_REVEAL_FAILURES) { stopReason='reveal_limit_reached'; break; }
             continue;
           }
-          await validateDispatch(page,observed ?? spec.command,formRules);
+          const command = observed ?? spec.command;
+          await validateDispatch(page,command,formRules);
           const pageUrl = before.capture.observation.url;
           await store.transaction(async () => {
             await control.check(true);
@@ -443,7 +446,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           await control.check();
           diagnostics=new ActionDiagnostics(page);
           try {
-            toolError=await dispatch(page,spec.command,formRules);
+            toolError=await dispatch(page,command,formRules);
           } catch (error) { toolError = message(error); }
           completion=await settleAction(store,page,runId,actionId,diagnostics,hooks);
           if(options.access&&!replay&&executed===1){
@@ -454,8 +457,11 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             }
           }
           after = await capture(store, page, runId, actionId, 'after', ordinal, null, hooks);
-          if(completion.status==='settled' && (completion.frames.at(-1)?.sha256!==after.capture.sha256||diagnostics.blockingPending())) {
-            completion.status='timed_out';completion.reason='The page changed or a request began between the quiet sample and the final capture.';
+          const copyDrifted = completion.settled_observation_sha256 !== observedCopyIdentity(after.capture.observation);
+          if(completion.status==='settled' && (diagnostics.blockingPending() || copyDrifted)) {
+            completion.status='timed_out';completion.reason=diagnostics.blockingPending()
+              ? 'A request began between the quiet sample and the final capture.'
+              : 'The page text or route changed between the quiet sample and the final capture.';
           }
           const outcome=await saveOutcome(store,runId,actionId,completion,diagnostics);
           outcomeSaved=true;

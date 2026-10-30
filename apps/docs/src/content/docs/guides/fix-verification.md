@@ -32,7 +32,7 @@ A completed browser job alone is insufficient. No new suspicion is insufficient.
 
 ## Preconditions and deployment mapping
 
-Scout inherits the original viewport, action parameters and expected result. It maps the original entry URL to your explicit candidate entry URL and other recorded same-origin routes to the candidate origin. External routes remain subject to the existing allowlist. New native control IDs are bound only after matching the recorded page text, control states, route, viewport, scroll and authenticated/public context. A changed control or meaningful page context stops dispatch and remains inconclusive. Appearance alone may change; every new screenshot and difference mask is stored independently.
+Scout inherits the original viewport, action parameters and expected result. It maps the original entry URL to your explicit candidate entry URL and other recorded same-origin routes to the candidate origin. External routes remain subject to the existing allowlist. New native control IDs are bound only after matching the recorded page text, control states, route, viewport and authenticated/public context. Clock and date labels, and scroll within 8 pixels, still match. A changed control or meaningful page context stops dispatch and remains inconclusive. Appearance alone may change; every new screenshot and difference mask is stored independently. Fresh reproduction of a suspect uses this same comparison.
 
 This initial implementation is deliberately conservative about content and data changes. It does not invent a replacement journey when the original preconditions cannot be reached. Both live and simulated provider modes are supported, but a simulated source cannot be silently verified using a live provider or vice versa.
 

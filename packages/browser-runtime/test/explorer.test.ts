@@ -137,14 +137,16 @@ test('model-driven browser loop preserves evidence, graph and uncertainty', {
       const request = (await store.query('SELECT spec FROM model_requests WHERE request_id=$1', [action.assessment.request_id])).rows[0];
       assert.deepEqual(request.spec.capture_ids, [action.before_capture_id, action.after_capture_id]);
     });
-    await t.test('one-channel one-pixel change survives the model path and creates a distinct state', async () => {
+    await t.test('one-channel one-pixel change stays in the evidence mask without splitting the state', async () => {
       const result = await run('/tiny', {client:new ModelClient({provider:'anthropic',model:'scout-explorer-fixture',freeOnly:true})});
       assert.equal(result.report.run.lifecycle, 'completed', result.report.run.error);
       assert.equal(result.report.actions[1].comparison.counts.changed_pixels, 1);
       assert.equal(result.report.actions[1].comparison.max_overlap_channel_delta, 1);
       assert.equal(result.report.actions[1].assessment.verdict, 'no_issue_observed');
       const edge = result.report.graph.edges[1];
-      assert.notEqual(edge.from_state_id, edge.to_state_id);
+      assert.equal(edge.from_state_id, edge.to_state_id);
+      assert.notEqual(result.report.captures.find((c: { capture_id: string }) => c.capture_id === result.report.actions[1].before_capture_id).sha256,
+        result.report.captures.find((c: { capture_id: string }) => c.capture_id === result.report.actions[1].after_capture_id).sha256);
       assert.equal(result.report.model_usage.known_input_tokens, 240);
     });
     await t.test('branch traversal returns to a prior state and does not replay its attempted controls', async () => {

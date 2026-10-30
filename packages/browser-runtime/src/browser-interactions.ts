@@ -1,15 +1,14 @@
 import type { Page } from 'playwright';
 import type { BrowserCommand, Capture } from './contracts.js';
-import { blockedReason, observeControls } from './exploration-policy.js';
+import { blockedReason, findObservedControl, observeControls } from './exploration-policy.js';
 import { testFormRules, type TestFormRule } from './form-policy.js';
 import { commandAction, commandFor } from './interaction-contract.js';
 import { isDeepStrictEqual } from 'node:util';
 
 export function observedCommand(command: BrowserCommand, capture: Capture, origin: string): BrowserCommand {
   if (command.type === 'navigate') return command;
-  const control = capture.observation.controls?.find(c=>c.control_id===command.control.control_id);
-  if (!control || control.role!==command.control.role || control.name!==command.control.name || control.href!==command.control.href || blockedReason(control,origin)) throw new Error('Selected control is no longer available.');
-  if (command.type==='scroll' && !isDeepStrictEqual(control.scroll_target,command.control.scroll_target)) throw new Error('Recorded scroll target has changed.');
+  const control = findObservedControl(command.control, capture.observation.controls ?? []);
+  if (!control || blockedReason(control, origin)) throw new Error('Selected control is no longer available.');
   if (command.type==='submit' && !isDeepStrictEqual(control.form,command.control.form)) throw new Error('Recorded form contract has changed.');
   return commandFor(control,commandAction(command));
 }

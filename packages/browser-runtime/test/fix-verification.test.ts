@@ -28,6 +28,19 @@ test('candidate controls are rebound only after equivalent recorded DOM and nati
   assert.equal((bindVerificationCommand(step,fresh,verification) as any).control.control_id,'fresh-id');
   fresh.observation.text='Different account or page';assert.equal(preconditionsMatch(before,fresh,source,candidate),false);assert.throws(()=>bindVerificationCommand(step,fresh,verification),/No action dispatched/);
 });
+test('clock labels and a few pixels of scroll do not change recorded preconditions',()=>{
+  const before=capture(),fresh=capture(candidate);
+  before.observation.text='Ready 2s ago';fresh.observation.text='Ready 15 seconds ago';
+  fresh.sha256='shifted-pixels';fresh.observation.scroll={x:0,y:3};
+  before.observation.controls![0]={...control,name:'Save 1 minute ago'} as any;
+  fresh.observation.controls![0]={...control,name:'Save 3s ago',control_id:'fresh-id',rect:{x:12,y:4,width:20,height:10}} as any;
+  assert.equal(preconditionsMatch(before,fresh,source,candidate),true);
+  const command={type:'click',control:before.observation.controls![0]} as unknown as BrowserCommand;
+  const bound=bindVerificationCommand({before,command} as any,fresh,{source_entry:source,candidate_url:candidate} as any);
+  assert.equal((bound as any).control.control_id,'fresh-id');
+  assert.equal((bound as any).control.name,'Save 3s ago');
+  fresh.observation.text='Offline';assert.equal(preconditionsMatch(before,fresh,source,candidate),false);
+});
 test('missing, disabled, occluded, truncated or differently authenticated preconditions are not silently healed',()=>{
   for(const change of [(c:any)=>c.observation.controls=[],(c:any)=>c.observation.controls[0].enabled=false,(c:any)=>c.observation.controls[0].occluded=true,(c:any)=>c.observation.controls_truncated=true,(c:any)=>c.observation.auth_context_id='different-auth']){
     const before=capture(),fresh=structuredClone(capture(candidate));change(fresh);assert.equal(preconditionsMatch(before,fresh,source,candidate),false);

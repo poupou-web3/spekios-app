@@ -5,7 +5,7 @@ import {hash} from './store.js';
 import type {BrowserCommand,Capture,ObservedControl} from './contracts.js';
 import {isUuid} from './contracts.js';
 import {loadReplay,readCapture,type Replay,type ReplayStep} from './reproduction.js';
-import {parseAssessment} from './exploration-policy.js';
+import {findObservedControl,parseAssessment,sameObservedState} from './exploration-policy.js';
 import type {AccessResult} from './access-handoff.js';
 
 export type FixVerification={verification_id:string;issue_id:string;source_entry:string;candidate_url:string;original:Record<string,any>;requires_session:boolean};
@@ -22,28 +22,18 @@ function remapControl(control:ObservedControl,source:string,candidate:string):Ob
 export function remapCommand(command:BrowserCommand,source:string,candidate:string):BrowserCommand {
   return command.type==='navigate'?{...command,url:remapUrl(command.url,source,candidate)}:{...command,control:remapControl(command.control,source,candidate)};
 }
-// Deployment pixels may change. Match the recorded DOM preconditions, route,
-// native control state and auth-presence; retain every screenshot separately.
+// Deployment pixels may change. Match the recorded route, page copy and native
+// control state, with the same clock and scroll tolerance as exploration.
+// Every screenshot is still stored separately.
 export function preconditionsMatch(source:Capture,fresh:Capture,sourceEntry:string,candidateEntry:string):boolean {
-  function projection(c:Capture,map:boolean){
-    const o=c.observation;
-    return {url:map&&o.url!=='about:blank'?remapUrl(o.url,sourceEntry,candidateEntry):o.url,title:o.title,text:o.text,text_truncated:o.text_truncated,
-      viewport:o.viewport,device_scale:o.device_scale,scroll:o.scroll,authenticated:!!o.auth_context_id,
-      controls_truncated:o.controls_truncated??false,controls:(o.controls??[]).map(raw=>{
-        const {control_id:_id,rect:_rect,...control}=map?remapControl(raw,sourceEntry,candidateEntry):raw;
-        if(control.form){const {signature:_signature,...form}=control.form;return {...control,occluded:control.occluded??false,form};}
-        return {...control,occluded:control.occluded??false};
-      })};
-  }
-  return !source.observation.observation_error&&!fresh.observation.observation_error&&isDeepStrictEqual(projection(source,true),projection(fresh,false));
+  return sameObservedState(source,fresh,url=>remapUrl(url,sourceEntry,candidateEntry));
 }
 export function bindVerificationCommand(step:ReplayStep,fresh:Capture,verification:FixVerification):BrowserCommand {
   if(!preconditionsMatch(step.before,fresh,verification.source_entry,verification.candidate_url))throw new Error('Candidate preconditions differ from the recorded behavior. No action dispatched.');
   if(step.command.type==='navigate')return step.command;
-  const command=step.command;
-  const matches=fresh.observation.controls?.filter(c=>c.role===command.control.role&&c.name===command.control.name&&c.href===command.control.href)??[];
-  if(matches.length!==1)throw new Error('The recorded candidate control does not resolve uniquely. No action dispatched.');
-  return {...command,control:matches[0]};
+  const control=findObservedControl(step.command.control,fresh.observation.controls??[]);
+  if(!control)throw new Error('The recorded candidate control does not resolve uniquely. No action dispatched.');
+  return {...step.command,control};
 }
 export async function loadVerification(store:Store,id:string,sessionId?:string,authMode?:string):Promise<Replay> {
   if(!isUuid(id))throw new Error('Invalid verification ID.');

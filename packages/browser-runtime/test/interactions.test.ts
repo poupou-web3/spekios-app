@@ -27,10 +27,15 @@ test('interaction proposals enforce exact types, bounded text and observed optio
   assert.notEqual(commandKey({type:'fill',control:field,value:'one'}),commandKey({type:'fill',control:field,value:'two'}));
 });
 
-test('field values and checkbox state participate in exact state identity',()=>{
-  const captured=(control:ObservedControl)=>({sha256:'same-screenshot',observation:{url:'http://app/',controls:[control]}} as Capture);
+test('field values and checkbox state participate in state identity, screenshot bytes and clocks do not',()=>{
+  const captured=(control:ObservedControl,text='Ready',sha='same-screenshot',scroll={x:0,y:0})=>({sha256:sha,observation:{url:'http://app/',title:'App',text,text_truncated:false,viewport:{width:800,height:600},scroll,controls:[control]}} as Capture);
   assert.notEqual(stateFingerprint(captured({...field,value:'one'})),stateFingerprint(captured({...field,value:'two'})));
   assert.notEqual(stateFingerprint(captured({...field,role:'checkbox',checked:true})),stateFingerprint(captured({...field,role:'checkbox',checked:false})));
+  assert.equal(stateFingerprint(captured(field,'Updated 2s ago','pixel-a')),stateFingerprint(captured(field,'Updated 5 minutes ago','pixel-b')));
+  assert.equal(stateFingerprint(captured(field,'Ready', 'pixel-a', {x:0,y:0})),stateFingerprint(captured(field,'Ready', 'pixel-b', {x:0,y:3})));
+  assert.notEqual(stateFingerprint(captured(field,'Ready')),stateFingerprint(captured(field,'Saved')));
+  assert.notEqual(stateFingerprint(captured(field,'Ready', 'pixel-a', {x:0,y:0})),stateFingerprint(captured(field,'Ready', 'pixel-a', {x:0,y:40})));
+  assert.equal(stateFingerprint(captured(field)),stateFingerprint(captured({...field,rect:{x:4,y:8,width:20,height:10}})));
 });
 
 test('large forms use a bounded prompt projection while retaining exact option values and full observations',()=>{
@@ -58,6 +63,9 @@ test('typed interactions retain independent evidence and reproduce their exact p
       assert.deepEqual(result.report.actions.map(a=>a.spec.command.type),['navigate','fill','select','set_checked','set_checked','click']);
       assert.equal(result.report.run.config.replans,0,'Caret blinking must not create a stale input plan.');
       assert.equal(result.report.run.config.screenshot_caret,'hide');
+      assert.equal(result.report.run.config.screenshot_animations,'disabled');
+      assert.equal(result.report.run.config.reduced_motion,'reduce');
+      assert.equal(result.report.run.config.capture_clock,'paused_during_capture');
       assert.equal(result.report.model_requests.length,12);
       assert.equal(result.report.graph.edges.length,6);
       for(const action of result.report.actions){
