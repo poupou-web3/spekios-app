@@ -3,16 +3,17 @@ import { chromium } from 'playwright';
 import { comparePng, changedPixelsInRects } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
 import { capture, installNetworkGate, type Hooks } from './recorder.js';
-import { isUuid, type Capture, type ObservedControl } from './contracts.js';
+import { DEFAULT_EXPLORATION_ACTIONS, MAX_EXPLORATION_ACTIONS, isUuid, type Capture, type ObservedControl } from './contracts.js';
 import { ModelClient, modelSettings } from './model-client.js';
-import { blockedReason, observeControls, parseAssessment, parsePlan, parsePrediction, stateFingerprint, validateTarget } from './exploration-policy.js';
+import { blockedReason, documentFingerprint, observeControls, parseAssessment, parsePlan, parsePrediction, stateFingerprint, validateTarget } from './exploration-policy.js';
 import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reproduction.js';
 import {loadVerification,bindVerificationCommand,parseFixAssessment,finishVerification} from './fix-verification.js';
 import { FrontierPlanner, PLANNER_VERSION, type BrowserCommand, type ChangeSignal, type RouteStep } from './frontier-planner.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
 import { commandFor, INTERACTION_VERSION } from './interaction-contract.js';
-import { dispatch, observedCommand, validateDispatch } from './browser-interactions.js';
-import { commandContext, controlContext, pageContext as context } from './model-context.js';
+import { dispatch, observedCommand, revealControl, validateDispatch, type Reveal } from './browser-interactions.js';
+import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyContext, pageContext as context } from './model-context.js';
+import { AppMemory, MEMORY_VERSION, type MemoryScope } from './app-memory.js';
 import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged } from './access-detection.js';
 import { AuthVault } from './auth-session.js';
 import { testFormRules, type TestFormRule } from './form-policy.js';
@@ -35,19 +36,30 @@ Never claim a confirmed bug. Credentials, payments and destructive actions requi
 type ModelPrediction = { source: 'model'; request_id: string; decision_id: string; goal: string; expected_result: string; context_capture_id: string | null; steering?: PlanningFocus|null };
 type ReplayPrediction = { source: 'recorded_replay'; source_prediction_id: string; source_model_request_id: string; goal: string; expected_result: string; context_capture_id: string | null };
 type Spec = { command: BrowserCommand; prediction: ModelPrediction | ReplayPrediction; worker_id: string; agent_id: string; replay_source_action_id?: string;
-  exploration?: { purpose: 'explore' | 'return'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep } };
+  exploration?: { purpose: 'explore' | 'return' | 'resume'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep } };
 export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: number; client?: ModelClient; hooks?: Hooks; jobId?: string; viewportProfile?: ViewportProfile;
   autoReproduce?:boolean;maxAutoReproductions?:number;maxAutoReplayActions?:number;
+  // Library callers opt in; queued jobs pass the setting frozen at admission.
+  appMemory?: boolean; maxDurationMs?: number;
   testFormRules?: TestFormRule[]; access?: AccessHandoff; authMode?: 'auto'|'sign_in'|'public'; sessionId?:string; accessTimeoutMs?:number };
 const MAX_REPLANS = 3;
+// Each failed reveal permanently removes one control from this run's frontier.
+const MAX_REVEAL_FAILURES = 5;
+export function explorationDurationMs() {
+  const minutes = Number(process.env.SCOUT_EXPLORER_MAX_MINUTES ?? '30');
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 180) throw new Error('SCOUT_EXPLORER_MAX_MINUTES must be an integer from 1 to 180.');
+  return minutes * 60000;
+}
 function changes(before: Capture, after: Capture, mask: Buffer): Record<string, ChangeSignal> {
   const controls = after.observation.controls ?? [];
-  const counts = changedPixelsInRects(mask, controls.map(c => c.rect));
+  // Only controls inside the captured viewport have pixels to compare.
+  const visible = controls.filter(c => c.rect);
+  const counts = new Map(changedPixelsInRects(mask, visible.map(c => c.rect)).map((count: {changed_pixels:number;sampled_pixels:number}|null, i: number) => [visible[i].control_id, count]));
   const samePage = before.observation.url === after.observation.url;
-  return Object.fromEntries(controls.map((c,i) => [c.control_id, {
+  return Object.fromEntries(controls.map(c => [c.control_id, {
     newly_exposed: samePage && !(before.observation.controls ?? []).some(old => old.control_id === c.control_id && !old.disabled && !old.occluded),
-    changed_pixels: samePage ? counts[i]?.changed_pixels ?? 0 : 0,
-    sampled_pixels: counts[i]?.sampled_pixels ?? 0,
+    changed_pixels: samePage ? counts.get(c.control_id)?.changed_pixels ?? 0 : 0,
+    sampled_pixels: counts.get(c.control_id)?.sampled_pixels ?? 0,
   }]));
 }
 
@@ -81,8 +93,11 @@ export async function verifyFix(store:Store,verificationId:string,options:Explor
 async function execute(store: Store, inputUrl: string, options: ExplorationOptions, replay?: Replay) {
   const allowedOrigins = options.allowedOrigins ?? (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
   const targetUrl = validateTarget(inputUrl, allowedOrigins);
-  const maxActions = replay?.steps.length ?? options.maxActions ?? Number(process.env.SCOUT_EXPLORER_MAX_ACTIONS ?? '6');
-  if (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > 12) throw new Error('The local explorer action limit must be between 1 and 12.');
+  const maxActions = replay?.steps.length ?? options.maxActions ?? Number(process.env.SCOUT_EXPLORER_MAX_ACTIONS ?? String(DEFAULT_EXPLORATION_ACTIONS));
+  if (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > MAX_EXPLORATION_ACTIONS) throw new Error(`The explorer action limit must be between 1 and ${MAX_EXPLORATION_ACTIONS}.`);
+  // Replays are bounded by their recorded path instead of wall time.
+  const maxDurationMs = replay ? null : options.maxDurationMs ?? explorationDurationMs();
+  if (maxDurationMs !== null && (!Number.isInteger(maxDurationMs) || maxDurationMs < 1)) throw new Error('Invalid exploration time limit.');
   const automaticPolicy=automaticReproductionPolicy({...options,autoReproduce:!replay&&options.autoReproduce===true});
   const client = options.client ?? new ModelClient(modelSettings());
   const profile = replay?.viewport_profile ?? viewportProfile(options.viewportProfile);
@@ -102,10 +117,22 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       await options.hooks?.beforeCapture?.(page);
       if((options.access||authContext||replay?.fix_verification)&&(await accessSignals(page)).login_form)throw new PrivateLoginSurface();
     } };
-    const runId = randomUUID(), workerId = randomUUID(), agentId = randomUUID();
+    const runId = randomUUID(), workerId = randomUUID(), agentId = randomUUID(), startedAt = Date.now();
     const control=new RunControl(store,runId);
     const maxModelRequests = replay ? maxActions : maxActions * 3 + MAX_REPLANS * 2;
-    let modelRequests = 0, executed = 0, replans = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
+    let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
+    // Replays never read or write memory; their path is fixed by evidence.
+    const memoryEnabled = !replay && options.appMemory === true;
+    let memory = AppMemory.disabled(store, runId);
+    const memoryScopes: ReturnType<AppMemory['summary']>[] = [];
+    const openMemory = async () => {
+      if (!memoryEnabled) return;
+      const scope: MemoryScope = { origin, viewport_profile: profile, auth_scope: authContext ? 'signed_in' : 'public', execution_mode: executionMode };
+      memory = await AppMemory.open(store, runId, scope);
+      memoryScopes.push(memory.summary());
+      await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ app_memory: { version: MEMORY_VERSION, enabled: true, scopes: memoryScopes } })]);
+      await store.event(runId, 'memory.loaded', memory.summary());
+    };
     await store.transaction(async () => {
       await store.query("INSERT INTO runtime_runs(run_id,workspace_id,user_id,target_url,lifecycle,config) VALUES($1,$2,$3,$4,'active',$5)",
         [runId, store.workspaceId, store.userId, targetUrl, JSON.stringify({ runtime_version: 'explorer-v1', expectation_source: replay ? 'recorded_replay' : 'model',
@@ -114,9 +141,13 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           model_connection: client.settings, execution_mode: executionMode,automatic_reproduction_policy:automaticPolicy,
           replay_of: replay ? { ...(replay.fix_verification?{verification_id:replay.fix_verification.verification_id}:{reproduction_id: replay.reproduction_id}), source_run_id: replay.source_run_id, source_action_id: replay.source_action_id } : null,
           fix_verification:replay?.fix_verification?{verification_id:replay.fix_verification.verification_id,issue_id:replay.fix_verification.issue_id,source_entry:replay.fix_verification.source_entry,candidate_url:replay.fix_verification.candidate_url}:null,
-          limits: { max_actions: maxActions, max_replans: replay ? 0 : MAX_REPLANS, max_model_requests: maxModelRequests, max_output_tokens_per_request: 2048, attempts_per_request: 1 },
+          limits: { max_actions: maxActions, max_replans: replay ? 0 : MAX_REPLANS, max_reveal_failures: replay ? 0 : MAX_REVEAL_FAILURES, max_model_requests: maxModelRequests,
+            max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, context_budgets: CONTEXT_BUDGETS },
+          app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] },
           scope: 'operator-controlled-app', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
+      await openMemory();
+      planner = new FrontierPlanner(targetUrl, memory.snapshot);
       if (options.jobId) {
         const linked = await store.query("UPDATE browser_jobs SET run_id=$2 WHERE job_id=$1 AND workspace_id=$3 AND user_id=$4 AND status='running' AND run_id IS NULL RETURNING cancel_id,cancel_requested_at", [options.jobId, runId, store.workspaceId, store.userId]);
         if (linked.rowCount !== 1) throw new Error('Browser job is no longer claimable.');
@@ -190,6 +221,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             [randomUUID(), runId, id, control.control_id, JSON.stringify(control), reason ? 'blocked' : 'unexplored', reason]);
           if (signals[control.control_id]) await store.query("UPDATE exploration_frontier SET planning=planning || $4::jsonb WHERE run_id=$1 AND state_id=$2 AND control_id=$3", [runId,id,control.control_id,JSON.stringify({change_signal:signals[control.control_id]})]);
         }
+        await memory.observe(c, planner.metadata(id).path_likelihood_score);
         await store.event(runId, 'state.observed', { state_id: id, capture_id: c.capture_id, fingerprint, controls_truncated: c.observation.controls_truncated ?? false }, c.action_id);
         return id;
       });
@@ -240,7 +272,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         authContext=result;await recordContext();
         // Authentication changes the available tree. Preserve old evidence, but
         // never reuse its plans or return routes for a different account context.
-        last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl);
+        // Memory switches to the signed-in scope for the same reason.
+        await store.transaction(openMemory);
+        last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl,memory.snapshot);
         await page.goto('about:blank');
         return true;
       };
@@ -248,6 +282,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
 
       for (let ordinal = 1; executed < maxActions; ordinal++) {
         await control.check();
+        if (maxDurationMs !== null && Date.now() - startedAt >= maxDurationMs) { stopReason = 'time_budget_reached'; break; }
         if(options.access&&!replay&&(await accessSignals(page)).login_form)await handoff(authContext?'session_expired':'login_required');
         if (!replay && modelRequests >= maxModelRequests - 1) { stopReason = 'model_request_budget_reached'; break; }
         let spec: Spec;
@@ -265,21 +300,27 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             decision_id: decision.decisionId, ...decision.result, context_capture_id: null }, worker_id: workerId, agent_id: agentId };
         } else {
           const available = planner.available(lastState!);
-          const shown = controlContext(available);
+          const signals = planner.nodes.get(lastState!)!.signals;
           let decision: Awaited<ReturnType<typeof decide<ReturnType<typeof parsePlan>>>> | undefined;
           if (available.length) {
-            decision = await decide('plan', null, [last.capture.capture_id], { task: 'plan', page: {...context(last.capture), controls: undefined},
-              available_controls: shown.controls,available_controls_truncated:shown.controls_truncated,omitted_available_controls:shown.omitted_controls,
-              recent_history: history.slice(-2), exploration: planner.context(lastState!),
-              control_changes: planner.nodes.get(lastState!)!.signals,
-              instruction: 'Estimate what a user is most likely to do NEXT given this path and current page. Favor continuing a useful journey and newly exposed controls where appropriate. Rank up to eight available controls, each with an observable expectation. Use click for buttons/links, fill with short synthetic plain text for editable text/search fields, select with an exact enabled observed option value, set_checked for checkboxes/radios (radios only true), scroll for an observed page scroll control, or submit for an explicitly authorized observed form submitter. For forms, try empty/invalid input when useful, then fill synthetic data and submit to observe validation or the result. Avoid repeating an unchanged value. Do not invent sensitive data, press keys, submit an unauthorized form, or invent controls/scroll coordinates. Likelihood is a conditional estimate, not measured probability. A visual change does not by itself mean a bug.',
-              response_schema: { candidates: [{ control_id: 'observed ID', goal: 'string', expected_result: 'string', likelihood: 'number 0..1',
-                action:'Exactly one of {type:"click"}, {type:"fill",value:"plain text"}, {type:"select",value:"observed option value"}, {type:"set_checked",checked:boolean}, {type:"scroll"}, {type:"submit"}' }], stop_reason: 'string when candidates empty; otherwise null' } },
-            value => parsePlan(value, shown.controls));
+            const fitted = fitContext(scale => {
+              const shown = controlContext(available, Math.floor(CONTEXT_BUDGETS.plan_controls_bytes * scale));
+              const appMemory = memory.planningContext(last!.capture.observation.url, shown.controls);
+              return { task: 'plan' as const, page: {...context(last!.capture, scale), controls: undefined},
+                available_controls: shown.controls,available_controls_truncated:shown.controls_truncated,omitted_available_controls:shown.omitted_controls,
+                recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.plan_history * scale)), exploration: planner.context(lastState!),
+                control_changes: Object.fromEntries(shown.controls.flatMap(c => signals[c.control_id]?.newly_exposed || signals[c.control_id]?.changed_pixels ? [[c.control_id, signals[c.control_id]]] : [])),
+                ...(appMemory ? { app_memory: appMemory } : {}), context_scale: scale,
+                instruction: 'Estimate what a user is most likely to do NEXT given this path and current page. Favor continuing a useful journey and newly exposed controls where appropriate. Rank up to eight available controls, each with an observable expectation. Controls with in_viewport=false are further down the page and are scrolled into view before acting; they are not visible in the screenshot. control_changes lists only controls that were newly exposed or contain changed pixels. Use click for buttons/links, fill with short synthetic plain text for editable text/search fields, select with an exact enabled observed option value, set_checked for checkboxes/radios (radios only true), scroll for an observed page scroll control, or submit for an explicitly authorized observed form submitter. For forms, try empty/invalid input when useful, then fill synthetic data and submit to observe validation or the result. Avoid repeating an unchanged value. Do not invent sensitive data, press keys, submit an unauthorized form, or invent controls/scroll coordinates. Likelihood is a conditional estimate, not measured probability. A visual change does not by itself mean a bug.',
+                response_schema: { candidates: [{ control_id: 'observed ID', goal: 'string', expected_result: 'string', likelihood: 'number 0..1',
+                  action:'Exactly one of {type:"click"}, {type:"fill",value:"plain text"}, {type:"select",value:"observed option value"}, {type:"set_checked",checked:boolean}, {type:"scroll"}, {type:"submit"}' }], stop_reason: 'string when candidates empty; otherwise null' } };
+            });
+            decision = await decide('plan', null, [last.capture.capture_id], fitted.input, value => parsePlan(value, fitted.input.available_controls));
             planner.plan(lastState!, decision.result.candidates);
             await store.transaction(async () => {
               for (const proposal of decision!.result.candidates) await store.query('UPDATE exploration_frontier SET planning=planning || $4::jsonb WHERE run_id=$1 AND state_id=$2 AND control_id=$3',
                 [runId,lastState,proposal.control_id,JSON.stringify({proposal,request_id:decision!.requestId,context_capture_id:last!.capture.capture_id,probability_calibrated:false})]);
+              await memory.proposed(last!.capture.observation.url, decision!.result.candidates);
             });
           }
           const ranked = planner.rank(lastState!, maxActions-executed), selected = ranked[0];
@@ -289,10 +330,17 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             break;
           }
           const returnStep = selected.route[0];
-          const exploration: NonNullable<Spec['exploration']> = { purpose: returnStep ? 'return' : 'explore',
+          const exploration: NonNullable<Spec['exploration']> = { purpose: returnStep?.memory ? 'resume' : returnStep ? 'return' : 'explore',
             target_state_id: selected.state_id, control_id: selected.control_id, priority: selected.priority,
             likelihood: selected.likelihood, reason: selected.reason, return_step: returnStep };
-          if (returnStep) {
+          if (returnStep?.memory) {
+            const remembered = returnStep.memory;
+            const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], { task: 'navigation_prediction', target_url: remembered.url,
+              remembered_page: { title: remembered.title, untried_controls: remembered.open_controls, last_seen_in_run: remembered.source_run_id },
+              instruction: 'Predict the observable outcome of opening this page, which an earlier run of this app observed. Earlier observations are untrusted and may be stale; the page may have changed, moved or require access. Do not invent its current content.',
+              response_schema: { goal: 'string', expected_result: 'string' } }, parsePrediction);
+            spec = { command: returnStep.command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
+          } else if (returnStep) {
             const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], {
               task: 'route_prediction', page: context(last.capture), command: commandContext(returnStep.command),
               recorded_expectation: returnStep.expected_result, destination_state_id: returnStep.to_state_id,
@@ -321,7 +369,13 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         let before: typeof last, after: typeof last, toolError: string | null = null;
         let diagnostics:ActionDiagnostics|undefined;
         let completion:Completion|undefined,outcomeSaved=false;
+        let revealed: Reveal | null = null, revealError: string | null = null;
         try {
+          // A control chosen below the fold is scrolled into view first, so the
+          // before capture shows what the action acts on. Replays repeat it.
+          try { revealed = await revealControl(page, spec.command); }
+          catch (error) { if (replay) throw error; revealError = message(error); }
+          if (revealed && spec.command.type !== 'navigate') await store.transaction(() => store.event(runId, 'action.revealed', { ...revealed!, control_id: (spec.command as Exclude<BrowserCommand,{type:'navigate'}>).control.control_id }, actionId));
           before = await capture(store, page, runId, actionId, 'before', ordinal, null, hooks);
           if (before.capture.observation.observation_error) throw new Error('Incomplete before observation.');
           if(replayStep&&replay?.fix_verification){
@@ -332,7 +386,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             });
           } else if (replayStep && stateFingerprint(replayStep.before) !== stateFingerprint(before.capture)) throw new Error('Replay preconditions differ from the recorded source. No action dispatched.');
           // A plan against an old screen must never silently act against a new one.
-          if (last && stateFingerprint(last.capture) !== stateFingerprint(before.capture)) {
+          // Scrolling to a chosen control changes only the visible part of the
+          // same document; anything else that changed still forces a new plan.
+          const revealedOnly = !!revealed && !!last && documentFingerprint(last.capture) === documentFingerprint(before.capture);
+          if (last && stateFingerprint(last.capture) !== stateFingerprint(before.capture) && !revealedOnly) {
             if (replay) throw new Error('Page changed during replay; prediction is stale. No action dispatched.');
             const drift = comparePng(last.bytes, before.bytes, {beforeCaptureId:last.capture.capture_id,afterCaptureId:before.capture.capture_id});
             const mask = await store.artifact(runId,'replanning_mask',drift.rawMaskPng,'png');
@@ -346,14 +403,40 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             continue;
           }
           const fromState = await state(before.capture,lastState);
-          await validateDispatch(page,observedCommand(spec.command,before.capture,origin),formRules);
+          // The planning state keeps its own frontier when a reveal moved the view.
+          const planningState = revealed && lastState && lastState !== fromState ? lastState : null;
+          let observed: BrowserCommand | null = null;
+          try { if (!revealError) observed = observedCommand(spec.command,before.capture,origin); }
+          catch (error) { if (!revealed || replay) throw error; revealError = message(error); }
+          if (!observed && spec.command.type !== 'navigate') {
+            // The control could not be brought into a usable view (covered,
+            // disabled, ambiguous or gone). Skip it without dispatch and replan.
+            const controlId = spec.command.control.control_id, reason = revealError ?? 'Selected control is no longer available.';
+            await store.transaction(async () => {
+              await store.query("UPDATE runtime_actions SET state='skipped',before_capture_id=$2,assessment=$3,finished_at=now() WHERE action_id=$1", [actionId,before!.capture.capture_id,JSON.stringify({verdict:'inconclusive',method:'reveal-guard',reason:'The control below the visible area could not be used after scrolling: '+reason+' No action dispatched.',confirmed_bug:false})]);
+              await store.query("UPDATE exploration_frontier SET status='blocked',reason='unavailable_after_reveal' WHERE run_id=$1 AND state_id=ANY($2::uuid[]) AND control_id=$3", [runId,[fromState,planningState].filter(Boolean),controlId]);
+              await store.event(runId,'exploration.reveal_failed',{control_id:controlId,state_id:fromState,planning_state_id:planningState,reveal:revealed,error:reason},actionId);
+            });
+            for (const id of [fromState, planningState]) if (id) planner.attempted(id, spec.command, true);
+            // A return route through this control is not retried.
+            if (spec.exploration?.purpose === 'return' && spec.exploration.return_step) planner.transition({...spec.exploration.return_step,to_state_id:fromState},'inconclusive',spec.exploration.return_step);
+            last = before; lastState = fromState;
+            if (++revealFailures >= MAX_REVEAL_FAILURES) { stopReason='reveal_limit_reached'; break; }
+            continue;
+          }
+          await validateDispatch(page,observed ?? spec.command,formRules);
+          const pageUrl = before.capture.observation.url;
           await store.transaction(async () => {
             await control.check(true);
             await store.query("UPDATE runtime_actions SET state='dispatched',before_capture_id=$2,dispatched_at=now() WHERE action_id=$1", [actionId, before!.capture.capture_id]);
-            if (spec.command.type !== 'navigate') await store.query("UPDATE exploration_frontier SET status='attempted',action_id=COALESCE(action_id,$4) WHERE run_id=$1 AND state_id=$2 AND control_id=$3", [runId, fromState, spec.command.control.control_id, actionId]);
+            if (spec.command.type !== 'navigate') {
+              await store.query("UPDATE exploration_frontier SET status='attempted',action_id=COALESCE(action_id,$4) WHERE run_id=$1 AND state_id=ANY($2::uuid[]) AND control_id=$3", [runId, [fromState,planningState].filter(Boolean), spec.command.control.control_id, actionId]);
+              if (spec.command.control.role !== 'scroll') await memory.attempted(pageUrl, spec.command.control.control_id, actionId);
+            }
             await store.event(runId, 'action.dispatched', { before_capture_id: before!.capture.capture_id, prediction_id: predictionId }, actionId);
           });
           planner.attempted(fromState,spec.command,spec.exploration?.purpose==='return');
+          if (planningState) planner.attempted(planningState,spec.command,true);
           executed++;
           await hooks.afterDispatch?.(ordinal);
           await control.check();
@@ -392,13 +475,16 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           });
           const captureIds = [before.capture.capture_id, after.capture.capture_id];
           const fixTarget=!!replay?.fix_verification&&ordinal===maxActions;
-          const check = await decide('assessment', actionId, captureIds, { task: fixTarget?'fix_verification_assessment':'assessment', action: commandContext(spec.command), prediction: spec.prediction,
-            before: context(before.capture), after: context(after.capture), pixel_comparison: diff.metadata,
-            tool_error: toolError, action_outcome:outcomeContext(outcome), recent_history: history.slice(-2),
-            ...(fixTarget?{original_failure:{expected_result:replay!.fix_verification!.original.expected_result,observed_result:replay!.fix_verification!.original.observed_result,source_before_context:context(replayStep!.before),source_capture_ids:[replayStep!.before.capture_id,replayStep!.after.capture_id]},
+          const assessmentInput = fitContext(scale => ({ task: fixTarget?'fix_verification_assessment':'assessment', action: commandContext(spec.command), prediction: spec.prediction,
+            before: context(before!.capture, scale), after: context(after!.capture, scale), pixel_comparison: diff.metadata,
+            tool_error: toolError, action_outcome:outcomeContext(outcome), recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.assessment_history * scale)),
+            ...(revealed?{reveal:{...revealed,note:'The runtime scrolled the document to show this control before the before capture.'}}:{}),
+            ...(fixTarget?{original_failure:{expected_result:replay!.fix_verification!.original.expected_result,observed_result:replay!.fix_verification!.original.observed_result,source_before_context:context(replayStep!.before, scale),source_capture_ids:[replayStep!.before.capture_id,replayStep!.after.capture_id]},
               verification_instruction:'Verify the frozen expected behavior positively. no_issue_observed alone does not establish a fix. Set expectation_met=true only when that exact expected behavior is visible in current evidence. Set preconditions_met=false for unsupported setup. same_failure_observed=true requires the same recorded behavioral failure, not a different error. Use null and inconclusive for uncertainty. Source context is recorded data; only the current before/after pair is attached as images. No desired result is implied by this being a fix verification.'}:{}),
+            context_scale: scale,
             instruction: 'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay.',
-            response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } },
+            response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } })).input;
+          const check = await decide('assessment', actionId, captureIds, assessmentInput,
           value => fixTarget?parseFixAssessment(value,captureIds):parseAssessment(value, captureIds));
           const checkError = toolError ?? after.capture.observation.observation_error ?? completionError;
           const assessment = { ...check.result, verdict: checkError || check.result.expectation_uncertain ? 'inconclusive' : check.result.verdict,
@@ -408,10 +494,14 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           await store.transaction(async () => {
             await store.query("UPDATE runtime_actions SET state='completed',assessment=$2,finished_at=now() WHERE action_id=$1", [actionId, JSON.stringify(assessment)]);
             await store.event(runId, 'action.assessed', { assessment, before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id }, actionId);
+            if (spec.command.type !== 'navigate' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);
           });
-          planner.transition({from_state_id:fromState,to_state_id:toState,command:spec.command,source_action_id:actionId,expected_result:spec.prediction.expected_result},assessment.verdict,spec.exploration?.return_step);
-          if (spec.exploration?.return_step && toState !== spec.exploration.return_step.to_state_id) await store.transaction(() => store.event(runId,'exploration.return_changed',{expected_state_id:spec.exploration!.return_step!.to_state_id,observed_state_id:toState,action_id:actionId}));
-          history.push({ action: commandContext(spec.command), expected_result: spec.prediction.expected_result.slice(0,400), verdict: assessment.verdict, observed_result: assessment.observed_result.slice(0,400) });
+          const returning = spec.exploration?.purpose === 'return' ? spec.exploration.return_step : undefined;
+          // Routes start where the action was planned: replaying this step from
+          // there scrolls to the control again. The evidence edge keeps fromState.
+          planner.transition({from_state_id:planningState??fromState,to_state_id:toState,command:spec.command,source_action_id:actionId,expected_result:spec.prediction.expected_result},assessment.verdict,returning);
+          if (returning && toState !== returning.to_state_id) await store.transaction(() => store.event(runId,'exploration.return_changed',{expected_state_id:returning.to_state_id,observed_state_id:toState,action_id:actionId}));
+          history.push({ action: commandContext(spec.command), expected_result: spec.prediction.expected_result.slice(0,300), verdict: assessment.verdict, observed_result: assessment.observed_result.slice(0,300) });
           last = after; lastState = toState;
           if(completionError&&!toolError&&!after.capture.observation.observation_error){stopReason='action_completion_unresolved';break;}
           if (checkError) throw new Error('Stopped after a tool or observation failure.');
@@ -446,7 +536,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       await stopBrowser();
       await store.transaction(async () => {
         await control.check(true);
-        await store.query("UPDATE runtime_runs SET lifecycle='completed',config=config || $2::jsonb,finished_at=now() WHERE run_id=$1", [runId, JSON.stringify({ stop_reason: stopReason, replans, executed_actions:executed })]);
+        await store.query("UPDATE runtime_runs SET lifecycle='completed',config=config || $2::jsonb,finished_at=now() WHERE run_id=$1", [runId, JSON.stringify({ stop_reason: stopReason, replans, reveal_failures: revealFailures, executed_actions:executed })]);
         await store.event(runId, 'run.completed', { executed_actions: executed, stop_reason: stopReason, coverage_complete: false });
       });
     } catch (error) {

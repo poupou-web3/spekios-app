@@ -42,7 +42,7 @@ try{
     const count=JSON.parse(await clickhouse(`SELECT count() AS n FROM scout.runtime_events_current WHERE run_id=${sqlString(item.run.run_id)} FORMAT JSONEachRow`));
     assert.equal(Number(count.n),item.events.length);
   }
-  const result={status:'passed',verified_at:new Date().toISOString(),mode:'simulated_models_real_browser',planner:'frontier-v1',
+  const result={status:'passed',verified_at:new Date().toISOString(),mode:'simulated_models_real_browser',planner:report.run.config.planner_version,
     tree_run_id:tree.run_id,replay_run_id:replay.run_id,changed_controls_run_id:menu.run_id,viewports:matrix.runs,
     checks:['dead_end_return','ranked_branch_lineage','change_aware_priority','return_path_reproduction','three_viewport_CLI_matrix','capture_and_artifact_hashes','immutable_manifest','ClickHouse_events'],
     probability_calibrated:false,visual_GUI_check:'unverified_tool_restricted'};

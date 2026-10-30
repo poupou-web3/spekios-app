@@ -93,8 +93,14 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
         <button type='button' ${path.endsWith('/broken')?'':`onclick="document.querySelector('#status').textContent='Preview ready'"`}>Preview selection</button>
         </form><p id='status'>Ready</p><p>Search: <span id='query'></span> · <span id='category'>All</span> · <span id='stock'>All stock</span></p>
         <style>label{display:block;margin:14px 0}input,select{font:inherit}</style>`;
-    } else if (path === '/scrolling' || path === '/scrolling/broken') {
+    } else if (path === '/scrolling/covered') {
+      content = `<h1>Long catalogue</h1><p>Explore the items further down the page.</p><div style='height:700px'></div><span style='position:relative;display:inline-block'><button onclick="location.href='/forbidden-covered'">Reveal details</button><span style='position:absolute;inset:0;background:#ddd;z-index:2'>Overlay</span></span><p id='status'>Details hidden</p><div style='height:900px'></div>`;
+    } else if (path === '/scrolling' || path === '/scrolling/broken' || path === '/scrolling/manual' || path === '/scrolling/manual/broken') {
       content = `<h1>Long catalogue</h1><p>Explore the items further down the page.</p><div style='height:700px'></div><button ${path.endsWith('/broken')?'':`onclick="document.querySelector('#status').textContent='Details revealed';this.disabled=true"`}>Reveal details</button><p id='status'>Details hidden</p>`;
+    } else if (path === '/atlas') {
+      content = `<h1>Atlas</h1><p>Browse the product areas.</p><a href='/atlas/products'>Products</a>`;
+    } else if (path === '/atlas/products') {
+      content = `<h1>Products</h1><p id='status'>Choose a product view</p><button onclick="document.querySelector('#status').textContent='Plans compared'">Compare plans</button><button>Pricing FAQ</button>`;
     } else if (path === '/interaction-blocks') {
       content = `<h1>Controls requiring access</h1><form action='/forbidden-submit'>
         <label>Password <input type='password' value='fixture-password'></label><label>Email <input type='email' value='fixture@example.test'></label>

@@ -31,6 +31,9 @@ export type ObservedControl = {
   disabled: boolean; submits_form: boolean; ambiguous: boolean;
   rect?: { x: number; y: number; width: number; height: number };
   occluded?: boolean;
+  // Controls further down the document are observed without a viewport rect.
+  // Occlusion is only known after the runtime scrolls one into view.
+  in_viewport?: boolean; page_y?: number;
   input_type?: string; read_only?: boolean; sensitive?: boolean; unsupported?: boolean;
   value?: string; value_truncated?: boolean; max_length?: number; checked?: boolean;
   options?: { value: string; label: string; disabled: boolean }[]; options_truncated?: boolean;
@@ -48,6 +51,12 @@ export type Capture = {
   sha256: string; object_key: string; metadata_key: string; byte_length: number; observation: Observation;
   purpose: 'runtime_validation' | 'exploration'; training_status: 'excluded_fixture' | 'unreviewed';
 };
+// Executed browser actions per exploration, including navigation and returns.
+// A replay path is at most one exploration long; its ordinals also count
+// skipped stale plans and reveals, so they get twice the room.
+export const MAX_EXPLORATION_ACTIONS = 50;
+export const DEFAULT_EXPLORATION_ACTIONS = 20;
+export const MAX_REPLAY_ORDINAL = MAX_EXPLORATION_ACTIONS * 2;
 export const workspaceId = '00000000-0000-4000-8000-000000000001';
 export const userId = '00000000-0000-4000-8000-000000000002';
 export const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);

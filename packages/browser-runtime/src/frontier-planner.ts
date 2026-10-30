@@ -1,8 +1,11 @@
 import type { BrowserCommand, Capture, ControlAction } from './contracts.js';
 import { blockedReason, type Proposal } from './exploration-policy.js';
 import { commandKey } from './interaction-contract.js';
+import { jumpableUrl, type MemorySnapshot } from './app-memory.js';
 
-export const PLANNER_VERSION = 'frontier-v1';
+export const PLANNER_VERSION = 'frontier-v2';
+// A remembered page whose controls were observed but never ranked by a model.
+export const UNRANKED_MEMORY_SCORE = .3;
 export type { BrowserCommand } from './contracts.js';
 export type ChangeSignal = { newly_exposed: boolean; changed_pixels: number; sampled_pixels: number };
 type Node = {
@@ -12,27 +15,34 @@ type Node = {
 export type RouteStep = {
   from_state_id: string; to_state_id: string; command: BrowserCommand;
   source_action_id: string; expected_result: string; reset?: boolean;
+  // Reopens a page remembered from earlier runs. Its destination is a new
+  // observation in this run, never an assumed restored state.
+  memory?: { url: string; title: string | null; open_controls: number; source_run_id: string };
 };
 export type RankedPath = {
   state_id: string; control_id: string; name: string; goal: string; expected_result: string;
   likelihood: number; path_likelihood_score: number; priority: number; travel_steps: number;
   action?: ControlAction; focus_stale: boolean;
   path_state_ids: string[]; route: RouteStep[];
-  components: { likely_next: number; newly_exposed: number; changed_control: number; novelty: number; repeat_penalty: number; reach_weight: number };
+  components: { likely_next: number; newly_exposed: number; changed_control: number; novelty: number; repeat_penalty: number;
+    earlier_run_coverage: number; new_since_earlier_runs: number; reach_weight: number };
   reason: string;
 };
 
 // Exact evidence nodes are never merged. This is a bounded scheduling projection
 // over those nodes; likelihoods are model hypotheses, not measured user behavior.
+// Memory from earlier runs is keyed by URL and control identity only.
 export class FrontierPlanner {
   readonly nodes = new Map<string, Node>();
   private readonly edges: RouteStep[] = [];
   private readonly repetitions = new Map<string, number>();
   private readonly returnAttempts = new Map<string, number>();
   private readonly failedRoutes = new Set<string>();
+  private readonly navigated = new Set<string>();
   private root: string | null = null;
   private rootAction: string | null = null;
-  constructor(readonly targetUrl: string) {}
+  private focused = false;
+  constructor(readonly targetUrl: string, readonly memory: MemorySnapshot | null = null) {}
 
   observe(id: string, capture: Capture, parentId?: string, signals: Record<string, ChangeSignal> = {}, likelihood = 1, initial = false) {
     const existing = this.nodes.get(id);
@@ -60,6 +70,7 @@ export class FrontierPlanner {
     // Preserve observed paths/attempted actions. Cached hypotheses may guide a
     // return to another branch, but fresh rankings always take precedence.
     for (const node of this.nodes.values()) { node.focus_stale=true; node.declined=false; }
+    this.focused = true;
   }
   plan(id: string, proposals: Proposal[]) {
     const node = this.nodes.get(id)!;
@@ -70,7 +81,7 @@ export class FrontierPlanner {
     node.proposals = new Map(proposals.map(proposal => [proposal.control_id, proposal]));
   }
   attempted(id: string, command: BrowserCommand, returning: boolean) {
-    if (command.type === 'navigate') return;
+    if (command.type === 'navigate') { this.navigated.add(command.url); return; }
     const node = this.nodes.get(id)!;
     node.attempted.add(command.control.control_id);
     if (!returning) {
@@ -131,23 +142,31 @@ export class FrontierPlanner {
       const route = this.route(currentId, node.id);
       // Reserve room for the actual unexplored action after returning.
       if (!route || route.length + 1 > remainingActions) continue;
+      const page = this.memory?.pages.get(node.capture.observation.url);
       for (const control of this.available(node.id)) {
         const proposal = node.proposals.get(control.control_id);
         if (!proposal) continue; // Unranked controls stay explicitly unranked.
         const signal = node.signals[control.control_id];
         const repeats = this.repetitions.get(control.control_id) ?? 0;
+        const earlier = this.memory?.controls.get(control.control_id);
         const components = { likely_next: .65 * proposal.likelihood,
           newly_exposed: signal?.newly_exposed ? .15 : 0,
           changed_control: signal && signal.changed_pixels > 0 ? .10 : 0,
-          novelty: repeats === 0 ? .10 : 0, repeat_penalty: Math.min(repeats, 3) * .15,
+          novelty: repeats === 0 && !earlier?.attempts ? .10 : 0, repeat_penalty: Math.min(repeats, 3) * .15,
+          earlier_run_coverage: earlier?.attempts ? earlier.last_verdict === 'no_issue_observed' ? .20 : .10 : 0,
+          new_since_earlier_runs: page && !page.controls_truncated && !earlier ? .10 : 0,
           reach_weight: .6 + .4 * Math.sqrt(node.reach_estimate) };
-        const local = Math.max(.01, components.likely_next + components.newly_exposed + components.changed_control + components.novelty - components.repeat_penalty);
+        const local = Math.max(.01, components.likely_next + components.newly_exposed + components.changed_control + components.novelty
+          + components.new_since_earlier_runs - components.repeat_penalty - components.earlier_run_coverage);
         const priority = local * components.reach_weight / (1 + .3 * route.length);
         const reasons = [`Model next-action score ${Math.round(proposal.likelihood * 100)}/100`];
         if (signal?.newly_exposed) reasons.push('newly exposed control');
         if (signal && signal.changed_pixels > 0) reasons.push(`${signal.changed_pixels} changed pixels inside the control`);
+        if (control.in_viewport === false) reasons.push('below the visible area; scrolled into view before acting');
         if (node.focus_stale) reasons.push('cached branch awaiting ranking for the current focus');
         if (repeats) reasons.push('repeated control is deprioritized');
+        if (earlier?.attempts) reasons.push(`already tried in earlier runs (last: ${earlier.last_verdict?.replaceAll('_', ' ') ?? 'no assessment'})`);
+        if (components.new_since_earlier_runs) reasons.push('not seen on this page in earlier runs');
         if (route.length) reasons.push(`${route.length} recorded return steps`);
         ranked.push({ state_id: node.id, control_id: control.control_id, name: control.name,
           goal: proposal.goal, expected_result: proposal.expected_result, likelihood: proposal.likelihood, action:proposal.action, focus_stale:node.focus_stale,
@@ -155,12 +174,45 @@ export class FrontierPlanner {
           travel_steps: route.length, path_state_ids: this.ancestry(node.id), route, components, reason: reasons.join('; ') + '.' });
       }
     }
+    ranked.push(...this.remembered(currentId, remainingActions));
     return ranked.sort((a,b) => Number(a.focus_stale)-Number(b.focus_stale) || b.priority-a.priority || a.travel_steps-b.travel_steps || a.control_id.localeCompare(b.control_id));
+  }
+  // Pages that earlier runs reached but did not finish. Reopening one costs a
+  // navigation plus at least one action there. A remembered page is never
+  // treated as an observed state: the run plans again once it lands.
+  private remembered(currentId: string, remainingActions: number): RankedPath[] {
+    const memory = this.memory;
+    if (!memory || !this.root || remainingActions < 2) return [];
+    const origin = new URL(this.targetUrl).origin;
+    const visited = new Set([...this.nodes.values()].map(node => node.capture.observation.url));
+    const result: RankedPath[] = [];
+    for (const page of memory.pages.values()) {
+      if (visited.has(page.url) || this.navigated.has(page.url) || page.url === this.targetUrl || !jumpableUrl(page.url, origin)) continue;
+      const open = (memory.by_page.get(page.url) ?? []).filter(c => !c.attempts && !c.blocked_reason);
+      if (!open.length) continue;
+      const best = [...open].sort((a, b) => (b.best_likelihood ?? -1) - (a.best_likelihood ?? -1) || a.control_id.localeCompare(b.control_id))[0];
+      const likelihood = best.best_likelihood ?? UNRANKED_MEMORY_SCORE;
+      const reach = page.best_path_score ?? 0;
+      const components = { likely_next: .65 * likelihood, newly_exposed: 0, changed_control: 0, novelty: .10, repeat_penalty: 0,
+        earlier_run_coverage: 0, new_since_earlier_runs: 0, reach_weight: .6 + .4 * Math.sqrt(reach) };
+      const priority = (components.likely_next + components.novelty) * components.reach_weight / 1.3;
+      const step: RouteStep = { from_state_id: currentId, to_state_id: `memory:${page.url}`, command: { type: 'navigate', url: page.url },
+        source_action_id: page.last_action_id ?? '', expected_result: `The previously observed page${page.title ? ` "${page.title}"` : ''} opens.`,
+        memory: { url: page.url, title: page.title, open_controls: open.length, source_run_id: page.last_run_id } };
+      result.push({ state_id: step.to_state_id, control_id: best.control_id, name: best.name,
+        goal: `Resume ${best.name} on a page earlier runs did not finish`, expected_result: step.expected_result, likelihood,
+        path_likelihood_score: reach * likelihood, priority, travel_steps: 1, focus_stale: this.focused, path_state_ids: [], route: [step], components,
+        reason: [best.best_likelihood === null ? `Unranked remembered page (default score ${Math.round(UNRANKED_MEMORY_SCORE * 100)}/100)`
+          : `Earlier model next-action score ${Math.round(likelihood * 100)}/100`, `${open.length} untried controls remembered from ${memory.prior_runs} earlier run${memory.prior_runs === 1 ? '' : 's'}`,
+          'reopen the page; it is observed again before any action'].join('; ') + '.' });
+    }
+    return result;
   }
   context(id: string) {
     return { algorithm: PLANNER_VERSION, current_path: this.ancestry(id).map(stateId => {const url=this.nodes.get(stateId)!.capture.observation.url;return {state_id:stateId,url:url.slice(0,240),url_truncated:url.length>240};}),
       discovered_states: this.nodes.size,
       unvisited_controls: [...this.nodes.values()].reduce((n,node) => n+this.available(node.id).length, 0),
+      ...(this.memory?.prior_runs ? { remembered_pages: this.memory.pages.size } : {}),
       interpretation: 'Model likelihood values are uncalibrated scores, not a normalized distribution; path scores multiply discovery-edge scores. No unobserved destination is invented.' };
   }
 }

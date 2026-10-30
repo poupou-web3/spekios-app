@@ -41,7 +41,7 @@ Operations is a human manager/operator route. It exposes delivery and queue snap
 
 The request is asynchronous: new admission returns 202, an identical retry 200. Read **GET /v1/model-requests/{request_id}** afterward.
 
-Prompt bytes are limited to 32768; optional system text to 16384. Output-token bounds are 1–4096 and attempt bounds 1–3. Optional evidence links are **run_id**, **action_id** and up to two distinct **capture_ids**; action/capture links require a run.
+Prompt bytes are limited to 65536; optional system text to 16384. This route accepts request bodies up to 192 KiB. Output-token bounds are 1–4096 and attempt bounds 1–3. Optional evidence links are **run_id**, **action_id** and up to two distinct **capture_ids**; action/capture links require a run.
 
 This gateway request does not execute browser actions. API keys stay server-side. Supported providers are `openai`, `anthropic`, `openrouter` and `meta`. Meta uses the Responses API and model IDs such as `muse-wonder-1.0`.
 
@@ -49,10 +49,18 @@ This gateway request does not execute browser actions. API keys stay server-side
 
 Workspace managers read **GET /v1/exploration-settings**, then POST the complete new preference set to the same path.
 
-Use a fresh **request_id**, the current **expected_revision**, provider, model, **max_actions**, **viewport_profile**, **free_only**, **auto_reproduce**, **max_auto_reproductions** and **max_auto_replay_actions**.
+Use a fresh **request_id**, the current **expected_revision**, provider, model, **max_actions**, **viewport_profile**, **free_only**, **auto_reproduce**, **max_auto_reproductions** and **max_auto_replay_actions**. The optional boolean **app_memory** defaults to true.
 
-The default revision is zero until the first saved preference. Action bounds are 1–12; auto-reproduction case bounds 1–3; total replay-action bounds 1–24.
+The default revision is zero until the first saved preference. Action bounds are 1–50; auto-reproduction case bounds 1–3; total replay-action bounds 1–100.
 
 A new save returns 201; an identical retry 200. Revision conflicts return 409. New jobs freeze the effective revision; existing jobs and retries do not adopt later defaults.
 
 The preferences endpoint cannot change provider keys, allowed origins or test-form rules.
+
+## App memory
+
+**GET /v1/app-memory** lists up to 100 remembered scopes for the caller, newest first. Each scope is one origin, viewport profile, sign-in state and execution mode, with run, page and tried/untried control counts and **in_use** while an active run uses it.
+
+**POST /v1/app-memory/{scope_id}/forget** with an empty JSON body deletes that scope's derived pages and controls and returns 200. Runs and evidence are unchanged. An unknown scope returns 404; a scope in use returns 409 **memory_scope_in_use**.
+
+An exploration job (**POST /v1/browser-jobs** with kind **explore**, or the **scout_start_exploration** tool) accepts an optional boolean **app_memory** that overrides the saved default for that run. While the gateway uses simulated models, omitted **app_memory** means off. Reproduction and fix-verification jobs reject it; they never use memory. See [explore deeper across runs](../../guides/app-memory/).

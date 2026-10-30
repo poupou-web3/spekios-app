@@ -10,7 +10,8 @@ import { workspaceId,userId } from '../src/contracts.js';
 
 test('automatic reproduction is opt-in with separate case and total action caps',()=>{
   assert.deepEqual(automaticReproductionPolicy(),{enabled:false,max_cases:2,max_actions:12});
-  for(const invalid of [{autoReproduce:'true'},{maxAutoReproductions:0},{maxAutoReproductions:4},{maxAutoReplayActions:0},{maxAutoReplayActions:25},{maxAutoReplayActions:1.5}])assert.throws(()=>automaticReproductionPolicy(invalid as any));
+  for(const invalid of [{autoReproduce:'true'},{maxAutoReproductions:0},{maxAutoReproductions:4},{maxAutoReplayActions:0},{maxAutoReplayActions:101},{maxAutoReplayActions:1.5}])assert.throws(()=>automaticReproductionPolicy(invalid as any));
+  assert.equal(automaticReproductionPolicy({maxAutoReplayActions:100}).max_actions,100,'One longest exploration path fits twice.');
   const policy=automaticReproductionPolicy({autoReproduce:true,maxAutoReproductions:3,maxAutoReplayActions:7});
   assert.equal(automaticReservation(policy,0,0,4),null);
   assert.equal(automaticReservation(policy,1,4,4),'action_limit');

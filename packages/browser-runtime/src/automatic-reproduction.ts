@@ -4,13 +4,18 @@ import type { Store } from './store.js';
 import { publicHttpsOrigin } from './exploration-policy.js';
 import { loadReplay } from './reproduction.js';
 import { COMPLETION_VERSION } from './action-outcome.js';
+import { MAX_EXPLORATION_ACTIONS, MAX_REPLAY_ORDINAL } from './contracts.js';
+
+// Total replay actions across one exploration's automatic checks, counting
+// every prerequisite step. One full-length path fits twice.
+export const MAX_AUTO_REPLAY_ACTIONS = MAX_EXPLORATION_ACTIONS * 2;
 
 export type AutomaticReproductionPolicy = { enabled:boolean; max_cases:number; max_actions:number };
 export type GatewayStatus = { executionMode:'live'|'protocol_fixture'; configuredProviders:string[] };
 export function automaticReproductionPolicy(options:{autoReproduce?:boolean;maxAutoReproductions?:number;maxAutoReplayActions?:number}={}):AutomaticReproductionPolicy {
   const maxCases=options.maxAutoReproductions??2,maxActions=options.maxAutoReplayActions??12;
-  if(typeof (options.autoReproduce??false)!=='boolean'||!Number.isInteger(maxCases)||maxCases<1||maxCases>3||!Number.isInteger(maxActions)||maxActions<1||maxActions>24)
-    throw new Error('Automatic reproduction requires a boolean opt-in, 1–3 cases and 1–24 total replay actions.');
+  if(typeof (options.autoReproduce??false)!=='boolean'||!Number.isInteger(maxCases)||maxCases<1||maxCases>3||!Number.isInteger(maxActions)||maxActions<1||maxActions>MAX_AUTO_REPLAY_ACTIONS)
+    throw new Error(`Automatic reproduction requires a boolean opt-in, 1–3 cases and 1–${MAX_AUTO_REPLAY_ACTIONS} total replay actions.`);
   return {enabled:options.autoReproduce===true,max_cases:maxCases,max_actions:maxActions};
 }
 export function automaticReservation(policy:AutomaticReproductionPolicy,reservedCases:number,reservedActions:number,pathActions:number) {
@@ -76,9 +81,9 @@ export class AutomaticReproductionScheduler {
     const prefix=(await this.store.query('SELECT * FROM runtime_actions WHERE run_id=$1 AND ordinal<=$2 ORDER BY ordinal',[source.run_id,target.ordinal])).rows;
     const path=authContext?prefix.filter(a=>a.spec?.auth_context_id===authContext.context_id):prefix;
     const firstOrdinal=path[0]?.ordinal??1;
-    if(target.ordinal<1||target.ordinal>24||path.length!==target.ordinal-firstOrdinal+1||path.some((a,i)=>a.ordinal!==firstOrdinal+i))return {reason:'invalid_path',actions:0};
+    if(target.ordinal<1||target.ordinal>MAX_REPLAY_ORDINAL||path.length!==target.ordinal-firstOrdinal+1||path.some((a,i)=>a.ordinal!==firstOrdinal+i))return {reason:'invalid_path',actions:0};
     const rows=path.filter(a=>!(a.state==='skipped'&&!a.dispatched_at&&a.before_capture_id&&!a.after_capture_id));
-    if(!rows.length||rows.length>12||rows.at(-1)?.action_id!==sourceActionId||rows[0].spec?.command?.type!=='navigate'||rows[0].spec.command.url!==source.target_url)return {reason:'invalid_path',actions:0};
+    if(!rows.length||rows.length>MAX_EXPLORATION_ACTIONS||rows.at(-1)?.action_id!==sourceActionId||rows[0].spec?.command?.type!=='navigate'||rows[0].spec.command.url!==source.target_url)return {reason:'invalid_path',actions:0};
     if(rows.some(a=>a.state!=='completed'||a.tool_error||a.assessment?.expectation_uncertain||a.outcome?.version!==COMPLETION_VERSION||a.outcome?.status!=='settled'||
       !a.comparison||!a.before_capture_id||!a.after_capture_id||a.spec?.prediction?.source!=='model'||typeof a.spec.prediction.expected_result!=='string'||!a.spec.prediction.expected_result.trim()||
       (a.action_id!==sourceActionId&&a.assessment?.verdict!=='no_issue_observed')))return {reason:'incomplete_path',actions:0};

@@ -86,7 +86,7 @@ impl ModelRequest {
         {
             return Err("invalid_request_id_or_model");
         }
-        if self.prompt.trim().is_empty() || self.prompt.len() > 32_768 || self.system.len() > 16_384
+        if self.prompt.trim().is_empty() || self.prompt.len() > 65_536 || self.system.len() > 16_384
         {
             return Err("invalid_prompt_length");
         }

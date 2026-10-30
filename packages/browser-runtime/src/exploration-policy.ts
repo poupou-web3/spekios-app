@@ -57,12 +57,31 @@ export function validateTarget(input: string, origins: string[]): string {
   return url.href;
 }
 
+// Controls anywhere in the document are observed, in-viewport ones first. A
+// control below the fold is revealed by document scrolling only when chosen.
+export const MAX_OBSERVED_CONTROLS = 120;
 export async function observeControls(page: Page, rules: TestFormRule[] = testFormRules()) {
-  const candidates = await page.evaluate(() => {
+  // This function runs in the page. Keep helpers anonymous: the TypeScript
+  // loader names function constants with a helper the page does not have.
+  const candidates = await page.evaluate(maxControls => {
+    const documentHeight = Math.max(document.scrollingElement?.scrollHeight ?? 0, innerHeight);
     const controls = Array.from(document.querySelectorAll('button,a[href],input,textarea,select')).flatMap<Omit<ObservedControl,'control_id'>>(element => {
       const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
       if (!rect.width || !rect.height || style.visibility !== 'visible' || style.display === 'none' ||
-          rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) return [];
+          rect.right <= 0 || rect.left >= innerWidth) return [];
+      const inViewport = rect.bottom > 0 && rect.top < innerHeight, pageY = Math.round(rect.top + scrollY);
+      if (!inViewport) {
+        if (pageY + rect.height <= 0 || pageY >= documentHeight || style.position === 'fixed' ||
+            !element.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) return [];
+        // Content inside a clipping or nested scrolling ancestor cannot be revealed
+        // by scrolling the document, so it stays unobserved until it is visible.
+        for (let node = element.parentElement, depth = 0; node && node !== document.body && node !== document.documentElement && depth < 40; node = node.parentElement, depth++) {
+          const clip = getComputedStyle(node);
+          if (clip.overflowX === 'visible' && clip.overflowY === 'visible') continue;
+          const box = node.getBoundingClientRect();
+          if (rect.bottom <= box.top || rect.top >= box.bottom || rect.right <= box.left || rect.left >= box.right) return [];
+        }
+      }
       const input=element instanceof HTMLInputElement ? element : null;
       const textarea=element instanceof HTMLTextAreaElement ? element : null;
       const select=element instanceof HTMLSelectElement ? element : null;
@@ -84,11 +103,13 @@ export async function observeControls(page: Page, rules: TestFormRule[] = testFo
       const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
       const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
       const points = [[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]];
-      const hittable = points.some(([x,y]) => {
+      const hittable = inViewport && points.some(([x,y]) => {
         const hit = document.elementFromPoint(left+(right-left)*x, top+(bottom-top)*y);
         return hit === element || (hit !== null && element.contains(hit));
       });
-      const details: Partial<ObservedControl> = {};
+      const details: Partial<ObservedControl> = inViewport
+        ? { in_viewport: true, occluded: !hittable || style.pointerEvents === 'none', rect: { x: left, y: top, width: right-left, height: bottom-top } }
+        : { in_viewport: false, page_y: pageY, ...(style.pointerEvents === 'none' ? { occluded: true } : {}) };
       const submitter=element instanceof HTMLButtonElement ? element : input?.type==='submit' ? input : null;
       const form=submitter?.type==='submit' ? submitter.form : null;
       if (form && submitter) {
@@ -122,8 +143,7 @@ export async function observeControls(page: Page, rules: TestFormRule[] = testFo
       return [{ role, name: name.slice(0, 200), href: element instanceof HTMLAnchorElement ? element.href : null,
         disabled: element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true',
         submits_form: !!((element instanceof HTMLButtonElement||input) && (element as HTMLButtonElement).type==='submit' && (element as HTMLButtonElement).form),
-        ambiguous: !name || name.length > 200, occluded: !hittable || style.pointerEvents === 'none',
-        rect: { x: left, y: top, width: right-left, height: bottom-top }, ...details }];
+        ambiguous: !name || name.length > 200, ...details }];
     });
     const scrolling=document.scrollingElement;
     const maxY=Math.max(0,(scrolling?.scrollHeight??0)-innerHeight),step=Math.max(1,Math.floor(innerHeight*.8));
@@ -134,9 +154,13 @@ export async function observeControls(page: Page, rules: TestFormRule[] = testFo
       scrolls.push({role:'scroll',name:`Scroll page ${direction}`,href:null,disabled:false,submits_form:false,ambiguous:false,
         scroll_target:{x:scrollX,y,direction}});
     }
-    return { truncated: controls.length+scrolls.length > 40, controls: [...controls.slice(0,40-scrolls.length).map(control => ({ ...control,
+    // Visible controls keep document order; the nearest offscreen ones fill the
+    // remaining budget. Ambiguity uses the whole document, like dispatch does.
+    const ordered = controls.map((control, index) => ({ control, index, distance: control.in_viewport ? -1 : Math.abs((control.page_y ?? 0) - scrollY) }))
+      .sort((a, b) => a.distance - b.distance || a.index - b.index).map(entry => entry.control);
+    return { truncated: controls.length+scrolls.length > maxControls, controls: [...ordered.slice(0,maxControls-scrolls.length).map(control => ({ ...control,
       ambiguous: control.ambiguous || controls.filter(other => other.role === control.role && other.name === control.name).length !== 1 })),...scrolls] };
-  });
+  }, MAX_OBSERVED_CONTROLS);
   const controls: ObservedControl[] = candidates.controls.map(c => authorizeForm({ ...c,
     ...(c.form?{form:{...c.form,signature:hash(Buffer.from(c.form.signature))}}:{}),
     control_id: hash(jsonBytes({ url: page.url(), role: c.role, name: c.name, href: c.href })).slice(0, 24) }, new URL(page.url()).origin,rules));
@@ -171,6 +195,18 @@ export function stateFingerprint(capture: Capture) {
   return hash(jsonBytes({ ...(o.auth_context_id?{auth_context_id:o.auth_context_id}:{}), screenshot_sha256: capture.sha256, url: o.url, title: o.title, text: o.text,
     text_truncated: o.text_truncated, viewport: o.viewport, scroll: o.scroll,
     controls: (o.controls ?? []).map(({rect: _rect, occluded, ...control}) => ({...control, occluded: occluded ?? false})), controls_truncated: o.controls_truncated ?? false }));
+}
+
+// The same document regardless of which part of it the viewport shows. Used
+// only to confirm that scrolling a chosen control into view changed nothing
+// else; the screenshot, scroll and viewport geometry are deliberately excluded.
+export function documentFingerprint(capture: Capture) {
+  const o = capture.observation;
+  const controls = (o.controls ?? []).filter(control => control.role !== 'scroll')
+    .map(({rect: _rect, occluded: _occluded, in_viewport: _inViewport, page_y: _pageY, ...control}) => control)
+    .sort((a, b) => a.control_id.localeCompare(b.control_id));
+  return hash(jsonBytes({ ...(o.auth_context_id?{auth_context_id:o.auth_context_id}:{}), url: o.url, title: o.title, text: o.text,
+    text_truncated: o.text_truncated, viewport: o.viewport, controls, controls_truncated: o.controls_truncated ?? false }));
 }
 
 type Obj = Record<string, unknown>;

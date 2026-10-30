@@ -170,6 +170,14 @@ export function openapi(catalog) {
     responses: { '202': response('Request admitted.', ref('ModelAdmission')), '200': response('Original admission reused.', ref('ModelAdmission')), ...errors },
   });
   add('/v1/model-requests/{request_id}', 'get', 'getModelRequest', 'Models', 'Read recorded model request and attempts', { parameters: [pathParameter('request_id')] });
+  add('/v1/app-memory', 'get', 'listAppMemory', 'Settings', 'List remembered app scopes from earlier explorations', {
+    description: 'One scope per origin, viewport profile, sign-in state and execution mode, newest first (at most 100). Counts pages and tried/untried controls. Memory is derived from runs; it never contains screenshots or field values.',
+  });
+  add('/v1/app-memory/{scope_id}/forget', 'post', 'forgetAppMemory', 'Settings', 'Forget one remembered app scope; run evidence is kept', {
+    parameters: [pathParameter('scope_id')],
+    description: 'Deletes the derived pages and controls for this scope. Recorded runs, captures and model requests are unchanged. A scope that an active run is still using returns 409 memory_scope_in_use.',
+    responses: { '200': response('Scope forgotten.'), ...errors },
+  });
   add('/v1/browser-access', 'get', 'getAccessRequests', 'Access', 'Read human access requests and nonsecret session metadata', {
     description: 'Private frames, leases, input controls, saved-session material and human review mutations are outside this contract. Agent tools expose only handoff metadata.',
   });
@@ -179,6 +187,7 @@ export function openapi(catalog) {
     target_url: { type: 'string', maxLength: 2048, description: 'At most 2048 UTF-8 bytes. HTTP(S), no embedded credentials, exact operator-allowed origin.' },
     viewport_profile: choice('desktop', 'tablet', 'mobile'),
     auth_mode: choice('auto', 'sign_in', 'public'), session_id: uuid, auto_reproduce: bool,
+    app_memory: { type: 'boolean', description: 'Override the saved memory default for this run. False explores without reading or recording cross-run memory.' },
   }, ['job_id', 'kind', 'target_url']);
   const jobReproduce = strict({ project_id:uuid,task_id:uuid,job_id: uuid, kind: { const: 'reproduce', type: 'string' }, source_action_id: uuid }, ['job_id', 'kind', 'source_action_id']);
   const verificationFields={candidate_url:{type:'string',maxLength:2048,format:'uri'},deployment_ref:{type:'string',minLength:1,maxLength:200},auth_mode:choice('auto','public'),session_id:uuid,project_id:uuid,task_id:uuid};
@@ -233,12 +242,13 @@ export function openapi(catalog) {
         SettingsSubmission: strict({
           request_id: uuid, expected_revision: { type: 'integer', minimum: 0, description: 'Signed 64-bit integer below 9223372036854775807.' },
           provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, description: 'Trimmed model ID with ASCII letters, digits and / : . _ - only.' },
-          max_actions: bounded(1,12), viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
-          auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,24),
+          max_actions: bounded(1,50), viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
+          auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,100),
+          app_memory: { type: 'boolean', default: true, description: 'Remember explored pages and controls across runs of the same app, viewport and sign-in state.' },
         }, ['request_id','expected_revision','provider','model','max_actions','viewport_profile','free_only','auto_reproduce','max_auto_reproductions','max_auto_replay_actions']),
         ModelRequest: strict({
           request_id: uuid, provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[A-Za-z0-9/:._-]+$' },
-          prompt: { type: 'string', minLength: 1, maxLength: 32768, description: 'Nonblank, no NUL, at most 32768 UTF-8 bytes.' },
+          prompt: { type: 'string', minLength: 1, maxLength: 65536, description: 'Nonblank, no NUL, at most 65536 UTF-8 bytes. This route accepts request bodies up to 192 KiB.' },
           system: { type: 'string', maxLength: 16384, default: '', description: 'No NUL; at most 16384 UTF-8 bytes.' },
           run_id: uuid, action_id: uuid, capture_ids: { type: 'array', maxItems: 2, uniqueItems: true, items: uuid, default: [] },
           max_output_tokens: bounded(1,4096,1024), max_attempts: bounded(1,3,2), free_only: { type: 'boolean', default: true },

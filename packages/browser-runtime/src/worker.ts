@@ -100,6 +100,8 @@ try {
           const options = { client: new ModelClient(job.settings), maxActions: job.settings.maxActions,
             allowedOrigins: job.settings.allowedOrigins.filter((origin: string) => currentOrigins.includes(origin)), jobId: job.job_id,
             autoReproduce:job.settings.autoReproduce,maxAutoReproductions:job.settings.maxAutoReproductions,maxAutoReplayActions:job.settings.maxAutoReplayActions,
+            // Jobs admitted before memory existed omit the setting and stay memory-free.
+            appMemory:job.settings.appMemory===true,
             viewportProfile: job.settings.viewportProfile,access,authMode:job.request.auth_mode??'auto',sessionId:job.request.session_id };
           const result = await store.withScope({workspaceId:job.workspace_id,userId:job.user_id,agentId:job.agent_id,projectId:job.project_id,taskId:job.task_id},()=>job.request.kind==='verify_fix'?verifyFix(store,job.job_id,options):job.request.kind === 'reproduce'
             ? reproduce(store, job.request.source_action_id, options)

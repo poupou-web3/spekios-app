@@ -76,7 +76,7 @@ function decode(bytes, label) {
 /** Count exact changed pixels under observed, viewport-clipped control rectangles. */
 export function changedPixelsInRects(maskBytes, rectangles) {
   inspectHeader(maskBytes, 'Difference mask');
-  if (!Array.isArray(rectangles) || rectangles.length > 40) throw new Error('Expected at most 40 control rectangles.');
+  if (!Array.isArray(rectangles) || rectangles.length > 256) throw new Error('Expected at most 256 control rectangles.');
   const mask = decode(maskBytes, 'Difference mask');
   return rectangles.map(rect => {
     if (!rect || !['x','y','width','height'].every(key => Number.isFinite(rect[key])) || rect.width < 0 || rect.height < 0) return null;

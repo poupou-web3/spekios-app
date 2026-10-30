@@ -8,14 +8,15 @@ const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
   const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
-  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,updateConfiguration,rebaseConfiguration,applyConfiguration,configurationView,saveConfiguration,navigateAction};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,updateConfiguration,rebaseConfiguration,applyConfiguration,configurationView,saveConfiguration,navigateAction,memoryPanel};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
 test('defaults validate the same supported models, limits and free-only restriction as the API',()=>{
   const ui=workspace(),values=ui.configurationValues();assert.equal(ui.configurationError(values),'');
-  for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:null},{max_auto_reproductions:4},{max_auto_replay_actions:25},{viewport_profile:'watch'},{provider:'other'},{model:'paid/model'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
+  for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:null},{max_actions:51},{max_auto_reproductions:4},{max_auto_replay_actions:101},{viewport_profile:'watch'},{provider:'other'},{model:'paid/model'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
   assert.equal(ui.configurationError({...values,model:'vendor/model:free'}),'');
+  assert.equal(ui.configurationError({...values,max_actions:50,max_auto_replay_actions:100}),'');
   assert.equal(ui.configurationError({...values,provider:'openai',model:'provider-model',free_only:false}),'');
   assert.equal(ui.configurationError({...values,provider:'meta',model:'muse-wonder-1.0',free_only:false}),'');
 });
@@ -72,10 +73,26 @@ test('an old acknowledgement cannot discard a new draft after reconnecting with 
 });
 test('configuration text is escaped, exposes no secret input and clearly separates immutable environment policy',()=>{
   const ui=workspace();ui.updateConfiguration('model','<script>bad()</script>');const html=ui.configurationView();assert.doesNotMatch(html,/<script>|type="password"/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Queued and running jobs keep their original settings/);assert.match(html,/Saving does not call a model/);
-  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['auto_reproduce','free_only','max_actions','max_auto_replay_actions','max_auto_reproductions','model','provider','viewport_profile'].sort());
+  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','free_only','max_actions','max_auto_replay_actions','max_auto_reproductions','model','provider','viewport_profile'].sort());
 });
 test('previous and next follow the visible list, preserve comparison, and reject stale targets',()=>{
   const ui=workspace();ui.state.report={run:{},actions:[{action_id:'one'},{action_id:'two'},{action_id:'three'}],events:[]};ui.state.actionId='one';ui.state.image='compare';ui.state.frameId='old';
   assert.equal(ui.navigateAction(1,'three'),false);assert.equal(ui.navigateAction(-1,''),false);assert.equal(ui.navigateAction(1,'two'),true);assert.equal(ui.state.actionId,'two');assert.equal(ui.state.image,'compare');assert.equal(ui.state.frameId,null);
   ui.state.image='frame';assert.equal(ui.navigateAction(-1,'one'),true);assert.equal(ui.state.image,'after');
+});
+test('app memory is a saved default that can be turned off, and remembered scopes can be forgotten',async()=>{
+  const ui=workspace();assert.equal(ui.configurationValues().app_memory,true,'Memory follows the server default when unset.');
+  ui.applyConfiguration({revision:4,settings:{...defaults,appMemory:false}});assert.equal(ui.configurationValues().app_memory,false);
+  ui.updateConfiguration('app_memory',true);assert.equal(ui.configurationDraft().values.app_memory,true);assert.match(ui.configurationView(),/Remember explored pages and controls across runs/);
+  assert.match(ui.memoryPanel(),/Loading app memory/);
+  ui.state.memory={scopes:[]};assert.match(ui.memoryPanel(),/No app memory yet/);
+  ui.state.memory={scopes:[{scope_id:'00000000-0000-4000-8000-000000000009',origin:'https://app.test/<x>',viewport_profile:'mobile',auth_scope:'signed_in',execution_mode:'live',runs:2,pages:3,tried_controls:4,untried_controls:5,updated_at:'2026-10-30T10:00:00Z',in_use:false},
+    {scope_id:'00000000-0000-4000-8000-000000000010',origin:'https://busy.test',viewport_profile:'desktop',auth_scope:'public',execution_mode:'protocol_fixture',runs:1,pages:1,tried_controls:0,untried_controls:1,updated_at:'2026-10-30T10:00:00Z',in_use:true}]};
+  const html=ui.memoryPanel();
+  assert.match(html,/https:\/\/app.test\/&lt;x&gt;/);assert.doesNotMatch(html,/<x>/);
+  assert.match(html,/mobile · signed in · 2 runs · 3 pages · 4 tried \/ 5 untried controls/);
+  assert.match(html,/data-action="forget-memory"[^>]*data-id="00000000-0000-4000-8000-000000000009"/);
+  assert.match(html,/Test data · desktop · public · 1 run ·/);
+  assert.match(html,/In use by a running test/);assert.equal((html.match(/forget-memory/g)||[]).length,1,'A scope in use cannot be forgotten.');
+  assert.match(html,/recorded runs and evidence stay/);
 });

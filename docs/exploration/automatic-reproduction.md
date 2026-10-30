@@ -16,7 +16,7 @@ SCOUT_AUTO_REPRODUCE_MAX_CASES=2
 SCOUT_AUTO_REPRODUCE_MAX_ACTIONS=12
 ```
 
-Case limits range from one to three. The action limit ranges from one to twenty-four and covers the **sum of the entire selected replay paths**, including navigation and prerequisite actions. An individual replay remains limited to twelve executed actions. A case with a six-action path reserves six actions even if the suspected bug itself involves only the final click. These are browser-action limits, not token or monetary quotas; replay assessments use additional model calls with their own recorded usage.
+Case limits range from one to three. The action limit ranges from one to 100 and covers the **sum of the entire selected replay paths**, including navigation and prerequisite actions. An individual replay is limited to 50 executed actions, the longest exploration. Suspects found late in a long exploration have long paths, so raise the total if they should fit. A case with a six-action path reserves six actions even if the suspected bug itself involves only the final click. These are browser-action limits, not token or monetary quotas; replay assessments use additional model calls with their own recorded usage.
 
 Authenticated `POST /v1/browser-jobs` exploration requests accept the optional boolean `auto_reproduce`. The GUI always submits its explicit choice. Omission follows the operator default captured at admission. Clients cannot supply per-request case/action limits, and `reproduce` requests do not accept this flag. Existing request UUID idempotency still applies.
 

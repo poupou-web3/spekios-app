@@ -165,6 +165,7 @@ struct StartArgs {
     auth_mode: Option<String>,
     session_id: Option<Uuid>,
     auto_reproduce: Option<bool>,
+    app_memory: Option<bool>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -586,6 +587,7 @@ async fn dispatch_inner(
                 ("auth_mode", json!(a.auth_mode)),
                 ("session_id", json!(a.session_id)),
                 ("auto_reproduce", json!(a.auto_reproduce)),
+                ("app_memory", json!(a.app_memory)),
             ] {
                 if !v.is_null() {
                     data[k] = v;

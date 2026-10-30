@@ -11,7 +11,7 @@ Internal design and operator notes for Scout QA. The published user guide is sep
 ## Exploration
 
 - [Run a URL](./exploration/overview.md) — what a bounded exploration records and where it stops
-- [Planner](./exploration/planner.md) — likely next actions, changed controls, branch returns, and viewports
+- [Planner](./exploration/planner.md) — likely next actions, changed controls, branch returns, viewports, and memory across runs
 - [Browser interactions](./exploration/interactions.md) — text, dropdowns, checkboxes, radios, and scrolling
 - [Action outcomes](./exploration/action-outcomes.md) — completion, form submission, and network/console evidence
 - [Reproduction](./exploration/reproduction.md) — replay a suspect action in a fresh browser

@@ -34,7 +34,7 @@ The tool/API agent interface can read review status. It cannot submit a human re
 
 ## Optional automatic rechecks
 
-Enable automatic rechecks when starting exploration or in saved defaults. They are off by default. The default batch reserves up to two cases and twelve total replay actions, including prerequisites. Configurable maxima are three cases and twenty-four replay actions.
+Enable automatic rechecks when starting exploration or in saved defaults. They are off by default. The default batch reserves up to two cases and twelve total replay actions, including prerequisites. Configurable maxima are three cases and 100 replay actions. A single replay can be up to 50 actions long, so suspects found late in a long run need a larger total.
 
 Reservations remain recorded. Cancelled or interrupted checks are not automatically retried. **Stop automatic checks** stops the source run’s recheck batch even after exploration finishes.
 

@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { PROMPT_LIMIT_BYTES } from './model-context.js';
 
 export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean };
 export function modelSettings(): ModelSettings {
@@ -32,7 +33,7 @@ export class ModelClient {
   async complete(requestId: string, runId: string, actionId: string | null, captureIds: string[], system: string, input: unknown, signal?:AbortSignal) {
     signal?.throwIfAborted();
     const prompt = JSON.stringify(input);
-    if (Buffer.byteLength(prompt) > 32768) throw new Error('Model context exceeds the bounded prompt size.');
+    if (Buffer.byteLength(prompt) > PROMPT_LIMIT_BYTES) throw new Error('Model context exceeds the bounded prompt size.');
     const body = { request_id: requestId, run_id: runId, action_id: actionId, capture_ids: captureIds,
       provider: this.settings.provider, model: this.settings.model, free_only: this.settings.freeOnly,
       prompt, system, max_output_tokens: 2048, max_attempts: 1 };

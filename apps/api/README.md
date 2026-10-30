@@ -71,22 +71,27 @@ The Rust API exposes 24 shared MCP/HTTP tools for durable exploration, job polli
   "expected_revision": 0,
   "provider": "openrouter",
   "model": "openrouter/free",
-  "max_actions": 6,
+  "max_actions": 20,
   "viewport_profile": "desktop",
   "free_only": true,
   "auto_reproduce": false,
   "max_auto_reproductions": 2,
-  "max_auto_replay_actions": 12
+  "max_auto_replay_actions": 12,
+  "app_memory": true
 }
 ```
 
-Use a fresh non-nil UUID for a new save and the current revision from GET. Providers are `openai`, `anthropic`, `openrouter` and `meta`. Model IDs are trimmed, nonempty, at most 200 characters, contain no control characters and use only ASCII letters, numbers, `/ : . _ -`. Exploration actions are bounded to 1–12, automatic cases to 1–3, and total additional replay actions to 1–24. Viewports are `desktop`, `tablet` and `mobile`. Booleans must be actual JSON booleans. OpenRouter free-only requires `openrouter/free` or a model ending in `:free`; direct-provider free-only flags normalize to false. Saving does not call a model, test a provider connection or require a configured key.
+Use a fresh non-nil UUID for a new save and the current revision from GET. Providers are `openai`, `anthropic`, `openrouter` and `meta`. Model IDs are trimmed, nonempty, at most 200 characters, contain no control characters and use only ASCII letters, numbers, `/ : . _ -`. Exploration actions are bounded to 1–50, automatic cases to 1–3, and total additional replay actions to 1–100. `app_memory` is optional and defaults to true. Viewports are `desktop`, `tablet` and `mobile`. Booleans must be actual JSON booleans. OpenRouter free-only requires `openrouter/free` or a model ending in `:free`; direct-provider free-only flags normalize to false. Saving does not call a model, test a provider connection or require a configured key.
 
 A new revision returns 201 with `{ "revision": N, "settings": { ... }, "reused": false }`. An identical retry uses the same UUID, expected revision and normalized values and returns 200 with `reused: true`. The receipt remains valid after newer revisions exist and describes its originally saved revision; GET retrieves the latest state. A new write against a stale revision returns 409 `revision_conflict`; reusing a request UUID for different normalized content or scope returns 409 `settings_request_id_conflict`. Malformed/unknown fields return 400; unavailable queue/database storage returns 503.
 
 Migration `013-exploration-settings.sql` creates append-only per-workspace/user revision history with a mutation-rejection trigger. Preference writes and new job admission share a PostgreSQL transaction advisory lock. Each newly admitted job freezes effective settings and `settingsRevision`; an existing job UUID retry reconstructs its request against that original snapshot before current defaults or provider readiness can affect it. Saving defaults never updates queued/running job rows. Environment defaults are used until a saved revision exists, and direct recorder CLI commands retain their environment-based configuration.
 
-Only provider/model choice, action limits, viewport, OpenRouter free-only and automatic-check preferences are editable here. Provider API keys, access tokens, origin allowlists, execution mode and network policy cannot be changed through this API. Unknown secret/security fields are rejected. The same normal bearer access or explicitly enabled fenced local-development access applies to these routes; this is the local developer's settings, not a team administration permission system. The [back-office form](../../docs/platform/workspace.md#save-exploration-defaults) preserves dirty drafts and offers explicit conflict/retry handling.
+Only provider/model choice, action limits, viewport, OpenRouter free-only, automatic-check and app-memory preferences are editable here. Provider API keys, access tokens, origin allowlists, execution mode and network policy cannot be changed through this API. Unknown secret/security fields are rejected. The same normal bearer access or explicitly enabled fenced local-development access applies to these routes; this is the local developer's settings, not a team administration permission system. The [back-office form](../../docs/platform/workspace.md#save-exploration-defaults) preserves dirty drafts and offers explicit conflict/retry handling.
+
+## App memory
+
+Explorations with memory on read and record a derived projection of earlier runs, scoped to the caller's workspace and user, origin, viewport profile, sign-in state and execution mode (migration `019-app-memory.sql`: `app_memory_scopes`, `app_memory_pages`, `app_memory_controls`). `GET /v1/app-memory` lists up to 100 scopes with counts and `in_use`. `POST /v1/app-memory/{scope_id}/forget` deletes one scope's pages and controls in a transaction that locks the scope row; it returns 404 for an unknown scope and 409 `memory_scope_in_use` while the scope's latest run is active. Run evidence is never deleted. Exploration jobs accept an optional `app_memory` boolean that overrides the saved default for that run; in simulated-model (`protocol_fixture`) mode an omitted value admits the job with memory off; `reproduce` and `verify_fix` jobs reject it and always run with memory off. See [memory across runs](../../docs/exploration/planner.md#memory-across-runs).
 
 The workspace's **Compare** view retrieves separate authenticated before/after capture images, preserving their UUIDs and independent full-resolution inspection. It uses the existing capture/artifact routes and adds no image mutation or semantic bug-confirmation API.
 

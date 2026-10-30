@@ -15,6 +15,18 @@ use tokio::sync::Mutex;
 use tokio_postgres::Client;
 use uuid::Uuid;
 
+/// Executed browser actions per exploration, matching the browser runtime.
+pub const MAX_EXPLORATION_ACTIONS: u32 = 50;
+const DEFAULT_EXPLORATION_ACTIONS: u32 = 20;
+/// Total automatic replay actions per exploration; one full path fits twice.
+pub const MAX_AUTO_REPLAY_ACTIONS: u32 = MAX_EXPLORATION_ACTIONS * 2;
+/// Recorded actions in a verifiable issue path, including skipped plans.
+const MAX_ISSUE_PATH: usize = MAX_EXPLORATION_ACTIONS as usize * 2;
+
+fn enabled() -> bool {
+    true
+}
+
 #[derive(Clone)]
 pub struct Queue {
     db: Arc<Mutex<Client>>,
@@ -35,6 +47,9 @@ pub struct SettingsSubmission {
     auto_reproduce: bool,
     max_auto_reproductions: u32,
     max_auto_replay_actions: u32,
+    // Older clients omit it; memory is on unless explicitly disabled.
+    #[serde(default = "enabled")]
+    app_memory: bool,
 }
 
 #[derive(Debug)]
@@ -68,9 +83,9 @@ impl SettingsSubmission {
         {
             return Err("invalid_settings_model");
         }
-        if !(1..=12).contains(&self.max_actions)
+        if !(1..=MAX_EXPLORATION_ACTIONS).contains(&self.max_actions)
             || !(1..=3).contains(&self.max_auto_reproductions)
-            || !(1..=24).contains(&self.max_auto_replay_actions)
+            || !(1..=MAX_AUTO_REPLAY_ACTIONS).contains(&self.max_auto_replay_actions)
         {
             return Err("invalid_settings_limits");
         }
@@ -91,7 +106,7 @@ impl SettingsSubmission {
                 "provider":self.provider,"model":model,"maxActions":self.max_actions,
                 "viewportProfile":self.viewport_profile,"freeOnly":free_only,
                 "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
-                "maxAutoReplayActions":self.max_auto_replay_actions
+                "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory
             }),
         })
     }
@@ -110,6 +125,7 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
             "autoReproduce",
             "maxAutoReproductions",
             "maxAutoReplayActions",
+            "appMemory",
         ] {
             if let Some(value) = saved.get(key) {
                 settings[key] = value.clone();
@@ -165,6 +181,8 @@ pub struct Submission {
     #[serde(default)]
     auto_reproduce: Option<bool>,
     #[serde(default)]
+    app_memory: Option<bool>,
+    #[serde(default)]
     issue_id: Option<Uuid>,
     #[serde(default)]
     deployment_ref: Option<String>,
@@ -181,7 +199,11 @@ fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
 /// Public websites can be tested from a pasted URL. Private, HTTP and internal
 /// hosts still need an exact entry in the operator allowlist.
 fn public_https_origin(url: &reqwest::Url) -> bool {
-    if url.scheme() != "https" || url.port().is_some() || !url.username().is_empty() || url.password().is_some() {
+    if url.scheme() != "https"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return false;
     }
     let Some(host) = url.host_str() else {
@@ -194,20 +216,30 @@ fn public_https_origin(url: &reqwest::Url) -> bool {
     if host.is_empty()
         || host.len() > 253
         || !host.contains('.')
-        || host.split('.').all(|label| label.bytes().all(|byte| byte.is_ascii_digit()))
+        || host
+            .split('.')
+            .all(|label| label.bytes().all(|byte| byte.is_ascii_digit()))
     {
         return false;
     }
     if host == "localhost"
-        || [".localhost", ".local", ".internal", ".localdomain", ".home.arpa"]
-            .iter()
-            .any(|suffix| host.ends_with(suffix))
+        || [
+            ".localhost",
+            ".local",
+            ".internal",
+            ".localdomain",
+            ".home.arpa",
+        ]
+        .iter()
+        .any(|suffix| host.ends_with(suffix))
     {
         return false;
     }
     host.split('.').all(|label| {
         (1..=63).contains(&label.len())
-            && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             && !label.starts_with('-')
             && !label.ends_with('-')
     })
@@ -256,6 +288,7 @@ fn prepare_submission(
                 && input.auth_mode.is_none()
                 && input.session_id.is_none()
                 && input.auto_reproduce.is_none()
+                && input.app_memory.is_none()
                 && input.issue_id.is_none()
                 && input.deployment_ref.is_none() =>
         {
@@ -264,7 +297,8 @@ fn prepare_submission(
         "verify_fix"
             if input.source_action_id.is_none()
                 && input.viewport_profile.is_none()
-                && input.auto_reproduce.is_none() =>
+                && input.auto_reproduce.is_none()
+                && input.app_memory.is_none() =>
         {
             let issue_id = input
                 .issue_id
@@ -296,8 +330,14 @@ fn prepare_submission(
             // Keep omitted defaults omitted in the idempotency request.
             request["auto_reproduce"] = json!(enabled);
         }
+        if let Some(enabled) = input.app_memory {
+            settings["appMemory"] = json!(enabled);
+            request["app_memory"] = json!(enabled);
+        }
     } else {
+        // Replays follow recorded evidence and never use exploration memory.
         settings["autoReproduce"] = json!(false);
+        settings["appMemory"] = json!(false);
     }
     if let Some(mode) = &input.auth_mode {
         if !matches!(mode.as_str(), "auto" | "sign_in" | "public") {
@@ -355,6 +395,27 @@ impl Queue {
             .await
             .map_err(|_| "database_unavailable")?;
         Ok(row.get(0))
+    }
+    /// Delete one remembered app scope. Run evidence is untouched. A scope
+    /// that an active run is still writing cannot be forgotten until it ends.
+    pub async fn forget_memory(&self, scope_id: Uuid) -> Result<Value, &'static str> {
+        let mut db = self.db.lock().await;
+        let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
+        let row = tx.query_opt("SELECT origin,viewport_profile,auth_scope,execution_mode,EXISTS(SELECT 1 FROM runtime_runs r WHERE r.run_id=s.last_run_id AND r.lifecycle='active') FROM app_memory_scopes s WHERE scope_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&scope_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("memory_scope_not_found")?;
+        if row.get::<_, bool>(4) {
+            return Err("memory_scope_in_use");
+        }
+        tx.execute(
+            "DELETE FROM app_memory_scopes WHERE scope_id=$1",
+            &[&scope_id],
+        )
+        .await
+        .map_err(|_| "database_unavailable")?;
+        tx.commit().await.map_err(|_| "database_unavailable")?;
+        Ok(json!({
+            "scope_id":scope_id,"forgotten":true,"origin":row.get::<_,String>(0),"viewport_profile":row.get::<_,String>(1),
+            "auth_scope":row.get::<_,String>(2),"execution_mode":row.get::<_,String>(3),"run_evidence_retained":true
+        }))
     }
     pub fn scoped(&self, principal: &crate::identity::Principal) -> Self {
         Self {
@@ -574,10 +635,11 @@ impl Queue {
             principal: crate::identity::Principal::default(),
             settings: json!({
                 "provider":provider,"model":model,"freeOnly":provider=="openrouter" && env::var("SCOUT_EXPLORER_FREE_ONLY").as_deref()!=Ok("false"),
-                "maxActions":env::var("SCOUT_EXPLORER_MAX_ACTIONS").ok().and_then(|s|s.parse::<u32>().ok()).filter(|n|(1..=12).contains(n)).unwrap_or(6),
+                "maxActions":bounded_setting("SCOUT_EXPLORER_MAX_ACTIONS",DEFAULT_EXPLORATION_ACTIONS,MAX_EXPLORATION_ACTIONS),
+                "appMemory":env::var("SCOUT_EXPLORER_APP_MEMORY").as_deref()!=Ok("false"),
                 "autoReproduce":env::var("SCOUT_AUTO_REPRODUCE").as_deref()==Ok("true"),
                 "maxAutoReproductions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_CASES",2,3),
-                "maxAutoReplayActions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_ACTIONS",12,24),
+                "maxAutoReplayActions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_ACTIONS",12,MAX_AUTO_REPLAY_ACTIONS),
                 "viewportProfile":env::var("SCOUT_EXPLORER_VIEWPORT").unwrap_or_else(|_|"desktop".into()),
                 "allowedOrigins":env::var("SCOUT_ALLOWED_ORIGINS").unwrap_or_else(|_|"http://exploration-fixture:8082".into()).split(',').map(str::trim).collect::<Vec<_>>()
             }),
@@ -621,7 +683,7 @@ impl Queue {
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
         let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
-        let (request, settings) = prepare_submission(&input, &defaults)?;
+        let (request, mut settings) = prepare_submission(&input, &defaults)?;
         let verification_source = if let Some(issue_id) = input.issue_id {
             let row=tx.query_opt("SELECT to_jsonb(i),r.lifecycle,r.config,scout_issue_path(a.run_id,a.ordinal),a.state,a.assessment,a.tool_error FROM issues i JOIN runtime_runs r ON r.run_id=i.source_run_id JOIN runtime_actions a ON a.action_id=i.source_action_id AND a.run_id=r.run_id WHERE i.issue_id=$1 AND i.workspace_id=$2 AND i.user_id=$3",&[&issue_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("issue_not_found")?;
             let issue: Value = row.get(0);
@@ -642,7 +704,10 @@ impl Queue {
             {
                 return Err("issue_source_not_verifiable");
             }
-            if path.as_array().is_none_or(|p| p.is_empty() || p.len() > 24) {
+            if path
+                .as_array()
+                .is_none_or(|p| p.is_empty() || p.len() > MAX_ISSUE_PATH)
+            {
                 return Err("issue_source_path_not_supported");
             }
             Some((issue, path, config))
@@ -675,6 +740,11 @@ impl Queue {
         } else {
             "live"
         };
+        // Simulated-model runs check contracts against fixed fixture apps and
+        // must not depend on earlier test runs: memory only when requested.
+        if mode == "protocol_fixture" && input.app_memory.is_none() {
+            settings["appMemory"] = json!(false);
+        }
         if let Some((_, _, config)) = &verification_source
             && config["execution_mode"] != mode
         {
@@ -888,11 +958,15 @@ mod tests {
             ("model", json!("a".repeat(201))),
             ("model", json!("méta/model")),
             ("max_actions", json!(0)),
-            ("max_actions", json!(13)),
+            ("max_actions", json!(MAX_EXPLORATION_ACTIONS + 1)),
             ("max_auto_reproductions", json!(0)),
             ("max_auto_reproductions", json!(4)),
             ("max_auto_replay_actions", json!(0)),
-            ("max_auto_replay_actions", json!(25)),
+            (
+                "max_auto_replay_actions",
+                json!(MAX_AUTO_REPLAY_ACTIONS + 1),
+            ),
+            ("app_memory", json!("yes")),
             ("viewport_profile", json!("watch")),
             ("expected_revision", json!(-1)),
             ("expected_revision", json!(i64::MAX)),
@@ -931,10 +1005,21 @@ mod tests {
         let mut maximum = settings_input();
         maximum["model"] = json!("a".repeat(200));
         maximum["free_only"] = json!(false);
-        maximum["max_actions"] = json!(12);
+        maximum["max_actions"] = json!(MAX_EXPLORATION_ACTIONS);
         maximum["max_auto_reproductions"] = json!(3);
-        maximum["max_auto_replay_actions"] = json!(24);
+        maximum["max_auto_replay_actions"] = json!(MAX_AUTO_REPLAY_ACTIONS);
         assert!(normalize_settings(maximum).is_ok());
+        assert_eq!(
+            normalize_settings(settings_input()).unwrap().settings["appMemory"],
+            true,
+            "Omitted memory preference defaults on"
+        );
+        let mut fresh = settings_input();
+        fresh["app_memory"] = json!(false);
+        assert_eq!(
+            normalize_settings(fresh).unwrap().settings["appMemory"],
+            false
+        );
     }
 
     #[test]

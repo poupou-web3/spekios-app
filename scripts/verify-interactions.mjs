@@ -23,7 +23,7 @@ try{
     assert.equal(report.run.config.viewport_profile,entry.viewport_profile);
   }
   const replays=[];
-  for(const [path,limit] of [['/interactions/broken',6],['/scrolling/broken',3]]){
+  for(const [path,limit] of [['/interactions/broken',6],['/scrolling/manual/broken',3]]){
     const source=await run('explore','http://exploration-fixture:8082'+path,limit);
     const report=await get('/v1/runs/'+source.run_id);reports.push(report);
     const replay=await run('reproduce',report.actions.at(-1).action_id);
@@ -38,7 +38,7 @@ try{
     // retains PostgreSQL microseconds. Compare their common timestamp precision.
     const normalize=actions=>actions.map(action=>({...action,...Object.fromEntries(['created_at','dispatched_at','finished_at'].map(key=>[key,action[key]===null?null:new Date(action[key]).toISOString()]))}));
     assert.deepEqual(normalize(manifest.actions),normalize(report.actions));
-    assert.equal(manifest.run.config.interaction_version,'browser-interactions-v1');
+    assert.equal(manifest.run.config.interaction_version,'browser-interactions-v2');
     assert.equal(manifest.run.config.screenshot_caret,'hide');
     assert.equal(report.model_usage.incomplete_usage_attempts,0);
     for(const capture of report.captures)assert.equal(sha256(await getObject(s3,capture.object_key)),capture.sha256);
@@ -46,7 +46,7 @@ try{
     const count=JSON.parse(await clickhouse(`SELECT count() AS n FROM scout.runtime_events_current WHERE run_id=${sqlString(report.run.run_id)} FORMAT JSONEachRow`));
     assert.equal(Number(count.n),report.events.length);
   }
-  const result={status:'passed',verified_at:new Date().toISOString(),mode:'simulated_models_real_browser',interaction_version:'browser-interactions-v1',
+  const result={status:'passed',verified_at:new Date().toISOString(),mode:'simulated_models_real_browser',interaction_version:'browser-interactions-v2',
     viewports:matrix.runs,replays,checks:['fill_select_checkbox_radio','responsive_viewports','offscreen_discovery_by_scroll','exact_parameter_replay','capture_and_artifact_hashes','immutable_manifests','model_usage','ClickHouse_events'],visual_browser_check:'unverified_tool_restricted'};
   await mkdir(new URL('../artifacts/browser-interactions/',import.meta.url),{recursive:true});
   await writeFile(new URL('../artifacts/browser-interactions/verification.json',import.meta.url),JSON.stringify(result,null,2)+'\n');

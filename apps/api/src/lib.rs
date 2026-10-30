@@ -19,6 +19,7 @@ pub mod history;
 pub mod identity;
 pub mod issues;
 pub mod jobs;
+pub mod memory;
 use identity::{Principal, ScopedState};
 pub mod models;
 pub mod oauth;
@@ -28,6 +29,8 @@ pub mod steering;
 pub mod ui;
 
 /// Legacy local workspace retained for CLI fixtures and operator bootstrap.
+/// Model prompts may reach 64 KiB; JSON escaping can roughly double the body.
+const MODEL_REQUEST_BODY_LIMIT: usize = 196_608;
 pub const WORKSPACE_ID: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
 
 #[derive(Clone)]
@@ -197,6 +200,11 @@ pub fn router(state: AppState) -> Router {
             "/v1/browser-jobs/{job_id}/cancel",
             axum::routing::post(jobs::cancel_job),
         )
+        .route("/v1/app-memory", get(memory::list))
+        .route(
+            "/v1/app-memory/{scope_id}/forget",
+            axum::routing::post(memory::forget),
+        )
         .route("/v1/browser-access", get(access::list))
         .route("/v1/browser-access/{id}/screen", get(access::screen))
         .route(
@@ -209,7 +217,12 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/model-providers", get(gateway::providers))
-        .route("/v1/model-requests", axum::routing::post(gateway::submit))
+        .route(
+            "/v1/model-requests",
+            axum::routing::post(gateway::submit).layer(axum::extract::DefaultBodyLimit::max(
+                MODEL_REQUEST_BODY_LIMIT,
+            )),
+        )
         .route("/v1/model-requests/{request_id}", get(gateway::request))
         .route("/v1/usage", get(gateway::usage_report))
         .layer(axum::extract::DefaultBodyLimit::max(65_536))
@@ -607,7 +620,9 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
             Ok(value) => value["settings"].clone(),
             Err(code) => return error(StatusCode::SERVICE_UNAVAILABLE, code),
         },
-        None => json!({"maxAutoReproductions":2,"maxAutoReplayActions":12,"settingsRevision":0}),
+        None => {
+            json!({"maxAutoReproductions":2,"maxAutoReplayActions":12,"appMemory":false,"settingsRevision":0})
+        }
     };
     let providers = state
         .gateway
@@ -633,7 +648,9 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         "agent_interface":{"version":1,"mcp_endpoint":"/mcp","http_catalog":"/v1/agent/tools","stdio_bridge":true,"coding_agent_report":true,"asynchronous_progress":true,"human_review_write":false,"external_browser_driver":false},
         "cancellation":{"queued_jobs":true,"active_explorer_runs":true,"durable":true,"resume":false,"in_flight_provider_calls":"settle_and_account"},
         "app_login":{"manual_handoff":true,"session_reuse":true,"saved_session_hours":24,"google_oauth":false,"private_login_recording":false},
-        "frontier_planning":{"version":"frontier-v1","automatic_return":true,"stale_plan_recovery":true,"max_replans":3,"probability_calibrated":false},
+        "frontier_planning":{"version":"frontier-v2","automatic_return":true,"stale_plan_recovery":true,"max_replans":3,"probability_calibrated":false,
+            "max_actions":jobs::MAX_EXPLORATION_ACTIONS,"document_controls":true,"reveal_before_action":true,"max_observed_controls":120,"max_prompt_bytes":65536,"max_duration_minutes_env":"SCOUT_EXPLORER_MAX_MINUTES"},
+        "app_memory":{"version":"app-memory-v1","enabled_by_default":effective_settings["appMemory"],"scope":["origin","viewport_profile","auth_scope","execution_mode"],"keyed_by":"url_and_control_identity","resume_remembered_pages":true,"replays_use_memory":false,"forget":"/v1/app-memory/{scope_id}/forget"},
         "viewport_profiles":["desktop","tablet","mobile"],
         "model_gateway":true,"model_inference":configured && state.gateway.as_ref().is_some_and(|g|g.is_ready()),
         "model_providers":providers,
@@ -1078,9 +1095,13 @@ mod tests {
                 "{required}"
             );
         }
-        assert!(!ui::ASSETS.iter().any(|(path, _, _)| path.contains("backoffice")
-            || path.contains(".test.")
-            || path.contains("testing/")));
+        assert!(
+            !ui::ASSETS
+                .iter()
+                .any(|(path, _, _)| path.contains("backoffice")
+                    || path.contains(".test.")
+                    || path.contains("testing/"))
+        );
         for (asset, content_type, expected) in ui::ASSETS {
             let path = format!("/assets/{asset}");
             for authorization in [None, Some("Bearer wrong")] {

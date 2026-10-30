@@ -58,14 +58,17 @@ Open **Settings → Exploration defaults** in the workspace. Supported fields ar
 | --- | --- |
 | Model provider | OpenRouter, OpenAI, Anthropic or Meta AI |
 | Model ID | Up to 200 characters using letters, numbers, `/ : . _ -`; surrounding spaces are trimmed |
-| Maximum exploration actions | Integer from 1 to 12 |
+| Maximum exploration actions | Integer from 1 to 50 (initial default 20) |
 | Default viewport | Desktop, tablet or mobile |
 | Restrict OpenRouter to free model IDs | Requires `openrouter/free` or a model ending in `:free`; direct-provider calls, including Meta AI, use their own API billing |
 | Automatic checks by default | Optional boolean; each URL launch can explicitly override it |
 | Maximum automatic cases | Integer from 1 to 3 |
-| Total additional replay actions | Integer from 1 to 24 across complete selected paths |
+| Total additional replay actions | Integer from 1 to 100 across complete selected paths |
+| Remember explored pages and controls across runs | Boolean, on by default; agents and API clients can override it per exploration with `app_memory` |
 
 **Save defaults** creates an append-only PostgreSQL revision and applies it to future browser-job admissions without restarting services. Queued and running jobs retain their original settings, as do exact retries of an already admitted job UUID. Existing per-launch viewport and automatic-check choices continue to override defaults. Saved preferences survive service restarts. Environment values provide the initial defaults; after a saved revision exists, its editable fields take precedence. Credentials, origins, execution mode and network policy continue to come from the operator configuration. Direct recorder CLI exploration continues to use its environment configuration.
+
+**Settings → App memory** lists what earlier runs remembered for each app, screen size and sign-in state (pages, tried and untried controls, runs, last update) from `GET /v1/app-memory`. **Forget** calls `POST /v1/app-memory/{scope_id}/forget` and deletes only that derived memory; recorded runs and evidence stay. A scope used by a running test cannot be forgotten until it finishes. The run heading shows whether earlier runs guided it, and the Flow tab labels a reopened remembered page as **Reopening a page from earlier runs**. See [memory across runs](../exploration/planner.md#memory-across-runs).
 
 Dirty drafts survive polling. Inputs are disabled during a save, duplicate clicks make one request, and an ambiguous response offers **Retry save** with the same request UUID and values. A concurrent revision preserves the draft and requires an explicit choice to discard it or keep the edits on the latest revision. An idempotent receipt may describe an older saved revision; the UI reads the latest state after acknowledgement and prevents older polling results from rolling it back. Saved defaults and current revision are available through authenticated `GET /v1/exploration-settings`; updates use `POST` on that same endpoint. See [the API contract](../../apps/api/README.md#exploration-settings).
 

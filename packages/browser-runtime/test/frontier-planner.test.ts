@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FrontierPlanner, type BrowserCommand } from '../src/frontier-planner.js';
+import { FrontierPlanner, UNRANKED_MEMORY_SCORE, type BrowserCommand } from '../src/frontier-planner.js';
 import { blockedReason } from '../src/exploration-policy.js';
+import { jumpableUrl, MEMORY_VERSION, type MemorySnapshot, type RememberedControl } from '../src/app-memory.js';
 import type { Capture, ObservedControl } from '../src/contracts.js';
 import { viewportProfile } from '../src/viewports.js';
 
@@ -102,4 +103,95 @@ test('a new focus prefers fresh rankings while keeping routes and covered contro
   planner.plan('leaf',[]);
   assert.equal(planner.rank('leaf',2)[0].control_id,'old','Unexplored recorded branches remain reachable');
   assert.equal(planner.available('root').some(c=>c.control_id==='visited'),false);
+});
+
+type Remembered = Partial<RememberedControl> & { url: string; control_id: string };
+function memory(pages: { url: string; path?: number; truncated?: boolean }[], controls: Remembered[], priorRuns = 1): MemorySnapshot {
+  const remembered = controls.map(c => ({ role: 'button', name: c.control_id, href: null, attempts: 0, best_likelihood: null,
+    last_verdict: null, last_observed_result: null, blocked_reason: null, ...c }) as RememberedControl);
+  const byPage = new Map<string, RememberedControl[]>();
+  for (const c of remembered) byPage.set(c.url, [...(byPage.get(c.url) ?? []), c]);
+  return { version: MEMORY_VERSION, scope_id: 'scope', scope: { origin: 'http://app', viewport_profile: 'desktop', auth_scope: 'public', execution_mode: 'protocol_fixture' },
+    prior_runs: priorRuns, truncated: false, controls: new Map(remembered.map(c => [c.control_id, c])), by_page: byPage,
+    pages: new Map(pages.map(p => [p.url, { url: p.url, title: p.url, visits: 1, best_path_score: p.path ?? null, controls_truncated: p.truncated ?? false, last_run_id: 'earlier-run', last_action_id: 'earlier-action' }])) };
+}
+const start = (planner: FrontierPlanner, controls: ObservedControl[]) => {
+  planner.observe('root', capture('http://app/', controls), undefined, {}, 1, true);
+  planner.transition({from_state_id:'blank',to_state_id:'root',command:{type:'navigate',url:'http://app/'},source_action_id:'open',expected_result:'Root appears'},'no_issue_observed');
+  planner.attempted('blank', {type:'navigate',url:'http://app/'}, false);
+};
+
+test('controls already tried in earlier runs yield to untried and newly appeared controls',()=>{
+  const planner = new FrontierPlanner('http://app/', memory([{url:'http://app/'}], [
+    {url:'http://app/',control_id:'tried',attempts:2,last_verdict:'no_issue_observed'},
+    {url:'http://app/',control_id:'untried'},
+  ]));
+  start(planner, [button('tried'), button('untried'), button('fresh')]);
+  planner.plan('root', [proposal('tried', .9), proposal('untried', .7), proposal('fresh', .6)]);
+  const ranked = planner.rank('root', 5);
+  assert.deepEqual(ranked.map(p => p.control_id), ['fresh', 'untried', 'tried']);
+  const tried = ranked.find(p => p.control_id === 'tried')!, fresh = ranked[0];
+  assert.equal(tried.components.earlier_run_coverage, .2);
+  assert.equal(tried.components.novelty, 0);
+  assert.match(tried.reason, /already tried in earlier runs \(last: no issue observed\)/);
+  assert.equal(fresh.components.new_since_earlier_runs, .1);
+  assert.match(fresh.reason, /not seen on this page in earlier runs/);
+});
+
+test('a truncated earlier observation cannot make a control look new',()=>{
+  const planner = new FrontierPlanner('http://app/', memory([{url:'http://app/',truncated:true}], []));
+  start(planner, [button('maybe-new')]);
+  planner.plan('root', [proposal('maybe-new', .5)]);
+  assert.equal(planner.rank('root', 3)[0].components.new_since_earlier_runs, 0);
+});
+
+test('an unfinished remembered page competes as a resume step and is observed again',()=>{
+  const planner = new FrontierPlanner('http://app/', memory([{url:'http://app/'},{url:'http://app/products',path:.7}], [
+    {url:'http://app/',control_id:'products',attempts:1,last_verdict:'no_issue_observed'},
+    {url:'http://app/products',control_id:'compare',attempts:1,last_verdict:'no_issue_observed',best_likelihood:.9},
+    {url:'http://app/products',control_id:'faq',best_likelihood:.6},
+  ]));
+  start(planner, [button('products')]);
+  planner.plan('root', [proposal('products', .7)]);
+  const ranked = planner.rank('root', 3);
+  assert.deepEqual(ranked.map(p => p.control_id), ['faq', 'products']);
+  const resume = ranked[0];
+  assert.equal(resume.travel_steps, 1);
+  assert.deepEqual(resume.route[0].command, {type:'navigate',url:'http://app/products'});
+  assert.deepEqual(resume.route[0].memory, {url:'http://app/products',title:'http://app/products',open_controls:1,source_run_id:'earlier-run'});
+  assert.equal(resume.likelihood, .6);
+  assert.match(resume.reason, /1 untried controls remembered from 1 earlier run/);
+  assert.deepEqual(planner.rank('root', 1).map(p => p.control_id), ['products'], 'A resume needs room for the navigation and one action.');
+  planner.attempted('root', {type:'navigate',url:'http://app/products'}, false);
+  assert.deepEqual(planner.rank('root', 3).map(p => p.control_id), ['products'], 'A page is reopened at most once per run.');
+});
+
+test('remembered pages are skipped once visited, when finished, unranked by default and stale under focus',()=>{
+  const snapshot = memory([{url:'http://app/'},{url:'http://app/done'},{url:'http://app/blocked'},{url:'http://app/unranked'},{url:'http://app/visited'}], [
+    {url:'http://app/done',control_id:'done',attempts:1},
+    {url:'http://app/blocked',control_id:'pay',blocked_reason:'payment_or_transaction_requires_handoff'},
+    {url:'http://app/unranked',control_id:'unranked'},
+    {url:'http://app/visited',control_id:'visited'},
+  ]);
+  const planner = new FrontierPlanner('http://app/', snapshot);
+  start(planner, []);
+  planner.observe('visited', capture('http://app/visited', [button('visited')]), 'root', {}, 1);
+  let ranked = planner.rank('root', 4);
+  assert.deepEqual(ranked.map(p => p.route[0]?.command), [{type:'navigate',url:'http://app/unranked'}]);
+  assert.equal(ranked[0].likelihood, UNRANKED_MEMORY_SCORE);
+  assert.equal(ranked[0].focus_stale, false);
+  planner.refocus();
+  ranked = planner.rank('root', 4);
+  assert.equal(ranked[0].focus_stale, true, 'Earlier-run hints never outrank fresh rankings for a new focus.');
+  assert.deepEqual(new FrontierPlanner('http://app/', null).rank('root', 4), []);
+});
+
+test('remembered URLs with secrets, sign-out or risky actions are never reopened',()=>{
+  const origin = 'https://app.example';
+  for (const url of [origin + '/products', origin + '/search?q=notebook', origin + '/#/settings', origin + '/docs/guide.html'])
+    assert.equal(jumpableUrl(url, origin), true, url);
+  for (const url of [origin + '/reset?token=abc', origin + '/invite?code=1', origin + '/callback?state=x&session=y', origin + '/logout', origin + '/account/sign-out',
+    origin + '/items/delete', origin + '/checkout', origin + '/billing/upgrade', 'https://other.example/products', 'http://app.example/products',
+    'https://user:pass@app.example/', origin + '/%E0%A4%A', 'not a url'])
+    assert.equal(jumpableUrl(url, origin), false, url);
 });

@@ -7,7 +7,7 @@ import {state} from '../state.js';
 import {replayControl} from './automatic.js';
 import {filteredFindings,humanReviewPill,reviewView} from './review.js';
 import {persistentIssueLink} from './run.js';
-export function actionName(action){const command=action.spec?.command;if(command?.type==='navigate')return 'Open application';const label=command?.control?.name||action.spec?.prediction?.goal||command?.type||'Browser action';return command?.type==='submit'?`Submit ${label}`:command?.type==='fill'?`Fill ${label}`:command?.type==='select'?`Select ${label}`:command?.type==='set_checked'?`${command.checked?'Check':'Uncheck'} ${label}`:label;}
+export function actionName(action){const command=action.spec?.command;if(command?.type==='navigate')return action.spec?.exploration?.purpose==='resume'?'Open remembered page':'Open application';const label=command?.control?.name||action.spec?.prediction?.goal||command?.type||'Browser action';return command?.type==='submit'?`Submit ${label}`:command?.type==='fill'?`Fill ${label}`:command?.type==='select'?`Select ${label}`:command?.type==='set_checked'?`${command.checked?'Check':'Uncheck'} ${label}`:label;}
 export function expected(action){return text(action.spec?.prediction?.expected_result??action.assessment?.expected??action.spec?.prediction?.expected);}
 export function selectedAction(){return state.report?.actions.find(a=>a.action_id===state.actionId);}
 export function actionDetail(){

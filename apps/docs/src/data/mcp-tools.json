@@ -425,10 +425,13 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Queue URL-only exploration. Can interact with and change the controlled target app; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required.",
+      "description": "Queue URL-only exploration. Can interact with and change the controlled target app; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "app_memory": {
+            "type": "boolean"
+          },
           "auth_mode": {
             "enum": [
               "auto",

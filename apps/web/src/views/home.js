@@ -24,7 +24,7 @@ export function hero(){
 }
 export function automaticEnabled(){return state.autoReproduce ?? state.settings.autoReproduce===true;}
 export function automaticOptions(){
-  const enabled=automaticEnabled(),cases=Math.max(1,Math.min(3,Number(state.settings.maxAutoReproductions)||2)),actions=Math.max(1,Math.min(24,Number(state.settings.maxAutoReplayActions)||12));
+  const enabled=automaticEnabled(),cases=Math.max(1,Math.min(3,Number(state.settings.maxAutoReproductions)||2)),actions=Math.max(1,Math.min(100,Number(state.settings.maxAutoReplayActions)||12));
   return `<div class="automatic-options"><label><input id="auto-reproduce" name="auto_reproduce" form="run-form" type="checkbox" ${enabled?'checked':''} aria-describedby="automatic-help"> Automatically recheck suspected bugs</label><p id="automatic-help" class="small muted">${enabled?`After exploration, use fresh browsers for up to ${cases} suspected bugs and ${actions} additional browser actions in total. Checks use additional model calls. Reproduced findings still need human review.`:'Optional fresh-browser checks use additional model calls. Findings remain subject to human review.'}</p></div>`;
 }
 export function explorationRequest(form){

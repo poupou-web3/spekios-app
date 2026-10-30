@@ -4,8 +4,12 @@ import { fixture, plan } from './fixture.js';
 import { isUuid } from './contracts.js';
 import { explore, reproduce } from './explorer.js';
 import { viewportProfiles, type ViewportProfile } from './viewports.js';
+import { ModelClient, modelSettings } from './model-client.js';
 
 const [command = 'demo', id] = process.argv.slice(2);
+// Live terminal explorations use app memory unless it is disabled. Simulated
+// runs check contracts against fixed fixtures and never depend on earlier runs.
+const memory = async () => process.env.SCOUT_EXPLORER_APP_MEMORY !== 'false' && await new ModelClient(modelSettings()).ready() === 'live';
 const store = new Store();
 try {
   await store.open();
@@ -25,19 +29,19 @@ try {
       console.log(JSON.stringify({ mode: 'fixture_defined', model_connected: false, runs: results }, null, 2));
     } finally { await target.close(); }
   } else if (command === 'explore-matrix' && id) {
-    const runs = [];
+    const runs = [], appMemory = await memory();
     for (const profile of Object.keys(viewportProfiles) as ViewportProfile[]) {
-      const result = await explore(store,id,{viewportProfile:profile});
+      const result = await explore(store,id,{viewportProfile:profile,appMemory});
       runs.push({viewport_profile:profile,run_id:result.run_id,lifecycle:result.report.run.lifecycle,manifest_key:result.report.run.manifest_key,
         error:result.report.run.error,manifest_error:result.manifest_error,export_error:result.export_error});
       if (result.report.run.lifecycle!=='completed'||result.manifest_error||result.export_error) process.exitCode=1;
     }
     console.log(JSON.stringify({mode:'sequential_viewport_matrix',runs},null,2));
   } else if ((command === 'explore' || command === 'reproduce') && id) {
-    const result = command === 'reproduce' ? await reproduce(store, id) : await explore(store, id);
+    const result = command === 'reproduce' ? await reproduce(store, id) : await explore(store, id, { appMemory: await memory() });
     console.log(JSON.stringify({ run_id: result.run_id, lifecycle: result.report.run.lifecycle,
       execution_mode: result.report.run.config.execution_mode, stop_reason: result.report.run.config.stop_reason,
-      viewport_profile: result.report.run.config.viewport_profile,
+      viewport_profile: result.report.run.config.viewport_profile, app_memory: result.report.run.config.app_memory,
       error: result.report.run.error, actions: result.report.actions.length, captures: result.report.captures.length,
       graph_states: result.report.graph?.states.length, graph_edges: result.report.graph?.edges.length,
       blocked_controls: result.report.graph?.frontier.filter((f: { status: string }) => f.status === 'blocked'),

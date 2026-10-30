@@ -2,7 +2,7 @@
 {
   "title": "Capabilities and current limits",
   "description": "Check what ScoutQA implements today, including browser actions, model providers, reports, sign-in, replay and deployment limitations.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-10-30",
   "sidebar": {
     "order": 5
   }
@@ -17,7 +17,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 | Input | URL-only exploration of explicitly permitted HTTP(S) origins. |
 | Browser | Chromium with desktop, tablet and mobile viewport profiles. |
 | Actions | Native navigation, click, text/search fill, single-select, checkbox/radio, document scroll and permitted form submission. |
-| Planning | Likely-action ranking, recorded graph/frontier, duplicate avoidance, branch returns, stale-state replanning and versioned active-run testing focus. |
+| Planning | Likely-action ranking, recorded graph/frontier, duplicate avoidance, branch returns, stale-state replanning, controls further down the page, versioned active-run testing focus and [memory across runs](../../guides/app-memory/) with reopening of unfinished pages. Runs allow up to 50 actions and stop after 30 minutes by default. |
 | Checks | Pre-action expectations, per-action assessments, exact image differences, sampled completion frames and redacted diagnostics. |
 | Findings | Original suspicions, fresh-browser replay, optional bounded automatic replay and append-only human review. |
 | Agent identity | User setup page, standard MCP browser OAuth with PKCE/DCR and rotating renewal, native connector compatibility, private history, revocation and token attribution. |

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Store } from './store.js';
-import { isUuid, type BrowserCommand, type Capture } from './contracts.js';
+import { MAX_EXPLORATION_ACTIONS, MAX_REPLAY_ORDINAL, isUuid, type BrowserCommand, type Capture } from './contracts.js';
 import { stateFingerprint } from './exploration-policy.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
 import { observedCommand } from './browser-interactions.js';
@@ -35,7 +35,7 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
   if (!source) throw new Error('Source action not found in this workspace.');
   if (source.lifecycle === 'active' || source.config.runtime_version !== 'explorer-v1' || source.config.replay_of ||
       source.state !== 'completed' || source.assessment?.verdict !== 'suspect' || source.assessment.expectation_uncertain ||
-      source.tool_error || source.ordinal < 1 || source.ordinal > 24) throw new Error('Replay requires a completed explorer suspect from a terminal source run.');
+      source.tool_error || source.ordinal < 1 || source.ordinal > MAX_REPLAY_ORDINAL) throw new Error('Replay requires a completed explorer suspect from a terminal source run.');
   const profile = viewportProfile(source.config.viewport_profile ?? 'desktop');
   if (!isDeepStrictEqual(source.config.viewport, viewportProfiles[profile]) || source.config.device_scale !== 1) throw new Error('Unsupported source browser geometry.');
   const origin = new URL(source.target_url).origin;
@@ -59,7 +59,11 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
     if (steps.length === 0) {
       if (command?.type !== 'navigate' || command.url !== source.target_url) throw new Error('Replay must begin with the original navigation.');
     } else if (command?.type === 'navigate') {
-      if (command.url !== source.target_url || action.spec.exploration?.purpose !== 'return') throw new Error('Source navigation is not a recorded return to the entry page.');
+      // Returns reopen the entry page; resumes reopen a same-origin page that an
+      // earlier run observed. Both replay as the exact recorded navigation.
+      const permitted = action.spec.exploration?.purpose === 'return' ? command.url === source.target_url
+        : action.spec.exploration?.purpose === 'resume' && new URL(command.url).origin === origin;
+      if (!permitted) throw new Error('Source navigation is not a recorded return or resume within the entry origin.');
     } else {
       if (!command?.control) throw new Error('Source path includes a missing control.');
       observedCommand(command,before,origin);
@@ -67,7 +71,7 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
     steps.push({ source_action_id: action.action_id, source_prediction_id: action.prediction_id, source_model_request_id: prediction.request_id,
       command: structuredClone(command), goal: prediction.goal, expected_result: prediction.expected_result, before, after });
   }
-  if (!steps.length || steps.length > 12 || actions.length !== source.ordinal-startOrdinal+1) throw new Error('Source path has missing steps or exceeds the replay budget.');
+  if (!steps.length || steps.length > MAX_EXPLORATION_ACTIONS || actions.length !== source.ordinal-startOrdinal+1) throw new Error('Source path has missing steps or exceeds the replay budget.');
   return { reproduction_id: randomUUID(), source_run_id: source.run_id, source_action_id: sourceActionId,
     target_url: source.target_url, training_status: source.config.training_status, viewport_profile: profile, steps,auth_context:authContext };
 }

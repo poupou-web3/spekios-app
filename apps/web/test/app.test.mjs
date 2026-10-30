@@ -305,3 +305,12 @@ test('a pasted bare host becomes a launchable address and malformed input is exp
   ui.state.launchError='Paste the address of the app you want to test.';
   assert.match(ui.home(),/role="alert"[^>]*>.*Paste the address/);assert.match(ui.home(),/aria-invalid="true"/);
 });
+test('the run heading says whether earlier runs guided it and names reopened remembered pages',()=>{
+  const ui=view(),report=connectReview(ui);
+  report.run.config.app_memory={version:'app-memory-v1',enabled:false,scopes:[]};assert.match(ui.runView(),/· Fresh exploration/);
+  report.run.config.app_memory={version:'app-memory-v1',enabled:true,scopes:[{prior_runs:0}]};assert.match(ui.runView(),/· First remembered run/);
+  report.run.config.app_memory={version:'app-memory-v1',enabled:true,scopes:[{prior_runs:2}]};assert.match(ui.runView(),/· Guided by 2 earlier runs/);
+  delete report.run.config.app_memory;assert.doesNotMatch(ui.runView(),/earlier run|Fresh exploration/,'Runs recorded before memory show no label.');
+  report.actions[0].spec={...report.actions[0].spec,command:{type:'navigate',url:'https://app.test/products'},exploration:{purpose:'resume'}};
+  assert.match(ui.runView(),/Open remembered page/);
+});

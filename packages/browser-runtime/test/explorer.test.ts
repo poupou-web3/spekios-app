@@ -273,6 +273,14 @@ test('model-driven browser loop preserves evidence, graph and uncertainty', {
       assert.equal(covered.reason,'covered_or_unclickable_control');
       assert.ok(!fixture.requests.includes('/forbidden-covered'));
     });
+    await t.test('an exhausted time budget stops before dispatching another action', async () => {
+      let dispatched = 0;
+      const result = await run('/working', {maxActions:8, maxDurationMs:1, hooks:{afterDispatch:async () => { dispatched++; }}});
+      assert.equal(result.report.run.lifecycle, 'completed', result.report.run.error);
+      assert.equal(result.report.run.config.stop_reason, 'time_budget_reached');
+      assert.equal(result.report.run.config.limits.max_duration_ms, 1);
+      assert.equal(dispatched, 0);
+    });
     await t.test('missing before evidence prevents even initial navigation', async () => {
       let dispatched = 0;
       const result = await run('/working', {hooks:{ screenshot:async () => {throw new Error('injected image failure');}, afterDispatch:async () => {dispatched++;} }});

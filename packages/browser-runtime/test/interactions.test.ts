@@ -84,20 +84,60 @@ test('typed interactions retain independent evidence and reproduce their exact p
       assert.equal(result.report.model_requests.length,6);
       assert.equal(result.report.captures.length,12);
     });
-    await t.test('scroll reveals a previously offscreen control and survives exact replay',async()=>{
-      const source=await explore(store,fixture.url+'/scrolling/broken',{...options,maxActions:3});
+    await t.test('a control further down the page is observed, scrolled into view before acting and replayed exactly',async()=>{
+      const source=await explore(store,fixture.url+'/scrolling/broken',{...options,maxActions:2});
+      assert.equal(source.report.run.lifecycle,'completed',source.report.run.error);
+      assert.deepEqual(source.report.actions.map(a=>a.spec.command.type),['navigate','click']);
+      const initial=source.report.captures.find(c=>c.capture_id===source.report.actions[0].after_capture_id)!;
+      const below=initial.observation.controls!.find((c:ObservedControl)=>c.name==='Reveal details')!;
+      assert.equal(below.in_viewport,false);
+      assert.equal(below.rect,undefined);
+      assert.ok(below.page_y!>initial.observation.viewport.height);
+      const click=source.report.actions[1];
+      assert.equal(click.spec.command.control.in_viewport,false);
+      const before=source.report.captures.find(c=>c.capture_id===click.before_capture_id)!;
+      assert.ok(before.observation.scroll!.y>0);
+      const shown=before.observation.controls!.find((c:ObservedControl)=>c.name==='Reveal details')!;
+      assert.equal(shown.in_viewport,true);
+      assert.equal(shown.occluded,false);
+      const revealed=source.report.events.find(e=>e.event_type==='action.revealed'&&e.action_id===click.action_id)!;
+      assert.equal(revealed.payload.from.y,0);
+      assert.equal(revealed.payload.to.y,before.observation.scroll!.y);
+      assert.equal(click.assessment.verdict,'suspect');
+      const result=await reproduce(store,click.action_id,options);
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      assert.equal(result.report.reproductions[0].result.outcome,'reproduced');
+      assert.deepEqual(result.report.actions.map(a=>a.spec.command),source.report.actions.map(a=>a.spec.command));
+      assert.ok(result.report.events.some(e=>e.event_type==='action.revealed'));
+    });
+    await t.test('an explicit page scroll still reaches a lower control and survives exact replay',async()=>{
+      const source=await explore(store,fixture.url+'/scrolling/manual/broken',{...options,maxActions:3});
       assert.equal(source.report.run.lifecycle,'completed',source.report.run.error);
       assert.deepEqual(source.report.actions.map(a=>a.spec.command.type),['navigate','scroll','click']);
-      const initial=source.report.captures.find(c=>c.capture_id===source.report.actions[0].after_capture_id)!;
-      assert.ok(!initial.observation.controls?.some((c:ObservedControl)=>c.name==='Reveal details'));
       const scrolled=source.report.captures.find(c=>c.capture_id===source.report.actions[1].after_capture_id)!;
       assert.ok(scrolled.observation.scroll!.y>0);
-      assert.ok(scrolled.observation.controls?.some((c:ObservedControl)=>c.name==='Reveal details'));
+      assert.equal(scrolled.observation.controls!.find((c:ObservedControl)=>c.name==='Reveal details')!.in_viewport,true);
       assert.equal(source.report.actions[1].assessment.verdict,'no_issue_observed');
+      assert.ok(!source.report.events.some(e=>e.event_type==='action.revealed'),'A control already in view needs no reveal.');
       const result=await reproduce(store,source.report.actions[2].action_id,options);
       assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
       assert.equal(result.report.reproductions[0].result.outcome,'reproduced');
       assert.deepEqual(result.report.actions[1].spec.command,source.report.actions[1].spec.command);
+    });
+    await t.test('a lower control that turns out to be covered is skipped without dispatch',async()=>{
+      const result=await explore(store,fixture.url+'/scrolling/covered',{...options,maxActions:2});
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      const skipped=result.report.actions[1];
+      assert.equal(skipped.state,'skipped');
+      assert.equal(skipped.dispatched_at,null);
+      assert.equal(skipped.assessment.method,'reveal-guard');
+      assert.ok(skipped.before_capture_id);
+      assert.ok(result.report.events.some(e=>e.event_type==='exploration.reveal_failed'&&e.action_id===skipped.action_id));
+      const blocked=result.report.graph.frontier.filter((f:any)=>f.control.name==='Reveal details'&&f.status==='blocked');
+      assert.ok(blocked.some((f:any)=>f.reason==='unavailable_after_reveal'));
+      assert.equal(result.report.run.config.reveal_failures,1);
+      assert.ok(result.report.actions.slice(2).every(a=>a.spec.command.control?.name!=='Reveal details'));
+      assert.ok(!fixture.requests.includes('/forbidden-covered'));
     });
     await t.test('sensitive, read-only, covered and unsupported fields stay blocked while a checkbox can be unchecked',async()=>{
       const result=await explore(store,fixture.url+'/interaction-blocks',{...options,maxActions:3});

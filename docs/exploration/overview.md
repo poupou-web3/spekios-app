@@ -22,7 +22,9 @@ The same loop is available from the [workspace](../platform/workspace.md) at **h
 | `SCOUT_EXPLORER_PROVIDER` | `openrouter` | `openai`, `anthropic`, `openrouter`, or `meta` |
 | `SCOUT_EXPLORER_MODEL` | `openrouter/free` | Model ID. OpenRouter defaults to `openrouter/free`; Meta defaults to `muse-wonder-1.0` |
 | `SCOUT_EXPLORER_FREE_ONLY` | `true` | OpenRouter free-route constraint; not applicable to direct OpenAI, Claude, or Meta billing |
-| `SCOUT_EXPLORER_MAX_ACTIONS` | `6` | Includes initial navigation; integer 1–12 |
+| `SCOUT_EXPLORER_MAX_ACTIONS` | `20` | Includes initial navigation, returns and resumes; integer 1–50 |
+| `SCOUT_EXPLORER_MAX_MINUTES` | `30` | Wall-clock stop for one exploration; integer 1–180 |
+| `SCOUT_EXPLORER_APP_MEMORY` | `true` | Default for remembering explored pages and controls across runs; see [memory across runs](./planner.md#memory-across-runs) |
 | `SCOUT_EXPLORER_VIEWPORT` | `desktop` | `desktop` (800×600), `tablet` (768×1024), or `mobile` (390×844) |
 | `SCOUT_ALLOWED_ORIGINS` | `http://exploration-fixture:8082` | Extra origins for private, HTTP and internal apps. Public https sites do not need an entry |
 
@@ -75,7 +77,7 @@ Simulated-provider runs and the bundled controlled fixture are labeled `excluded
 
 The suite covers URL-only execution through the OpenAI, Anthropic and OpenRouter adapters, no-change failure, one-pixel change, graph branching/deduplication, access blocks with continued public coverage, cycle bounds, invented control rejection, invalid assessment evidence, provider outage, uncertain expectations, stale plans, missing before evidence and interruption recovery. The adversarial case proves output validation rejects an invented action; it does not prove that a live model is immune to prompt injection.
 
-The worker supports visible native buttons/links, text/search fields, single-select dropdowns, checkboxes/radios and document scrolling, with three responsive Chromium viewport profiles, at most 40 observed controls and one active local run. Unapproved form submission, keyboard shortcuts, custom widgets, nested/horizontal scrolling, iframes, downloads and popup/dialog workflows remain unsupported. Viewport matrix runs are separate sequential executions, not native-device tests. Other-origin resources and WebSockets are blocked, so apps that depend on them are outside this test setup. Full network/console traces beyond the bounded diagnostic window, semantic state projections, external identity-provider handoff, token/spend quotas, resume, parallel workers and deployment isolation remain unfinished.
+The worker supports visible native buttons/links, text/search fields, single-select dropdowns, checkboxes/radios and document scrolling, with three responsive Chromium viewport profiles, at most 120 observed controls per page (including ones further down, which are scrolled into view before acting) and one active local run. Unapproved form submission, keyboard shortcuts, custom widgets, nested/horizontal scrolling, iframes, downloads and popup/dialog workflows remain unsupported. Viewport matrix runs are separate sequential executions, not native-device tests. Other-origin resources and WebSockets are blocked, so apps that depend on them are outside this test setup. Full network/console traces beyond the bounded diagnostic window, semantic state projections, external identity-provider handoff, token/spend quotas, resume, parallel workers and deployment isolation remain unfinished.
 
 Queued explorations can opt into [bounded automatic rechecks](./automatic-reproduction.md) from the URL form. These start after the source completes, use its frozen expectations and viewport in a fresh browser, and retain human review as the confirmation step. CLI and historical runs are not retroactively scheduled.
 

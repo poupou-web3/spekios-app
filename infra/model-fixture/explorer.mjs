@@ -40,13 +40,21 @@ export function explorerReply(input) {
         expected_result:next[0]==='Preview selection'?'Preview ready becomes visible.':`${next[0]} reflects the requested value.`}]:[],stop_reason:next?null:'The filter journey has been observed.'};
     }
     if (input.page.url.includes('/scrolling')) {
-      const target=controls.find(c=>c.name==='Reveal details')||controls.find(c=>c.name==='Scroll page down');
+      // /manual keeps an explicit scroll before acting on a control further down.
+      const reveal=controls.find(c=>c.name==='Reveal details'),scroll=controls.find(c=>c.name==='Scroll page down');
+      const target=input.page.url.includes('/manual')&&reveal?.in_viewport===false&&scroll?scroll:reveal||scroll;
       return {candidates:target?[{control_id:target.control_id,action:{type:target.role==='scroll'?'scroll':'click'},goal:`Use ${target.name}`,likelihood:.9,
         expected_result:target.role==='scroll'?'Lower catalogue content becomes visible.':'Details revealed becomes visible.'}]:[],stop_reason:target?null:'No further catalogue interaction.'};
     }
     if (input.page.url.includes('/interaction-blocks')) {
       const target=controls.find(c=>c.name==='Include archived'&&c.checked);
       return {candidates:target?[{control_id:target.control_id,action:{type:'set_checked',checked:false},goal:'Exclude archived items',likelihood:.9,expected_result:'Archived items are excluded.'}]:[],stop_reason:target?null:'Access-dependent controls stay blocked.'};
+    }
+    if (input.page.url.includes('/atlas')) {
+      const weights={'Products':.7,'Compare plans':.9,'Pricing FAQ':.6};
+      const expected={'Products':'The Products destination becomes visible.','Compare plans':'Plans compared becomes visible.','Pricing FAQ':'Pricing answers become visible.'};
+      const candidates=controls.filter(c=>weights[c.name]!==undefined).map(c=>({control_id:c.control_id,goal:`Use ${c.name}`,likelihood:weights[c.name],expected_result:expected[c.name]}));
+      return {candidates,stop_reason:candidates.length?null:'The atlas journey has been observed.'};
     }
     if (input.page.url.includes('/changing-controls') || input.page.url.includes('/tree') || input.page.url.includes('/responsive')) {
       const weights = {'Catalog':.95,'Help':.8,'Open menu':.95,'Menu item':.65,'Save draft':.9,
@@ -75,7 +83,8 @@ export function explorerReply(input) {
   const broken = input.action.type==='submit' && url.includes('/journeys/broken') && input.after.text.includes('Service unavailable') || click && url.includes('/broken') && (
     input.action.control?.name === 'Save draft' && !input.after.text.includes('Saved') ||
     input.action.control?.name === 'Preview selection' && !input.after.text.includes('Preview ready') ||
-    input.action.control?.name === 'Reveal details' && !input.after.text.includes('Details revealed'));
+    input.action.control?.name === 'Reveal details' && !input.after.text.includes('Details revealed')) ||
+    click && url.includes('/atlas/') && input.action.control?.name === 'Pricing FAQ' && !input.after.text.includes('Pricing answers');
   const tiny = click && url.includes('/tiny');
   const uncertain = url.includes('/uncertain');
   return {verdict: broken || uncertain ? 'suspect' : 'no_issue_observed',

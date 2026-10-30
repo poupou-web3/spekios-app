@@ -45,6 +45,8 @@ export async function refresh(){
   try{
     const [runs,jobs,providers,access]=await Promise.all(['/v1/runs','/v1/browser-jobs','/v1/model-providers','/v1/browser-access'].map(get));
     if((token!==state.token||developmentAccess!==state.developmentAccess))return;
+    // Memory is shown only in Settings; other views do not poll it.
+    if(state.view==='settings'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess)state.memoryError=error.message;}}
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
     if(privateLogin&&!access.requests.some(a=>a.access_id===privateLogin.id&&['waiting','active'].includes(a.status)))await closePrivateLogin(false);
     if(state.runId){const id=state.runId;const report=await get('/v1/runs/'+id);if((token!==state.token||developmentAccess!==state.developmentAccess))return;if(id===state.runId){report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}

@@ -54,7 +54,7 @@ const counts = async () => JSON.parse(await postgres(
 const values = s => ({
   provider:s.provider,model:s.model,max_actions:s.maxActions,viewport_profile:s.viewportProfile,
   free_only:s.freeOnly,auto_reproduce:s.autoReproduce,max_auto_reproductions:s.maxAutoReproductions,
-  max_auto_replay_actions:s.maxAutoReplayActions,
+  max_auto_replay_actions:s.maxAutoReplayActions,app_memory:s.appMemory!==false,
 });
 async function saveSettings(settings) {
   const current=await get('/v1/exploration-settings');

@@ -22,6 +22,22 @@ export async function validateDispatch(page: Page, command: BrowserCommand, rule
     if(!current||blockedReason(current,new URL(page.url()).origin)||!isDeepStrictEqual(current.form,command.control.form)) throw new Error('Form permission or destination changed before dispatch.');
   }
 }
+export type Reveal = { from: { x: number; y: number }; to: { x: number; y: number } };
+// Bring a chosen control that was observed below the fold into view before the
+// action's before capture, using the same document scroll as a scroll action.
+// Nested scrolling containers are never scrolled.
+export async function revealControl(page: Page, command: BrowserCommand): Promise<Reveal|null> {
+  if (command.type==='navigate' || command.control.role==='scroll' || command.control.in_viewport!==false) return null;
+  const locator=page.getByRole(command.control.role,{name:command.control.name,exact:true});
+  if (await locator.count()!==1) throw new Error('Selected control does not resolve uniquely.');
+  return locator.evaluate(async element => {
+    const from={x:scrollX,y:scrollY},rect=element.getBoundingClientRect();
+    const maxY=Math.max(0,(document.scrollingElement?.scrollHeight??0)-innerHeight);
+    window.scrollTo({left:scrollX,top:Math.round(Math.min(maxY,Math.max(0,scrollY+rect.top-innerHeight/3))),behavior:'instant'});
+    await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+    return {from,to:{x:scrollX,y:scrollY}};
+  },undefined,{timeout:2000});
+}
 export async function dispatch(page: Page, command: BrowserCommand, rules?: TestFormRule[]): Promise<string|null> {
   if (command.type==='navigate') {
     const response=await page.goto(command.url,{waitUntil:'domcontentloaded',timeout:10000});
