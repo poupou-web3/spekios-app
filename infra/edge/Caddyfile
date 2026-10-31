@@ -1,0 +1,5 @@
+# Public workspace and API. The operator console is not on this listener.
+{$SCOUT_PUBLIC_HOST} {
+	encode gzip
+	reverse_proxy api:8080
+}

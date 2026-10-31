@@ -2,7 +2,7 @@
 {
   "title": "Run Scout locally",
   "description": "Start ScoutQA’s Rust API, Chromium worker, PostgreSQL, ClickHouse and private screenshot storage with Docker Compose.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-10-31",
   "sidebar": {
     "order": 1
   }
@@ -61,5 +61,15 @@ just models
 ~~~
 
 Provider availability is distinct from API health. Then [submit your first URL](../first-run/).
+
+## Deploy this stack on a host
+
+Docker is enough. From the repository root:
+
+~~~sh
+just deploy
+~~~
+
+This starts the workspace, operator console, API, browser workers, PostgreSQL, ClickHouse and the evidence bucket, then applies the database schemas. The workspace stays on loopback until **SCOUT_PUBLISH** is set to a host address such as `0.0.0.0` (plain HTTP). For a public HTTPS name, set **SCOUT_PUBLIC_HOST** and **SCOUT_PUBLIC_ORIGIN** in `.env` and run `just deploy edge`. That proxy listens on ports 80 and 443. The direct workspace port and the operator console stay on this machine.
 
 Stopping containers preserves volumes. Do not delete volumes to fix an ordinary startup problem; they contain recordings, database history and saved sessions. See [troubleshooting](../../operators/troubleshooting/).

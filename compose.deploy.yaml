@@ -1,0 +1,28 @@
+# Host deploy overlay. Use it with compose.yaml:
+#   COMPOSE_FILE=compose.yaml:compose.deploy.yaml
+# The edge profile is the public HTTPS entry. It does not publish the operator console.
+
+name: scout-qa
+
+services:
+  edge:
+    profiles: [edge]
+    image: caddy:2-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    environment:
+      SCOUT_PUBLIC_HOST: ${SCOUT_PUBLIC_HOST:-}
+    ports:
+      - '${SCOUT_EDGE_PUBLISH:-0.0.0.0}:80:80'
+      - '${SCOUT_EDGE_PUBLISH:-0.0.0.0}:443:443'
+    volumes:
+      - ./infra/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge-data:/data
+      - edge-config:/config
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+
+volumes:
+  edge-data:
+  edge-config:

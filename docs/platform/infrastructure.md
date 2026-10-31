@@ -12,7 +12,7 @@ Requires Docker with Compose and Node.js 22 or newer. From the repository direct
 bash scripts/start-local.sh
 ```
 
-This preserves or creates private credentials, installs pinned utilities, builds/starts services, applies archive/runtime/model schemas, and waits for gateway readiness. `just dev` uses the same workflow. Initial setup needs network access for packages/images. Credentials live in ignored `.env` with mode `0600` and are not printed. Preserve it alongside the volumes. Changing passwords in this file does not rotate credentials already stored in PostgreSQL.
+This preserves or creates private credentials, installs pinned utilities, builds/starts services, applies archive/runtime/model schemas, and waits for gateway readiness. `just dev` uses the same workflow. `just deploy` starts the workspace, operator console, API, workers and databases on a host and applies the same schemas; see [deployment](./deployment.md). Initial setup needs network access for packages/images. Credentials live in ignored `.env` with mode `0600` and are not printed. Preserve it alongside the volumes. Changing passwords in this file does not rotate credentials already stored in PostgreSQL.
 
 | Service | Version | Host access | Persistent volume | Container cap |
 | --- | --- | --- | --- | --- |

@@ -43,6 +43,15 @@ up:
 
 dev: up
 
+# Deploy the workspace, operator console, API, workers, Postgres, ClickHouse and evidence storage.
+# `just deploy edge` also publishes HTTPS for SCOUT_PUBLIC_HOST.
+deploy mode="":
+    bash scripts/deploy.sh {{mode}}
+
+# Stop that deployment, including the HTTPS proxy, and keep the database volumes.
+deploy-stop:
+    COMPOSE_FILE=compose.yaml:compose.deploy.yaml docker compose --profile edge stop
+
 # Recreate the API so it loads the current .env. Does not rebuild the image.
 reload-env:
     docker compose up -d --no-deps --force-recreate --wait api
