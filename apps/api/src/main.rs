@@ -1,6 +1,5 @@
 use scout_api::{AppState, router};
 use std::{env, net::SocketAddr, sync::Arc, time::Duration};
-use tokio_postgres::NoTls;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,76 +25,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = AppState::new(None, &token)?
         .with_dev_auth_bypass(env::var("SCOUT_DEV_AUTH_BYPASS").as_deref() == Ok("true"))
         .with_public_origin(env::var("SCOUT_PUBLIC_ORIGIN").ok().as_deref())?;
-    if let Ok(host) = env::var("PGHOST") {
-        let mut config = tokio_postgres::Config::new();
-        config
-            .host(&host)
-            .user("scout")
-            .dbname("scout")
-            .password(
-                env::var("POSTGRES_PASSWORD")
-                    .map_err(|_| "POSTGRES_PASSWORD is required with PGHOST")?,
-            )
-            .connect_timeout(Duration::from_secs(5))
-            .options("-c statement_timeout=5000 -c default_transaction_read_only=on");
-        let (client, connection) = config
-            .connect(NoTls)
-            .await
-            .map_err(|_| "Database connection failed")?;
-        tokio::spawn(async move {
-            if connection.await.is_err() {
-                eprintln!("database_connection_closed");
-                std::process::exit(1);
-            }
-        });
-        state.database = Some(Arc::new(client));
-        config.options("-c statement_timeout=10000");
-        let (writer, connection) = config
-            .connect(NoTls)
-            .await
-            .map_err(|_| "Gateway database connection failed")?;
-        tokio::spawn(async move {
-            if connection.await.is_err() {
-                eprintln!("gateway_database_connection_closed");
-                std::process::exit(1);
-            }
-        });
-        let gateway = scout_api::gateway::Gateway::from_env(writer)?;
+    if env::var("PGHOST").is_ok() {
+        let database = Arc::new(scout_api::db::Postgres::connect().await?);
+        state.database = Some(database.clone());
+        let gateway = scout_api::gateway::Gateway::from_env(database.clone())?;
         gateway.start();
         state.gateway = Some(gateway);
-        let (jobs, connection) = config
-            .connect(NoTls)
-            .await
-            .map_err(|_| "Job database connection failed")?;
-        tokio::spawn(async move {
-            if connection.await.is_err() {
-                eprintln!("job_database_connection_closed");
-                std::process::exit(1);
-            }
-        });
-        state.jobs = Some(scout_api::jobs::Queue::from_env(jobs));
-        let (reviews, connection) = config
-            .connect(NoTls)
-            .await
-            .map_err(|_| "Review database connection failed")?;
-        tokio::spawn(async move {
-            if connection.await.is_err() {
-                eprintln!("review_database_connection_closed");
-                std::process::exit(1);
-            }
-        });
-        state.reviews = Some(scout_api::reviews::Reviews::new(reviews));
-        let (identity, connection) = config
-            .connect(NoTls)
-            .await
-            .map_err(|_| "Identity database connection failed")?;
-        tokio::spawn(async move {
-            if connection.await.is_err() {
-                eprintln!("identity_database_connection_closed");
-                std::process::exit(1);
-            }
-        });
-        state.identities = Some(scout_api::identity::Identities::new(identity));
+        state.jobs = Some(scout_api::jobs::Queue::from_env(database.clone()));
+        state.reviews = Some(scout_api::reviews::Reviews::new(database.clone()));
+        state.identities = Some(scout_api::identity::Identities::new(database));
     }
     let address: SocketAddr = env::var("SCOUT_API_BIND")
         .unwrap_or_else(|_| "127.0.0.1:18080".into())

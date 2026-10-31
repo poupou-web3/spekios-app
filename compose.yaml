@@ -12,6 +12,11 @@ services:
       SCOUT_PUBLIC_ORIGIN: ${SCOUT_PUBLIC_ORIGIN:-}
       SCOUT_API_BIND: '0.0.0.0:8080'
       PGHOST: postgres
+      PGPORT: ${PGPORT:-5432}
+      PGUSER: ${PGUSER:-scout}
+      PGDATABASE: ${PGDATABASE:-scout}
+      PGSSLMODE: ${PGSSLMODE:-disable}
+      SCOUT_DB_POOL_MAX: ${SCOUT_DB_POOL_MAX:-8}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/setup-local.mjs}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Run node scripts/setup-local.mjs}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Run node scripts/setup-local.mjs}

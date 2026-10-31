@@ -49,7 +49,7 @@ export async function refresh(){
     if(state.view==='settings'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess)state.memoryError=error.message;}}
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
     if(privateLogin&&!access.requests.some(a=>a.access_id===privateLogin.id&&['waiting','active'].includes(a.status)))await closePrivateLogin(false);
-    if(state.runId){const id=state.runId;const report=await get('/v1/runs/'+id);if((token!==state.token||developmentAccess!==state.developmentAccess))return;if(id===state.runId){report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
+    if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
     state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();render();followSubmittedJob();
   }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess)){state.error=error.message;render();}}finally{refreshing=false;}
 }
@@ -58,7 +58,7 @@ export async function route(){
   state.view=parts[0]==='settings'?'settings':'workspace';
   const id=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'')?parts[1]:null;
   if(state.trackedJobId&&(state.view!=='workspace'||id))clearTrackedJob();
-  if(id!==state.runId){state.runId=id;state.report=null;state.actionId=null;state.tab='actions';state.image='after';state.findingFilter='needs_review';clearImages();}
+  if(id!==state.runId){state.runId=id;state.report=null;state.reportEtag='';state.actionId=null;state.tab='actions';state.image='after';state.findingFilter='needs_review';clearImages();}
   const action=/^[\da-f-]{36}$/.test(parts[2]||'')?parts[2]:null;if(action){state.actionId=action;state.tab='actions';}
   closeReportExport();state.drawer=null;render();await refresh();
   if(state.focusLaunch&&state.view==='workspace'&&!state.runId){state.focusLaunch=false;document.getElementById('target-url')?.focus();}

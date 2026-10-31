@@ -11,8 +11,6 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{env, sync::Arc};
-use tokio::sync::Mutex;
-use tokio_postgres::Client;
 use uuid::Uuid;
 
 /// Executed browser actions per exploration, matching the browser runtime.
@@ -29,7 +27,7 @@ fn enabled() -> bool {
 
 #[derive(Clone)]
 pub struct Queue {
-    db: Arc<Mutex<Client>>,
+    db: Arc<crate::db::Postgres>,
     principal: crate::identity::Principal,
     pub settings: Value,
 }
@@ -400,18 +398,16 @@ fn prepare_submission(
 }
 
 impl Queue {
-    // The main AppState connection is intentionally read-only. Focus admission
-    // shares the queue writer and performs its transaction inside PostgreSQL.
+    // Read requests use the read-only pool. Focus admission checks out a write
+    // connection and performs its transaction inside PostgreSQL.
     pub async fn submit_steering(
         &self,
         run_id: Uuid,
         input: &crate::steering::Submission,
     ) -> Result<Value, &'static str> {
         let principal = &self.principal;
-        let row = self
-            .db
-            .lock()
-            .await
+        let db = self.db.write().await?;
+        let row = db
             .query_one(
                 "SELECT scout_submit_steering($1,$2,$3,$4,$5,$6,$7)",
                 &[
@@ -437,7 +433,7 @@ impl Queue {
         sql: &str,
         params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
     ) -> Result<Option<Value>, &'static str> {
-        let db = self.db.lock().await;
+        let db = self.db.write().await?;
         let row = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             db.query_opt(sql, params),
@@ -449,7 +445,7 @@ impl Queue {
     }
 
     pub async fn forget_memory(&self, scope_id: Uuid) -> Result<Value, &'static str> {
-        let mut db = self.db.lock().await;
+        let mut db = self.db.write().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         let row = tx.query_opt("SELECT origin,viewport_profile,auth_scope,execution_mode,EXISTS(SELECT 1 FROM runtime_runs r WHERE r.run_id=s.last_run_id AND r.lifecycle='active') FROM app_memory_scopes s WHERE scope_id=$1 AND workspace_id=$2 AND user_id=$3 FOR UPDATE",&[&scope_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("memory_scope_not_found")?;
         if row.get::<_, bool>(4) {
@@ -475,7 +471,7 @@ impl Queue {
         }
     }
     pub async fn effective_settings(&self) -> Result<Value, &'static str> {
-        let db = self.db.lock().await;
+        let db = self.db.write().await?;
         let saved = db.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?;
         let (revision, settings) = saved
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
@@ -487,7 +483,7 @@ impl Queue {
 
     async fn save_settings(&self, input: SettingsSubmission) -> Result<Value, &'static str> {
         let input = input.normalize()?;
-        let mut db = self.db.lock().await;
+        let mut db = self.db.write().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // New job admissions and preference revisions have one serialization
         // point across API instances. Already admitted jobs remain immutable.
@@ -524,7 +520,7 @@ impl Queue {
     }
 
     async fn cancel(&self, id: Uuid, by_run: bool) -> Result<Value, &'static str> {
-        let mut db = self.db.lock().await;
+        let mut db = self.db.write().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // Always lock the job before its run, matching the worker's linking
         // transaction. Dispatch/finalization serialize on the run row.
@@ -602,7 +598,7 @@ impl Queue {
 
     async fn cancel_automatic(&self, run_id: Uuid) -> Result<Value, &'static str> {
         let (cancellation_id, reused) = {
-            let mut db = self.db.lock().await;
+            let mut db = self.db.write().await?;
             let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
             // Match scheduler order: source job -> source run -> child jobs.
             // Persist every child stop intent in this same transaction so an
@@ -663,14 +659,14 @@ impl Queue {
             tx.commit().await.map_err(|_| "database_unavailable")?;
             (cancellation_id, existing.is_some())
         };
-        let db = self.db.lock().await;
+        let db = self.db.write().await?;
         let remaining: i64 = db.query_one("SELECT count(*) FROM automatic_reproduction_tasks t JOIN browser_jobs j ON j.job_id=t.child_job_id WHERE t.source_run_id=$1 AND j.workspace_id=$2 AND j.user_id=$3 AND j.parent_job_id=t.source_job_id AND j.automatic_source_action_id=t.source_action_id AND j.status IN ('queued','running')",&[&run_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.get(0);
         Ok(
             json!({"cancellation_id":cancellation_id,"run_id":run_id,"status":if remaining>0{"cancelling"}else{"cancelled"},"reused":reused}),
         )
     }
 
-    pub fn from_env(db: Client) -> Arc<Self> {
+    pub fn from_env(db: Arc<crate::db::Postgres>) -> Arc<Self> {
         let provider = env::var("SCOUT_EXPLORER_PROVIDER").unwrap_or_else(|_| "openrouter".into());
         let model = env::var("SCOUT_EXPLORER_MODEL")
             .ok()
@@ -681,7 +677,7 @@ impl Queue {
                 _ => String::new(),
             });
         Arc::new(Self {
-            db: Arc::new(Mutex::new(db)),
+            db,
             principal: crate::identity::Principal::default(),
             settings: json!({
                 "provider":provider,"model":model,"freeOnly":provider=="openrouter" && env::var("SCOUT_EXPLORER_FREE_ONLY").as_deref()!=Ok("false"),
@@ -701,7 +697,7 @@ impl Queue {
         input: Submission,
         providers: Value,
     ) -> Result<Value, &'static str> {
-        let mut db = self.db.lock().await;
+        let mut db = self.db.write().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // Serialize admission across API instances, including the queue limit.
         tx.query_one("SELECT pg_advisory_xact_lock(736268194002)", &[])

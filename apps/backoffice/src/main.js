@@ -32,7 +32,7 @@ root.addEventListener('click',async e=>{
   if(el.tagName==='A')e.preventDefault();
   if(action==='ops-tab')selectTab(el.dataset.value);
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Back office refreshed.');}
-  if(action==='logout'){state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.drawer=null;state.error='';sessionStorage.removeItem('scout.backoffice-token');login();}
+  if(action==='logout'){state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.error='';sessionStorage.removeItem('scout.backoffice-token');login();}
   if(action==='cancel-run'||action==='cancel-job')await cancelWork(action==='cancel-run'?'run':'job',el.dataset.id);
   if(action==='job-error'){state.drawer={title:'Browser job',raw:state.jobs.find(j=>j.job_id===el.dataset.id)};render();}
   if(action==='job-lineage'){const job=state.jobs.find(j=>j.job_id===el.dataset.id);state.drawer={title:'Automatic reproduction lineage',raw:{parent_job_id:job?.parent_job_id,source_action_id:job?.automatic_source_action_id,child_job_id:job?.job_id,note:'The parent job is outside the recent queue view. Inspect the child run to follow its source action.'}};render();}

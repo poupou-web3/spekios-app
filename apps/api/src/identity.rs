@@ -12,8 +12,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio_postgres::Client;
 use uuid::Uuid;
 
 pub const AGENT_SCOPES: &[&str] = &["runs:read", "runs:write", "usage:read"];
@@ -77,7 +75,7 @@ impl FromRequestParts<AppState> for ScopedState {
     }
 }
 pub struct Identities {
-    pub(crate) db: Mutex<Client>,
+    db: Arc<crate::db::Postgres>,
 }
 fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
@@ -100,11 +98,14 @@ fn unavailable() -> Response {
     )
 }
 impl Identities {
-    pub fn new(db: Client) -> Arc<Self> {
-        Arc::new(Self { db: Mutex::new(db) })
+    pub fn new(db: Arc<crate::db::Postgres>) -> Arc<Self> {
+        Arc::new(Self { db })
+    }
+    pub(crate) async fn write(&self) -> Result<crate::db::Conn, ()> {
+        self.db.write().await.map_err(|_| ())
     }
     pub async fn authenticate(&self, token: &str) -> Result<Option<Principal>, ()> {
-        let db = self.db.lock().await;
+        let db = self.write().await?;
         let row = db.query_opt("UPDATE workspace_credentials c SET last_used_at=now() FROM workspaces w WHERE c.workspace_id=w.workspace_id AND c.token_sha256=$1 AND c.revoked_at IS NULL AND c.expires_at>now() AND (c.agent_id IS NULL OR EXISTS(SELECT 1 FROM agent_identities a WHERE a.agent_id=c.agent_id AND a.workspace_id=c.workspace_id AND a.revoked_at IS NULL)) AND (c.oauth_session_id IS NULL OR EXISTS(SELECT 1 FROM oauth_sessions s WHERE s.session_id=c.oauth_session_id AND s.revoked_at IS NULL AND s.expires_at>now())) RETURNING c.workspace_id,w.owner_user_id,c.agent_id,c.credential_id,c.scopes,w.name,c.audience",&[&digest(token)]).await.map_err(|_|())?;
         Ok(row.map(|r| Principal {
             workspace_id: r.get(0),
@@ -119,7 +120,7 @@ impl Identities {
         }))
     }
     pub async fn audit(&self, p: &Principal, operation: &str, outcome: &str) -> Result<(), ()> {
-        self.db.lock().await.execute("INSERT INTO identity_audit(event_id,workspace_id,agent_id,credential_id,operation,outcome,request_id) VALUES($1,$2,$3,$4,$5,$6,$7)",
+        self.write().await?.execute("INSERT INTO identity_audit(event_id,workspace_id,agent_id,credential_id,operation,outcome,request_id) VALUES($1,$2,$3,$4,$5,$6,$7)",
             &[&Uuid::new_v4(),&p.workspace_id,&p.agent_id,&p.credential_id,&operation,&outcome,&p.request_id]).await.map_err(|_|())?;
         Ok(())
     }
@@ -149,7 +150,9 @@ pub async fn create_workspace(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -188,7 +191,9 @@ pub async fn begin(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -230,7 +235,9 @@ pub async fn poll(State(state): State<AppState>, Json(input): Json<PollInput>) -
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -307,7 +314,11 @@ pub async fn connection(ScopedState(state): ScopedState, Path(raw): Path<String>
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    match store.db.lock().await.query_opt("SELECT jsonb_build_object('agent_name',agent_name,'scopes',scopes,'status',status,'expires_at',expires_at,'workspace_id',$2::uuid,'credential_lifetime_days',30) FROM agent_connections WHERE user_code=$1 AND expires_at>now() AND (workspace_id IS NULL OR workspace_id=$2)",&[&code,&state.principal.workspace_id]).await {
+    let db = match store.write().await {
+        Ok(db) => db,
+        Err(()) => return unavailable(),
+    };
+    match db.query_opt("SELECT jsonb_build_object('agent_name',agent_name,'scopes',scopes,'status',status,'expires_at',expires_at,'workspace_id',$2::uuid,'credential_lifetime_days',30) FROM agent_connections WHERE user_code=$1 AND expires_at>now() AND (workspace_id IS NULL OR workspace_id=$2)",&[&code,&state.principal.workspace_id]).await {
         Ok(Some(row))=>Json(row.get::<_,Value>(0)).into_response(),Ok(None)=>error(StatusCode::NOT_FOUND,"connection_not_found"),Err(_)=>unavailable()
     }
 }
@@ -325,7 +336,11 @@ pub async fn decide(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    match store.db.lock().await.execute("UPDATE agent_connections SET status=$3,workspace_id=$2 WHERE user_code=$1 AND status='pending' AND expires_at>now()",&[&code,&state.principal.workspace_id,&if input.approve{"approved"}else{"denied"}]).await {
+    let db = match store.write().await {
+        Ok(db) => db,
+        Err(()) => return unavailable(),
+    };
+    match db.execute("UPDATE agent_connections SET status=$3,workspace_id=$2 WHERE user_code=$1 AND status='pending' AND expires_at>now()",&[&code,&state.principal.workspace_id,&if input.approve{"approved"}else{"denied"}]).await {
         Ok(1)=>Json(json!({"status":if input.approve{"approved"}else{"denied"}})).into_response(),Ok(_)=>error(StatusCode::CONFLICT,"connection_unavailable"),Err(_)=>unavailable()
     }
 }
@@ -336,7 +351,11 @@ pub async fn agents(ScopedState(state): ScopedState) -> Response {
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    match store.db.lock().await.query("SELECT jsonb_build_object('agent_id',a.agent_id,'name',a.name,'created_at',a.created_at,'revoked_at',COALESCE(a.revoked_at,s.revoked_at),'scopes',c.scopes,'last_used_at',(SELECT max(k.last_used_at) FROM workspace_credentials k WHERE k.agent_id=a.agent_id AND k.workspace_id=a.workspace_id),'expires_at',COALESCE(s.expires_at,c.expires_at),'connection_kind',CASE WHEN c.oauth_session_id IS NULL THEN 'native_connector' ELSE 'browser_oauth' END) FROM agent_identities a JOIN LATERAL (SELECT * FROM workspace_credentials k WHERE k.agent_id=a.agent_id AND k.workspace_id=a.workspace_id ORDER BY k.created_at DESC,k.credential_id DESC LIMIT 1) c ON true LEFT JOIN oauth_sessions s ON s.session_id=c.oauth_session_id WHERE a.workspace_id=$1 ORDER BY a.created_at DESC LIMIT 100",&[&state.principal.workspace_id]).await {
+    let db = match store.write().await {
+        Ok(db) => db,
+        Err(()) => return unavailable(),
+    };
+    match db.query("SELECT jsonb_build_object('agent_id',a.agent_id,'name',a.name,'created_at',a.created_at,'revoked_at',COALESCE(a.revoked_at,s.revoked_at),'scopes',c.scopes,'last_used_at',(SELECT max(k.last_used_at) FROM workspace_credentials k WHERE k.agent_id=a.agent_id AND k.workspace_id=a.workspace_id),'expires_at',COALESCE(s.expires_at,c.expires_at),'connection_kind',CASE WHEN c.oauth_session_id IS NULL THEN 'native_connector' ELSE 'browser_oauth' END) FROM agent_identities a JOIN LATERAL (SELECT * FROM workspace_credentials k WHERE k.agent_id=a.agent_id AND k.workspace_id=a.workspace_id ORDER BY k.created_at DESC,k.credential_id DESC LIMIT 1) c ON true LEFT JOIN oauth_sessions s ON s.session_id=c.oauth_session_id WHERE a.workspace_id=$1 ORDER BY a.created_at DESC LIMIT 100",&[&state.principal.workspace_id]).await {
         Ok(rows)=>Json(json!({"agents":rows.iter().map(|r|r.get::<_,Value>(0)).collect::<Vec<_>>(),"limit":100})).into_response(),Err(_)=>unavailable()
     }
 }
@@ -347,7 +366,9 @@ pub async fn revoke(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Re
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };

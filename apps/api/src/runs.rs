@@ -3,11 +3,32 @@ use crate::{AppState, error, identity::ScopedState, query};
 use axum::{
     Json,
     extract::Path,
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
+
+/// Cheap fingerprint of the run document. Open workspace tabs send it back as
+/// `If-None-Match` so an unchanged report is not rebuilt or transferred.
+const SNAPSHOT_SQL: &str = "SELECT to_jsonb(md5(concat_ws('|'
+  ,md5(to_jsonb(r)::text)
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE state='completed'), count(*) FILTER (WHERE assessment->>'verdict'='suspect'), coalesce(max(finished_at)::text,'')) FROM runtime_actions a WHERE a.run_id=r.run_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE status='available'), count(*) FILTER (WHERE status='failed')) FROM runtime_captures c WHERE c.run_id=r.run_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE status='available')) FROM runtime_artifacts a WHERE a.run_id=r.run_id),'')
+  ,coalesce((SELECT max(seq)::text FROM runtime_events e WHERE e.run_id=r.run_id),'')
+  ,coalesce((SELECT count(*)::text FROM exploration_states s WHERE s.run_id=r.run_id),'')
+  ,coalesce((SELECT count(*)::text FROM exploration_edges e WHERE e.run_id=r.run_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE status='unexplored'), count(*) FILTER (WHERE status='blocked')) FROM exploration_frontier f WHERE f.run_id=r.run_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE status='requested'), coalesce(max(finished_at)::text,'')) FROM exploration_decisions d WHERE d.run_id=r.run_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), coalesce(max(created_at)::text,'')) FROM runtime_reproductions v WHERE v.source_run_id=r.run_id OR v.replay_run_id=r.run_id),'')
+  ,coalesce((SELECT string_agg(t.status || ':' || coalesce(j.status,'') || ':' || coalesce(j.cancel_id::text,'') || ':' || coalesce(t.updated_at::text,''), ',' ORDER BY t.task_id) FROM automatic_reproduction_tasks t LEFT JOIN browser_jobs j ON j.job_id=t.child_job_id AND j.workspace_id=r.workspace_id AND j.user_id=r.user_id WHERE t.source_run_id=r.run_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), coalesce(max(revision),0)) FROM finding_reviews f WHERE f.workspace_id=r.workspace_id AND f.user_id=r.user_id AND (f.run_id=r.run_id OR f.action_id IN (SELECT action_id FROM runtime_actions WHERE run_id=r.run_id))),'')
+  ,coalesce((SELECT count(*)::text FROM issue_occurrences o WHERE o.run_id=r.run_id AND o.workspace_id=r.workspace_id),'')
+  ,coalesce((SELECT v.status || ':' || coalesce(v.outcome,'') FROM issue_verifications v WHERE v.run_id=r.run_id AND v.workspace_id=r.workspace_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE state IN ('queued','preparing','dispatched')), coalesce(max(finished_at)::text,'')) FROM model_requests m WHERE m.run_id=r.run_id AND m.workspace_id=r.workspace_id AND m.user_id=r.user_id),'')
+  ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE c.state='completed'), coalesce(max(c.finished_at)::text,''), coalesce(sum(c.input_tokens),0), coalesce(sum(c.output_tokens),0)) FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=r.workspace_id AND m.user_id=r.user_id),'')
+))) FROM runtime_runs r WHERE r.run_id=$1 AND r.workspace_id=$2 AND r.user_id=$3";
 
 pub async fn list(ScopedState(state): ScopedState) -> Response {
     let sql = "SELECT jsonb_build_object('runs',COALESCE(jsonb_agg(to_jsonb(r)||jsonb_build_object('summary',(
@@ -35,11 +56,66 @@ pub async fn list(ScopedState(state): ScopedState) -> Response {
     }
 }
 
-pub async fn get(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
+pub async fn get(
+    ScopedState(state): ScopedState,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Response {
+    let token = match snapshot(&state, id).await {
+        Ok(Some(token)) => token,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "run_not_found"),
+        Err(response) => return response,
+    };
+    let etag = format!("\"{token}\"");
+    if not_modified(
+        headers
+            .get(header::IF_NONE_MATCH)
+            .and_then(|value| value.to_str().ok()),
+        &etag,
+    ) {
+        return with_etag(StatusCode::NOT_MODIFIED.into_response(), &etag);
+    }
     match load(&state, id).await {
-        Ok(value) => Json(value).into_response(),
+        Ok(value) => with_etag(Json(value).into_response(), &etag),
         Err(response) => response,
     }
+}
+
+async fn snapshot(state: &AppState, id: Uuid) -> Result<Option<String>, Response> {
+    match query(
+        state,
+        SNAPSHOT_SQL,
+        &[&id, &state.principal.workspace_id, &state.principal.user_id],
+    )
+    .await?
+    {
+        Some(Value::String(token))
+            if token.len() == 32 && token.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+        {
+            Ok(Some(token))
+        }
+        Some(_) => Err(error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+        )),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn not_modified(header: Option<&str>, etag: &str) -> bool {
+    header.is_some_and(|header| {
+        header.split(',').any(|part| {
+            let part = part.trim();
+            part == "*" || part == etag || part.strip_prefix("W/") == Some(etag)
+        })
+    })
+}
+
+fn with_etag(mut response: Response, etag: &str) -> Response {
+    if let Ok(value) = HeaderValue::from_str(etag) {
+        response.headers_mut().insert(header::ETAG, value);
+    }
+    response
 }
 
 pub(crate) async fn load(state: &AppState, id: Uuid) -> Result<Value, Response> {
@@ -92,5 +168,21 @@ pub async fn capture(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> R
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "capture_not_found"),
         Err(response) => response,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::not_modified;
+
+    #[test]
+    fn unchanged_run_reports_skip_the_body() {
+        let etag = "\"abc123\"";
+        assert!(not_modified(Some("\"abc123\""), etag));
+        assert!(not_modified(Some("W/\"abc123\""), etag));
+        assert!(not_modified(Some(" \"abc123\" , \"other\""), etag));
+        assert!(not_modified(Some("*"), etag));
+        assert!(!not_modified(None, etag));
+        assert!(!not_modified(Some("\"different\""), etag));
     }
 }

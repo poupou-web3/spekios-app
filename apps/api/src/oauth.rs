@@ -208,7 +208,9 @@ pub async fn register(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -294,7 +296,9 @@ pub async fn authorize(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -342,7 +346,11 @@ pub async fn review(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Re
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    match store.db.lock().await.query_opt("SELECT jsonb_build_object('authorization_id',a.authorization_id,'agent_name',c.name,'redirect_uri',a.redirect_uri,'scopes',a.scopes,'status',a.status,'expires_at',a.expires_at,'workspace_id',$2::uuid) FROM oauth_authorizations a JOIN oauth_clients c USING(client_id) WHERE a.authorization_id=$1 AND a.expires_at>now() AND (a.workspace_id IS NULL OR a.workspace_id=$2)",&[&id,&state.principal.workspace_id]).await {
+    let db = match store.write().await {
+        Ok(db) => db,
+        Err(()) => return unavailable(),
+    };
+    match db.query_opt("SELECT jsonb_build_object('authorization_id',a.authorization_id,'agent_name',c.name,'redirect_uri',a.redirect_uri,'scopes',a.scopes,'status',a.status,'expires_at',a.expires_at,'workspace_id',$2::uuid) FROM oauth_authorizations a JOIN oauth_clients c USING(client_id) WHERE a.authorization_id=$1 AND a.expires_at>now() AND (a.workspace_id IS NULL OR a.workspace_id=$2)",&[&id,&state.principal.workspace_id]).await {
         Ok(Some(row))=>Json(row.get::<_,Value>(0)).into_response(),Ok(None)=>error(StatusCode::NOT_FOUND,"authorization_unavailable"),Err(_)=>unavailable()
     }
 }
@@ -363,7 +371,9 @@ pub async fn decide(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -460,7 +470,9 @@ pub async fn token(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
@@ -592,7 +604,9 @@ pub async fn revoke(
     let Some(store) = &state.identities else {
         return unavailable();
     };
-    let mut db = store.db.lock().await;
+    let Ok(mut db) = store.write().await else {
+        return unavailable();
+    };
     let Ok(tx) = db.transaction().await else {
         return unavailable();
     };
