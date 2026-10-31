@@ -4,6 +4,7 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { workspaceId, userId, isUuid, type Capture, type Observation } from './contracts.js';
 
 export const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -36,23 +37,46 @@ export class Store {
     if(!isUuid(scope.workspaceId)||!isUuid(scope.userId))throw new Error('Invalid workspace scope.');
     return this.owner.run(scope,body);
   }
-  readonly pool = new pg.Pool({ host: process.env.PGHOST ?? 'postgres', user: 'scout', database: 'scout',
-    password: required('POSTGRES_PASSWORD'), max: 4, connectionTimeoutMillis: 5000, statement_timeout: 15000 });
-  readonly s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT ?? 'http://evidence:8333', region: 'us-east-1',
-    forcePathStyle: true, credentials: { accessKeyId: required('S3_ACCESS_KEY_ID'), secretAccessKey: required('S3_SECRET_ACCESS_KEY') },
-    maxAttempts: 2, requestHandler: { requestTimeout: 15000, connectionTimeout: 5000 } });
+  readonly pool: pg.Pool;
+  readonly s3: S3Client;
+  private readonly ownsResources: boolean;
   readonly bucket = 'qa-evidence';
   readonly spool = process.env.RECORDER_SPOOL ?? '/data/recorder';
   client!: pg.PoolClient;
 
+  // Jobs and browser slots each hold a connection for the whole run. Eight slots
+  // need the session, the slot, this store and the worker lease, with room left.
+  constructor(shared?: { pool: pg.Pool; s3: S3Client }) {
+    this.ownsResources = !shared;
+    this.pool = shared?.pool ?? new pg.Pool({ host: process.env.PGHOST ?? 'postgres', user: 'scout', database: 'scout',
+      password: required('POSTGRES_PASSWORD'), max: 24, connectionTimeoutMillis: 5000, statement_timeout: 15000 });
+    this.s3 = shared?.s3 ?? new S3Client({ endpoint: process.env.S3_ENDPOINT ?? 'http://evidence:8333', region: 'us-east-1',
+      forcePathStyle: true, credentials: { accessKeyId: required('S3_ACCESS_KEY_ID'), secretAccessKey: required('S3_SECRET_ACCESS_KEY') },
+      maxAttempts: 2, requestHandler: { requestTimeout: 15000, connectionTimeout: 5000 } });
+  }
   async open() { this.client = await this.pool.connect(); return this; }
-  async close() { this.client?.release(); await this.pool.end(); this.s3.destroy(); }
+  // A session has its own connection and scope so concurrent jobs do not share a transaction.
+  session() { return new Store({ pool: this.pool, s3: this.s3 }).open(); }
+  async close() {
+    this.client?.release();
+    this.client = undefined as never;
+    if (this.ownsResources) { await this.pool.end(); this.s3.destroy(); }
+  }
   query(text: string, values: unknown[] = []) { return this.client.query(text, values); }
-  async exclusive<T>(body: () => Promise<T>): Promise<T> {
-    const { rows } = await this.query("SELECT pg_try_advisory_lock(hashtextextended('scout-local-recorder-v1',0)) AS acquired");
-    if (!rows[0].acquired) throw new Error('Another local recorder owns the execution lock.');
+  // Session advisory locks on this store's connection mark work (a claimed
+  // job, a run, a reproduction) as live. Postgres releases them when the
+  // process or its connection dies, so a free lock means nobody is executing it.
+  async tryLock(key: string) {
+    return (await this.query('SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS acquired', [key])).rows[0].acquired as boolean;
+  }
+  async unlock(key: string) { await this.query('SELECT pg_advisory_unlock(hashtextextended($1,0))', [key]).catch(() => {}); }
+  async locked<T>(key: string, body: () => Promise<T>, wait = false): Promise<T> {
+    while (!await this.tryLock(key)) {
+      if (!wait) throw new Error(`Another process is executing this ${key.split(':')[0]}.`);
+      await delay(500);
+    }
     try { return await body(); }
-    finally { await this.query("SELECT pg_advisory_unlock(hashtextextended('scout-local-recorder-v1',0))"); }
+    finally { await this.unlock(key); }
   }
   async transaction<T>(body: () => Promise<T>): Promise<T> {
     await this.query('BEGIN');
@@ -173,26 +197,35 @@ export class Store {
     if (!response.ok) throw new Error(`ClickHouse export failed with HTTP ${response.status}`);
     return body;
   }
+  // Concurrent workers claim disjoint batches with SKIP LOCKED and acknowledge
+  // each batch in the transaction that claimed it.
   async flush(exportBatch: (query: string) => Promise<unknown> = query => this.clickhouse(query), maxBatches=Infinity) {
     let exported = 0;
     for (let batch=0;batch<maxBatches;batch++) {
-      const { rows } = await this.query('SELECT e.*,r.workspace_id,r.user_id FROM runtime_events e JOIN runtime_runs r USING(run_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at,e.seq LIMIT 100');
-      if (!rows.length) return exported;
-      const events = rows.map(e => ({ event_id: e.event_id, workspace_id: e.workspace_id, user_id: e.user_id, run_id: e.run_id,
-        seq: e.seq, event_type: e.event_type, action_id: e.action_id, occurred_at: clickhouseTimestamp(e.occurred_at), payload: JSON.stringify(e.payload) }));
-      exported += await this.deliverOutbox('runtime_events', rows, events, exportBatch);
+      const delivered = await this.transaction(async () => {
+        const { rows } = await this.query('SELECT e.*,r.workspace_id,r.user_id FROM runtime_events e JOIN runtime_runs r USING(run_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at,e.seq LIMIT 100 FOR UPDATE OF e SKIP LOCKED');
+        const events = rows.map(e => ({ event_id: e.event_id, workspace_id: e.workspace_id, user_id: e.user_id, run_id: e.run_id,
+          seq: e.seq, event_type: e.event_type, action_id: e.action_id, occurred_at: clickhouseTimestamp(e.occurred_at), payload: JSON.stringify(e.payload) }));
+        return this.deliverOutbox('runtime_events', rows, events, exportBatch);
+      });
+      if (!delivered) return exported;
+      exported += delivered;
     }
     return exported;
   }
   async flushIdentity() {
-    const {rows}=await this.query('SELECT event_id,workspace_id,agent_id,credential_id,operation,outcome,occurred_at,request_id FROM identity_audit WHERE exported_at IS NULL ORDER BY occurred_at,event_id LIMIT 100');
-    const events=rows.map(e=>({...e,occurred_at:clickhouseTimestamp(e.occurred_at)}));
-    return this.deliverOutbox('identity_audit', rows, events);
+    return this.transaction(async()=>{
+      const {rows}=await this.query('SELECT event_id,workspace_id,agent_id,credential_id,operation,outcome,occurred_at,request_id FROM identity_audit WHERE exported_at IS NULL ORDER BY occurred_at,event_id LIMIT 100 FOR UPDATE SKIP LOCKED');
+      const events=rows.map(e=>({...e,occurred_at:clickhouseTimestamp(e.occurred_at)}));
+      return this.deliverOutbox('identity_audit', rows, events);
+    });
   }
   async flushIssues() {
-    const rows=(await this.query('SELECT * FROM issue_events WHERE exported_at IS NULL ORDER BY occurred_at,event_id LIMIT 100')).rows;
-    const events=rows.map(e=>({event_id:e.event_id,workspace_id:e.workspace_id,issue_id:e.issue_id,seq:Number(e.seq),event_type:e.event_type,occurred_at:clickhouseTimestamp(e.occurred_at),payload:JSON.stringify(e.payload)}));
-    return this.deliverOutbox('issue_events', rows, events);
+    return this.transaction(async()=>{
+      const rows=(await this.query('SELECT * FROM issue_events WHERE exported_at IS NULL ORDER BY occurred_at,event_id LIMIT 100 FOR UPDATE SKIP LOCKED')).rows;
+      const events=rows.map(e=>({event_id:e.event_id,workspace_id:e.workspace_id,issue_id:e.issue_id,seq:Number(e.seq),event_type:e.event_type,occurred_at:clickhouseTimestamp(e.occurred_at),payload:JSON.stringify(e.payload)}));
+      return this.deliverOutbox('issue_events', rows, events);
+    });
   }
   private async deliverOutbox(table: OutboxTable, rows: {event_id: string}[], events: unknown[],
     exportBatch: (query: string) => Promise<unknown> = query => this.clickhouse(query)) {
@@ -203,8 +236,9 @@ export class Store {
     await this.query(`UPDATE ${table} SET exported_at=now() WHERE event_id=ANY($1::uuid[])`, [rows.map(e => e.event_id)]);
     return rows.length;
   }
+  // The run lock refuses recovery while any process is still executing it.
   async recover(runId: string) {
-    return this.exclusive(async () => {
+    return this.locked('run:' + runId, async () => {
       await this.report(runId);
       const { rows } = await this.query("SELECT * FROM runtime_captures WHERE run_id=$1 AND status<>'available'", [runId]);
       for (const row of rows) {

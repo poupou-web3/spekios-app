@@ -2,7 +2,7 @@
 
 Three entry points share the evidence recorder: `demo` runs deterministic `fixture_defined` cases; `explore URL` connects the Rust model gateway to bounded planning, predictions and assessments; `reproduce ACTION_UUID` replays a suspect explorer action's path in a fresh browser with separate evidence. All persist real Chromium evidence in the Compose stack. See [URL exploration](../../docs/exploration/overview.md) and [reproduction](../../docs/exploration/reproduction.md) for configuration, verification and limits. The sections below describe the deterministic recorder baseline.
 
-The explorer now uses [frontier planning](../../docs/exploration/planner.md) to rank known paths, prioritize changed clickable controls, return to branches and replan stale screens. `explore-matrix URL` runs the three responsive viewport profiles sequentially with separate evidence and usage. These capabilities extend the explorer; the fixed recorder demo below is unchanged.
+The explorer now uses [frontier planning](../../docs/exploration/planner.md) to rank known paths, prioritize changed clickable controls, return to branches and replan stale screens. `explore-matrix URL` runs the three responsive viewport profiles at once, one browser slot each, with separate evidence and usage. These capabilities extend the explorer; the fixed recorder demo below is unchanged.
 
 ## Run locally
 
@@ -58,7 +58,7 @@ docker compose run --rm --no-deps recorder flush
 
 Replace the angle-bracket placeholders with IDs printed by the demo. Use a fresh destination when redirecting an image; shell redirection can overwrite an existing file. Capture retrieval checks ownership, availability, size, and hash before emitting PNG bytes.
 
-The `scout-qa_recorder-spool` volume retains durable capture/derivative bytes and capture metadata for upload recovery. A PostgreSQL advisory lock allows only one recording/recovery operation across this local stack. Interrupted dispatched actions are marked as unknown outcomes and never automatically repeated. Recovery retries immutable uploads and republishes the manifest; it cannot manufacture a missing screenshot or convert an interrupted action into a successful assessment. Pending export acknowledgments survive a ClickHouse outage. The spool and bucket currently have no automatic expiry or garbage collection.
+The `scout-qa_recorder-spool` volume retains durable capture/derivative bytes and capture metadata for upload recovery. Each run holds its own Postgres advisory lock, so recovery waits until that run's connection is gone. Several runs can execute at once, up to `SCOUT_BROWSER_SLOTS`. Interrupted dispatched actions are marked as unknown outcomes and never automatically repeated. An interrupted exploration can continue in a new run, at most three times, using the actions it still has left. Recovery retries immutable uploads and republishes the manifest; it cannot manufacture a missing screenshot or convert an interrupted action into a successful assessment. Pending export acknowledgments survive a ClickHouse outage. The spool and bucket currently have no automatic expiry or garbage collection.
 
 ## Verification
 

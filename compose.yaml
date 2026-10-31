@@ -194,6 +194,7 @@ services:
       SCOUT_AUTO_REPRODUCE_MAX_CASES: ${SCOUT_AUTO_REPRODUCE_MAX_CASES:-2}
       SCOUT_AUTO_REPRODUCE_MAX_ACTIONS: ${SCOUT_AUTO_REPRODUCE_MAX_ACTIONS:-12}
       SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082}
+      SCOUT_BROWSER_SLOTS: ${SCOUT_BROWSER_SLOTS:-3}
       SCOUT_TEST_FORM_RULES: ${SCOUT_TEST_FORM_RULES:-[]}
     depends_on:
       postgres: { condition: service_healthy }
@@ -249,13 +250,16 @@ services:
 
   # Runs every target site. No Scout credentials, volumes or storage network:
   # it reaches the internet, the fixture app and the worker's token-protected
-  # login port only. It serves one run, then exits and restarts fresh.
+  # login port only. Each replica serves one run, then exits and restarts fresh.
+  # Keep the replica count equal to SCOUT_BROWSER_SLOTS.
   browser-sandbox:
     image: scout-qa-recorder:local
     build:
       context: .
       dockerfile: infra/recorder/Dockerfile
     entrypoint: [./node_modules/.bin/tsx, src/browser-server.ts]
+    deploy:
+      replicas: ${SCOUT_BROWSER_SLOTS:-3}
     environment:
       SCOUT_CHROMIUM_SANDBOX: ${SCOUT_CHROMIUM_SANDBOX:-true}
     networks:

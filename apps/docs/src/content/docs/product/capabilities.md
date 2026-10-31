@@ -36,7 +36,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 - An external observe/act/assess API.
 - Source-repository integration, automatic code fixes or source-location inference.
 - Human account signup/invitations, hosted identity providers, subscription billing and public community sharing.
-- Multiple browser workers, interrupted-action resume or Kubernetes manifests.
+- Kubernetes manifests. Several browser slots share the queue, and an interrupted exploration continues in a new run up to three times. A dispatched action is not repeated. Private sign-in is still one login at a time.
 - Full tool input/output payload auditing, approved training export or continuous video capture. Route/tool metadata audit is implemented.
 
 ## Permanent issue and candidate history

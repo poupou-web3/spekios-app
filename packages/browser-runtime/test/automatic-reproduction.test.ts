@@ -42,7 +42,7 @@ test('automatic scheduler reserves once and defers capacity without confirming f
     await store.query("UPDATE browser_jobs SET status='completed',finished_at=now() WHERE job_id=$1",[jobId]);
     return {...run,jobId,actionId:run.report.actions[1].action_id};
   };
-  const sweep=(status:any=gateway)=>store.exclusive(()=>new AutomaticReproductionScheduler(store).sweep(status));
+  const sweep=(status:any=gateway)=>new AutomaticReproductionScheduler(store).sweep(status);
   const taskFor=async(id:string)=>(await store.query('SELECT * FROM automatic_reproduction_tasks WHERE source_action_id=$1',[id])).rows[0];
   try{
     await t.test('provider and full queue defer a stable reservation and repeat no audit events',async()=>{
@@ -62,7 +62,7 @@ test('automatic scheduler reserves once and defers capacity without confirming f
       assert.equal(child.execution_mode,'protocol_fixture');assert.equal(child.request.source_action_id,original.actionId);
       const queuedEvents=await events();await sweep();assert.equal((await taskFor(original.actionId)).child_job_id,child.job_id);assert.equal(await events(),queuedEvents);
       await store.query("UPDATE browser_jobs SET status='running',started_at=now() WHERE job_id=$1",[child.job_id]);
-      assert.equal(await store.exclusive(()=>new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway)),true);
+      assert.equal(await new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway),true);
       const result=await reproduce(store,original.actionId,{client,allowedOrigins:[fixture.url],jobId:child.job_id,autoReproduce:false});
       await store.query("UPDATE browser_jobs SET status='completed',finished_at=now() WHERE job_id=$1",[child.job_id]);
       assert.equal(result.report.reproductions[0].result.outcome,'reproduced');assert.equal(result.report.reproductions[0].result.confirmed_bug,false);
@@ -81,13 +81,13 @@ test('automatic scheduler reserves once and defers capacity without confirming f
         store.get=get;await sweep();task=await taskFor(original.actionId);assert.equal(task.status,'queued');
         let child=(await store.query("UPDATE browser_jobs SET status='running',started_at=now() WHERE job_id=$1 RETURNING *",[task.child_job_id])).rows[0];
         store.get=unavailable;
-        assert.equal(await store.exclusive(()=>new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway)),false);
+        assert.equal(await new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway),false);
         child=(await store.query('SELECT *,next_attempt_at>now() AS cooling_down FROM browser_jobs WHERE job_id=$1',[child.job_id])).rows[0];
         assert.equal(child.status,'queued');assert.equal(child.run_id,null);assert.equal(child.cooling_down,true);
         assert.equal((await taskFor(original.actionId)).child_job_id,child.job_id);assert.equal((await taskFor(original.actionId)).reason,'evidence_unavailable');
         store.get=get;
         child=(await store.query("UPDATE browser_jobs SET status='running',started_at=now(),next_attempt_at=now() WHERE job_id=$1 RETURNING *",[child.job_id])).rows[0];
-        assert.equal(await store.exclusive(()=>new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway)),true);
+        assert.equal(await new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway),true);
         assert.equal((await taskFor(original.actionId)).reason,'scheduled');
         await store.query("UPDATE browser_jobs SET status='cancelled',finished_at=now() WHERE job_id=$1",[child.job_id]);
       }finally{store.get=get;}
@@ -107,7 +107,7 @@ test('automatic scheduler reserves once and defers capacity without confirming f
       await store.query(`INSERT INTO finding_reviews(review_id,action_id,run_id,workspace_id,user_id,reviewer_id,revision,disposition,rationale,expectation_basis,evidence_snapshot)
         VALUES($1,$2,$3,$4,$5,$5,1,'dismissed','Fixture dismissal before automatic dispatch.','','{}')`,[randomUUID(),original.actionId,original.run_id,workspaceId,userId]);
       const child=(await store.query("UPDATE browser_jobs SET status='running',started_at=now() WHERE job_id=$1 RETURNING *",[task.child_job_id])).rows[0],visits=fixture.requests.length;
-      assert.equal(await store.exclusive(()=>new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway)),false);
+      assert.equal(await new AutomaticReproductionScheduler(store).beforeDispatch(child,gateway),false);
       const updated=await taskFor(original.actionId);assert.equal(updated.status,'skipped');assert.equal(updated.reason,'reviewed');assert.equal(updated.child_job_id,child.job_id);assert.equal(updated.planned_actions,2);
       const cancelled=(await store.query('SELECT status,run_id FROM browser_jobs WHERE job_id=$1',[child.job_id])).rows[0];assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.run_id,null);assert.equal(fixture.requests.length,visits);
       await sweep();assert.equal((await taskFor(original.actionId)).child_job_id,child.job_id);

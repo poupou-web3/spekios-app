@@ -8,7 +8,7 @@ import { accessSignals, AccessStopped } from './access-detection.js';
 
 export type AccessResult={context_id:string;session_id:string|null;verification:string}|null;
 export type AccessReason='login_required'|'login_available'|'user_requested'|'session_expired';
-type Active={id:string;runId:string;page:Page;origin:string;targetUrl:string;mode:string;reason:AccessReason;
+type Active={id:string;runId:string;store:Store;page:Page;origin:string;targetUrl:string;mode:string;reason:AccessReason;
   status:'waiting'|'active';lease?:string;client?:string;frame?:string;inputs:Map<string,string>;
   baseline:string;timer:ReturnType<typeof setTimeout>;cleanup?:()=>void;resolve:(result:AccessResult)=>void;reject:(error:Error)=>void};
 const same=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);};
@@ -58,19 +58,19 @@ export class AccessHandoff {
     await this.serial(async()=>{if(this.active)await this.finish('interrupted');});
     await new Promise<void>(resolve=>{if(this.server)this.server.close(()=>resolve());else resolve();});
   }
-  async request(page:Page,runId:string,jobId:string|undefined,targetUrl:string,mode:string,reason:AccessReason,timeoutMs=600000,signal?:AbortSignal):Promise<AccessResult>{
+  async request(page:Page,runId:string,jobId:string|undefined,targetUrl:string,mode:string,reason:AccessReason,timeoutMs=600000,signal?:AbortSignal,scope:Store=this.store):Promise<AccessResult>{
     signal?.throwIfAborted();
     if(this.active)throw new Error('Only one private login can run at a time.');
     const id=randomUUID(),origin=new URL(targetUrl).origin;
     const baseline=createHash('sha256').update(JSON.stringify(await page.context().storageState())).digest('hex');
-    await this.store.transaction(async()=>{
-      await this.store.query(`INSERT INTO browser_access_requests(access_id,run_id,job_id,workspace_id,user_id,origin,reason,status,expires_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'waiting',now()+($8::int * interval '1 millisecond'))`,[id,runId,jobId??null,this.store.workspaceId,this.store.userId,origin,reason,timeoutMs]);
-      await this.store.event(runId,'access.requested',{access_id:id,origin,reason,private_observation:true});
+    await scope.transaction(async()=>{
+      await scope.query(`INSERT INTO browser_access_requests(access_id,run_id,job_id,workspace_id,user_id,origin,reason,status,expires_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,'waiting',now()+($8::int * interval '1 millisecond'))`,[id,runId,jobId??null,scope.workspaceId,scope.userId,origin,reason,timeoutMs]);
+      await scope.event(runId,'access.requested',{access_id:id,origin,reason,private_observation:true});
     });
     return new Promise<AccessResult>((resolve,reject)=>{
       const timer=setTimeout(()=>{void this.serial(()=>this.finish('expired')).catch(()=>{});},timeoutMs);
-      this.active={id,runId,page,origin,targetUrl,mode,reason,status:'waiting',inputs:new Map(),baseline,timer,resolve,reject};
+      this.active={id,runId,store:scope,page,origin,targetUrl,mode,reason,status:'waiting',inputs:new Map(),baseline,timer,resolve,reject};
       const cancel=()=>{void this.serial(async()=>{if(this.active?.id===id)await this.finish('cancelled');}).catch(()=>{});};
       this.active.cleanup=()=>signal?.removeEventListener('abort',cancel);
       signal?.addEventListener('abort',cancel,{once:true});
@@ -81,10 +81,10 @@ export class AccessHandoff {
     const a=this.active;if(!a)return;
     // Invalidate access before waking the explorer. In-flight input is serialized.
     clearTimeout(a.timer);a.cleanup?.();this.active=undefined;
-    try{await this.store.transaction(async()=>{
-      await this.store.query('UPDATE browser_access_requests SET status=$2,session_id=$3,verification=$4,finished_at=now() WHERE access_id=$1',
+    try{await a.store.transaction(async()=>{
+      await a.store.query('UPDATE browser_access_requests SET status=$2,session_id=$3,verification=$4,finished_at=now() WHERE access_id=$1',
         [a.id,status,result?.session_id??null,result?.verification??null]);
-      await this.store.event(a.runId,'access.'+status,{access_id:a.id,context_id:result?.context_id??null,session_id:result?.session_id??null,verification:result?.verification??null,private_observation:true});
+      await a.store.event(a.runId,'access.'+status,{access_id:a.id,context_id:result?.context_id??null,session_id:result?.session_id??null,verification:result?.verification??null,private_observation:true});
     });}catch{a.reject(new Error('Login handoff state could not be saved.'));throw new Error('private_control_failed');}
     if(status==='completed'||status==='skipped')a.resolve(result);else a.reject(new AccessStopped('access_'+status));
   }
@@ -92,13 +92,13 @@ export class AccessHandoff {
     const a=this.active;if(!a||a.id!==id)throw new Error('access_closed');
     // Use a separate connection: a human request must never join a recorder
     // transaction, and a durable cancellation invalidates the private lease.
-    const run=(await this.store.pool.query('SELECT cancel_id FROM runtime_runs WHERE run_id=$1',[a.runId])).rows[0];
+    const run=(await a.store.pool.query('SELECT cancel_id FROM runtime_runs WHERE run_id=$1',[a.runId])).rows[0];
     if(!run||run.cancel_id){await this.finish('cancelled');throw new Error('access_closed');}
     if(action==='start'){
       if(Object.keys(body).some(k=>k!=='client_id')||!isUuid(body.client_id))throw new Error('invalid_input');
       if(a.client&&a.client!==body.client_id)throw new Error('access_claimed');
       if(!a.lease){a.lease=randomBytes(32).toString('hex');a.client=body.client_id;a.status='active';
-        await this.store.transaction(async()=>{await this.store.query("UPDATE browser_access_requests SET status='active' WHERE access_id=$1",[id]);await this.store.event(a.runId,'access.opened',{access_id:id});});}
+        await a.store.transaction(async()=>{await a.store.query("UPDATE browser_access_requests SET status='active' WHERE access_id=$1",[id]);await a.store.event(a.runId,'access.opened',{access_id:id});});}
       return {lease:a.lease,viewport:a.page.viewportSize(),expires_in_seconds:600};
     }
     if(action==='skip'&&a.status==='waiting'){
@@ -128,7 +128,7 @@ export class AccessHandoff {
       }))throw new Error('not_editable');
       // Reserve before dispatch. An uncertain response must not type/click twice.
       a.inputs.set(input.input_id,fingerprint);
-      await this.store.transaction(()=>this.store.event(a.runId,'access.input',{access_id:id,input_id:input.input_id,kind:input.type,actor:'human',private_payload_omitted:true}));
+      await a.store.transaction(()=>a.store.event(a.runId,'access.input',{access_id:id,input_id:input.input_id,kind:input.type,actor:'human',private_payload_omitted:true}));
       if(input.type==='click')await a.page.mouse.click(input.x,input.y);
       if(input.type==='text')await a.page.keyboard.insertText(input.value);
       if(input.type==='key')await a.page.keyboard.press(input.key);

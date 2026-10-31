@@ -41,6 +41,6 @@ A ClickHouse delivery outage leaves pending outbox state. It does not justify lo
 
 ## Current deployment model
 
-There is one browser worker, guarded by the existing ownership/advisory-lock protocol, and one browser sandbox, which serves one run at a time. Multi-worker scheduling and Kubernetes deployment manifests are not implemented.
+The browser worker runs up to `SCOUT_BROWSER_SLOTS` jobs at once (1–8). Each slot is one sandbox container and one run. A running job holds a Postgres advisory lock that disappears with its connection, so a crashed job can be recovered immediately. Interrupted explorations continue in a new run, up to three times, without repeating a dispatched action. Jobs are claimed for every workspace member. Private sign-in is still one login at a time. Kubernetes deployment manifests are not implemented.
 
 Compose is the supported one-machine development setup. The public docs can be deployed as a standalone static site while the backend remains local.

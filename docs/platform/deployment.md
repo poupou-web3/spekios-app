@@ -28,7 +28,7 @@ just explorer-test   # URL loop with simulated models, graph/evidence/usage veri
 just fixture         # Start the controlled app; host preview on 127.0.0.1:18082
 just explore URL     # Bounded exploration of a public https site or allowed app using configured models
 just isolation-test  # Browser sandbox: no credentials or storage network, Chromium sandbox, one run per container
-just explore-matrix URL # Separate desktop, tablet and mobile runs, executed sequentially
+just explore-matrix URL # Desktop, tablet and mobile runs at once, one browser slot each
 just graph RUN_UUID  # Inspect states, edges, frontier and model decisions
 just test            # Core tests; model-test is separate because it restarts services
 just stop            # Stop services while keeping named volumes

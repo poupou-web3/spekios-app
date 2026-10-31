@@ -13,7 +13,7 @@ import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewp
 import { commandFor, INTERACTION_VERSION } from './interaction-contract.js';
 import { dispatch, observedCommand, revealControl, validateDispatch, type Reveal } from './browser-interactions.js';
 import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyContext, pageContext as context } from './model-context.js';
-import { AppMemory, MEMORY_VERSION, type MemoryScope } from './app-memory.js';
+import { AppMemory, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
 import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged } from './access-detection.js';
 import { AuthVault } from './auth-session.js';
 import { openBrowser } from './browser-sandbox.js';
@@ -21,7 +21,7 @@ import { testFormRules, type TestFormRule } from './form-policy.js';
 import { ActionDiagnostics, settleAction, saveOutcome, outcomeContext, incompleteCompletion, COMPLETION_VERSION, COMPLETION_LIMITS, type Completion } from './action-outcome.js';
 import type { AccessHandoff, AccessResult, AccessReason } from './access-handoff.js';
 import { RunControl, RunCancelled } from './run-control.js';
-import { planningFocus, type PlanningFocus } from './steering.js';
+import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 800) : 'Unknown exploration failure';
@@ -42,6 +42,10 @@ export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: numbe
   autoReproduce?:boolean;maxAutoReproductions?:number;maxAutoReplayActions?:number;
   // Library callers opt in; queued jobs pass the setting frozen at admission.
   appMemory?: boolean; maxDurationMs?: number;
+  // Worker shutdown closes the browser; the job is then resumed or interrupted.
+  shutdown?: AbortSignal;
+  // A continuation of an interrupted exploration job, with its remaining budget.
+  resume?: { attempt: number; previousRunIds: string[]; jobMaxActions: number };
   testFormRules?: TestFormRule[]; access?: AccessHandoff; authMode?: 'auto'|'sign_in'|'public'; sessionId?:string; accessTimeoutMs?:number };
 const MAX_REPLANS = 3;
 // Each failed reveal permanently removes one control from this run's frontier.
@@ -65,12 +69,13 @@ function changes(before: Capture, after: Capture, mask: Buffer): Record<string, 
 }
 
 export async function explore(store: Store, inputUrl: string, options: ExplorationOptions = {}) {
-  return store.exclusive(() => execute(store, inputUrl, options));
+  return execute(store, inputUrl, options);
 }
 
 export async function reproduce(store: Store, sourceActionId: string, options: ExplorationOptions = {}) {
   if (!isUuid(sourceActionId)) throw new Error('Invalid source action ID.');
-  return store.exclusive(async () => {
+  // Concurrent requests for one suspect wait, then reuse the first attempt.
+  return store.locked('reproduce:' + sourceActionId, async () => {
     const previous = (await store.query(`SELECT v.replay_run_id FROM runtime_reproductions v JOIN runtime_runs r ON r.run_id=v.source_run_id
       WHERE v.source_action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3`, [sourceActionId, store.workspaceId, store.userId])).rows[0];
     if (previous) {
@@ -82,15 +87,16 @@ export async function reproduce(store: Store, sourceActionId: string, options: E
     }
     const replay = await loadReplay(store, sourceActionId);
     return execute(store, replay.target_url, options, replay);
-  });
+  }, true);
 }
 
 export async function verifyFix(store:Store,verificationId:string,options:ExplorationOptions={}) {
   if(options.jobId!==verificationId)throw new Error('Fix verification requires its durable queued job.');
-  return store.exclusive(async()=>{const replay=await loadVerification(store,verificationId,options.sessionId,options.authMode);return execute(store,replay.target_url,options,replay);});
+  return store.locked('verification:'+verificationId,async()=>{const replay=await loadVerification(store,verificationId,options.sessionId,options.authMode);return execute(store,replay.target_url,options,replay);},true);
 }
 
-// All entry points hold the recorder lock for the entire browser lifetime.
+// Each run holds its run lock for its whole lifetime, so recovery never
+// touches a run that another slot or process is still executing.
 async function execute(store: Store, inputUrl: string, options: ExplorationOptions, replay?: Replay) {
   const allowedOrigins = options.allowedOrigins ?? (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
   const targetUrl = validateTarget(inputUrl, allowedOrigins);
@@ -111,20 +117,26 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
   let authContext:AccessResult=replay?.auth_context??(options.sessionId?{context_id:options.sessionId,session_id:options.sessionId,verification:'saved_session_reused'}:null);
   let handoffs=0;
   const authContexts:NonNullable<AccessResult>[]=[];
-  const hooks: Hooks = { ...options.hooks, observe: page=>observeControls(page,formRules),
-    observationContext:()=>authContext?{auth_context_id:authContext.context_id}:{},
-    beforeCapture:async page=>{
-      control.signal.throwIfAborted();
-      await options.hooks?.beforeCapture?.(page);
-      if((options.access||authContext||replay?.fix_verification)&&(await accessSignals(page)).login_form)throw new PrivateLoginSurface();
-    } };
     const runId = randomUUID(), workerId = randomUUID(), agentId = randomUUID(), startedAt = Date.now();
+    return store.locked('run:' + runId, async () => {
     const control=new RunControl(store,runId);
+    const hooks: Hooks = { ...options.hooks, observe: page=>observeControls(page,formRules),
+      observationContext:()=>authContext?{auth_context_id:authContext.context_id}:{},
+      beforeCapture:async page=>{
+        control.signal.throwIfAborted();
+        await options.hooks?.beforeCapture?.(page);
+        if((options.access||authContext||replay?.fix_verification)&&(await accessSignals(page)).login_form)throw new PrivateLoginSurface();
+      } };
     const maxModelRequests = replay ? maxActions : maxActions * 3 + MAX_REPLANS * 2;
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
     // Replays never read or write memory; their path is fixed by evidence.
     const memoryEnabled = !replay && options.appMemory === true;
     let memory = AppMemory.disabled(store, runId);
+    // A resumed run plans with what its interrupted runs covered. With memory
+    // on those runs are already in the memory snapshot; only withheld controls are added.
+    let resumed: MemorySnapshot | null = null;
+    const planningMemory = () => memory.snapshot ? (resumed ? { ...memory.snapshot, withheld: resumed.withheld } : memory.snapshot) : resumed;
+    const resume = replay ? undefined : options.resume;
     const memoryScopes: ReturnType<AppMemory['summary']>[] = [];
     const openMemory = async () => {
       if (!memoryEnabled) return;
@@ -145,10 +157,17 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           limits: { max_actions: maxActions, max_replans: replay ? 0 : MAX_REPLANS, max_reveal_failures: replay ? 0 : MAX_REVEAL_FAILURES, max_model_requests: maxModelRequests,
             max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, context_budgets: CONTEXT_BUDGETS },
           app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] },
+          resume: resume ? { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, job_max_actions: resume.jobMaxActions, carried_actions: resume.jobMaxActions - maxActions } : null,
           scope: allowedOrigins.includes(origin) ? 'operator-allowed-origin' : 'public-https', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
       await openMemory();
-      planner = new FrontierPlanner(targetUrl, memory.snapshot);
+      if (resume) {
+        resumed = await resumeSnapshot(store, resume.previousRunIds, { origin, viewport_profile: profile, auth_scope: authContext ? 'signed_in' : 'public', execution_mode: executionMode });
+        const focus = await carryFocus(store, resume.previousRunIds.at(-1)!, runId);
+        await store.event(runId, 'run.resumed', { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, remembered_pages: resumed.pages.size,
+          withheld_controls: resumed.withheld?.size ?? 0, focus_carried: focus !== null });
+      }
+      planner = new FrontierPlanner(targetUrl, planningMemory());
       if (options.jobId) {
         const linked = await store.query("UPDATE browser_jobs SET run_id=$2 WHERE job_id=$1 AND workspace_id=$3 AND user_id=$4 AND status='running' AND run_id IS NULL RETURNING cancel_id,cancel_requested_at", [options.jobId, runId, store.workspaceId, store.userId]);
         if (linked.rowCount !== 1) throw new Error('Browser job is no longer claimable.');
@@ -228,21 +247,23 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       });
     }
     let browser: Browser | undefined;
-    let browserClosing:Promise<void>|undefined;
-    const stopBrowser=()=>browser?(browserClosing??=browser.close().catch(()=>{})):Promise.resolve();
+    let browserClosing:Promise<void>|undefined, releaseSlot=async()=>{};
+    // The sandbox slot is freed only after the browser has disconnected.
+    const stopBrowser=()=>browser?(browserClosing??=browser.close().catch(()=>{}).then(()=>releaseSlot())):Promise.resolve();
     const abortBrowser=()=>{void stopBrowser();};
     control.signal.addEventListener('abort',abortBrowser,{once:true});
+    options.shutdown?.addEventListener('abort',abortBrowser,{once:true});
     control.start();
     let last: { capture: Capture; bytes: Buffer } | undefined, lastState: string | undefined;
     const history: unknown[] = [];
     try {
       await control.check();
       if(replay?.fix_verification?.requires_session&&!authContext?.session_id)throw new AccessStopped('candidate_sign_in_required');
-      const opened = await openBrowser(control.signal);
-      browser = opened.browser;
+      const opened = await openBrowser(store, options.shutdown ? AbortSignal.any([control.signal, options.shutdown]) : control.signal);
+      browser = opened.browser; releaseSlot = opened.release;
       await control.check();
       await store.transaction(async () => {
-        await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ browser: 'chromium', browser_version: browser!.version(), playwright_version: '1.64.0', browser_isolation: opened.isolation })]);
+        await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ browser: 'chromium', browser_version: browser!.version(), playwright_version: '1.64.0', browser_isolation: opened.isolation, browser_slot: opened.slot })]);
         await store.event(runId, 'browser.ready', { browser_version: browser!.version(), browser_isolation: opened.isolation });
       });
       let savedState;
@@ -268,7 +289,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         if(!options.access||options.authMode==='public'||replay)throw new AccessStopped('login_required');
         if(++handoffs>3)throw new AccessStopped('login_handoff_limit');
         await control.check();
-        const result=await options.access.request(page,runId,options.jobId,targetUrl,executionMode,reason,options.accessTimeoutMs,control.signal);
+        const result=await options.access.request(page,runId,options.jobId,targetUrl,executionMode,reason,options.accessTimeoutMs,control.signal,store);
         await control.check();
         if(!result)return false;
         authContext=result;await recordContext();
@@ -276,7 +297,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         // never reuse its plans or return routes for a different account context.
         // Memory switches to the signed-in scope for the same reason.
         await store.transaction(openMemory);
-        last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl,memory.snapshot);
+        last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl,planningMemory());
         await page.goto('about:blank');
         return true;
       };
@@ -555,10 +576,11 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         await store.query("UPDATE runtime_runs SET lifecycle=$3,error=$2,config=config || $4::jsonb,finished_at=now() WHERE run_id=$1", [runId, message(error),lifecycle,JSON.stringify({stop_reason:lifecycle==='cancelled'?'user_cancelled':lifecycle==='blocked'?'access_required':'execution_failed',executed_actions:executed})]);
         await store.event(runId, 'run.'+lifecycle, { error: message(error), executed_actions: executed, coverage_complete: false });
       });
-    } finally { await control.close();control.signal.removeEventListener('abort',abortBrowser);await stopBrowser(); }
+    } finally { await control.close();control.signal.removeEventListener('abort',abortBrowser);options.shutdown?.removeEventListener('abort',abortBrowser);await stopBrowser(); }
     if(replay?.fix_verification)await finishVerification(store,replay,runId);else if (replay) await finishReplay(store, replay, runId);
     let manifestError: string | null = null, exportError: string | null = null;
     try { await store.publish(runId); } catch (error) { manifestError = message(error); }
     try { await store.flush(); } catch (error) { exportError = message(error); }
     return { run_id: runId, report: await store.report(runId), manifest_error: manifestError, export_error: exportError, reused: false };
+    });
 }

@@ -76,7 +76,7 @@ If the fresh before capture differs from the planning capture, the worker record
 
 When the runtime scrolled to a chosen control, the guard instead compares the document without its viewport: URL, title, text and every control's identity and state, ignoring the screenshot, scroll position and viewport geometry. Any other change still forces a replan. If the revealed control turns out to be covered, disabled or ambiguous, the action is `skipped` with method `reveal-guard`, the control is blocked as `unavailable_after_reveal` and planning continues; five such skips end the run with `reveal_limit_reached`.
 
-Runs allow 1–50 dispatched actions (default 20), including navigation, returns and resumes, and stop after `SCOUT_EXPLORER_MAX_MINUTES` (default 30, 1–180) with `time_budget_reached`; the single browser worker runs one job at a time. Exploration permits at most `3 × max_actions + 6` model requests; replay permits one assessment per executed source action. Each request has one provider attempt and at most 2,048 output tokens. These limits bound work; they are not token or monetary quotas. Stop reasons distinguish exhausted actions, model requests, time, unstable pages, unusable revealed controls, unreachable frontiers and insufficient budget to travel to a remaining branch. `coverage_complete` remains false.
+Runs allow 1–50 dispatched actions (default 20), including navigation, returns and resumes, and stop after `SCOUT_EXPLORER_MAX_MINUTES` (default 30, 1–180) with `time_budget_reached`. The worker runs up to `SCOUT_BROWSER_SLOTS` jobs at once. An interrupted exploration continues in a new run with the remaining action budget, at most three times; each attempt gets a fresh time limit, and a dispatched action is not repeated. Exploration permits at most `3 × max_actions + 6` model requests; replay permits one assessment per executed source action. Each request has one provider attempt and at most 2,048 output tokens. These limits bound work; they are not token or monetary quotas. Stop reasons distinguish exhausted actions, model requests, time, unstable pages, unusable revealed controls, unreachable frontiers and insufficient budget to travel to a remaining branch. `coverage_complete` remains false.
 
 ## Responsive coverage
 
@@ -92,7 +92,7 @@ Choose a profile beside the URL in the workspace, or set `SCOUT_EXPLORER_VIEWPOR
 .tools/bin/just explore-matrix http://exploration-fixture:8082/responsive
 ```
 
-The matrix runs sequentially with separate browser contexts, run IDs, graphs, screenshots and usage. There is no shared matrix job or combined coverage report yet. These are responsive Chromium layouts, not native-device, touch, Safari or Android validation. Reproduction inherits the source run's viewport.
+The matrix runs the three profiles at once. Each has its own browser, run ID, graph, screenshots and usage. There is no shared matrix job or combined coverage report. These are responsive Chromium layouts, not native-device, touch, Safari or Android validation. Reproduction inherits the source run's viewport.
 
 ## Inspecting the evidence
 

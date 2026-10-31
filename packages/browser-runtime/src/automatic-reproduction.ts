@@ -31,8 +31,8 @@ export function transientEvidenceFailure(error:unknown):boolean {
 }
 const providerAvailable=(source:any,gateway:GatewayStatus|null)=> !!gateway&&source.execution_mode===gateway.executionMode&&gateway.configuredProviders.includes(source.settings?.provider);
 
-/** Runs only under Store.exclusive. Decisions and queue admissions share the
- * API admission lock, followed by parent job, source run and task row locks. */
+/** Decisions and queue admissions share the API admission lock, followed by
+ * parent job, source run and task row locks. Browser jobs can run alongside it. */
 export class AutomaticReproductionScheduler {
   constructor(private store:Store){}
   private async source(sourceRunId:string) {

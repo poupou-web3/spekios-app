@@ -15,7 +15,9 @@ for(const [table,flush] of [
     const sent:string[]=[],acknowledged:unknown[][]=[];
     const event={event_id:'11111111-1111-4111-8111-111111111111',workspace_id:'workspace',user_id:'user',run_id:'run',issue_id:'issue',seq:'7',event_type:'verification.finished',operation:'GET /v1/issues',outcome:'ok',occurred_at:new Date('2026-10-29T10:00:00Z'),payload:{message:'one\ntwo'}};
     store.query=async(sql,values=[])=>{
+      if(['BEGIN','COMMIT','ROLLBACK'].includes(sql))return {rows:[]} as any;
       assert.ok(sql.includes(table));
+      if(sql.startsWith('SELECT'))assert.match(sql,/SKIP LOCKED/,'Concurrent workers must claim disjoint batches');
       if(sql.startsWith('SELECT'))return {rows:pending?[event]:[]} as any;
       if(failAck)throw new Error('Database ack unavailable');
       acknowledged.push(values);pending=false;return {rows:[],rowCount:1} as any;

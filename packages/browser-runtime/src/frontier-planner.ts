@@ -64,7 +64,7 @@ export class FrontierPlanner {
   available(id: string) {
     const node = this.nodes.get(id)!;
     return (node.capture.observation.controls ?? []).filter(control => !node.attempted.has(control.control_id)
-      && !blockedReason(control, new URL(this.targetUrl).origin));
+      && !this.memory?.withheld?.has(control.control_id) && !blockedReason(control, new URL(this.targetUrl).origin));
   }
   refocus() {
     // Preserve observed paths/attempted actions. Cached hypotheses may guide a

@@ -19,7 +19,10 @@ export type RememberedControl = { url: string; control_id: string; role: string;
   best_likelihood: number | null; last_verdict: 'no_issue_observed' | 'suspect' | 'inconclusive' | null;
   last_observed_result: string | null; blocked_reason: string | null };
 export type MemorySnapshot = { version: typeof MEMORY_VERSION; scope_id: string; scope: MemoryScope; prior_runs: number; truncated: boolean;
-  pages: Map<string, RememberedPage>; controls: Map<string, RememberedControl>; by_page: Map<string, RememberedControl[]> };
+  pages: Map<string, RememberedPage>; controls: Map<string, RememberedControl>; by_page: Map<string, RememberedControl[]>;
+  // Controls whose action was in flight when a run was interrupted. Their
+  // outcome is unknown, so a resumed run never tries them again.
+  withheld?: ReadonlySet<string> };
 
 // GET links with secrets, one-time tokens or sign-out semantics are never
 // reopened from memory, even though an earlier run observed them.
@@ -33,6 +36,36 @@ export function jumpableUrl(raw: string, origin: string): boolean {
   words = words.replace(/[/_?=&.+-]+/g, ' ');
   if (actionRisk(words) || /\b(log|sign)[ -]?(out|off)\b/i.test(words)) return false;
   return ![...url.searchParams.keys()].some(key => SENSITIVE_PARAMETER.test(key));
+}
+
+// A resumed exploration continues an interrupted job in a new run. The earlier
+// runs' own records stand in for memory, even when app memory is off.
+export async function resumeSnapshot(store: Store, runIds: string[], scope: MemoryScope): Promise<MemorySnapshot> {
+  const pageRows = (await store.query(`SELECT s.url,(array_agg(c.observation->>'title' ORDER BY s.created_at DESC))[1] AS title,count(*)::int AS visits,
+      bool_or(COALESCE((c.observation->>'controls_truncated')::boolean,false)) AS controls_truncated,(array_agg(s.run_id ORDER BY s.created_at DESC))[1] AS last_run_id
+    FROM exploration_states s JOIN runtime_captures c ON c.capture_id=s.representative_capture_id
+    WHERE s.run_id=ANY($1::uuid[]) GROUP BY s.url ORDER BY max(s.created_at) DESC LIMIT $2`, [runIds, MAX_PAGES + 1])).rows;
+  const controlRows = (await store.query(`SELECT s.url,f.control_id,(array_agg(f.control))[1] AS control,count(DISTINCT f.action_id)::int AS attempts,
+      (array_agg(a.assessment->>'verdict' ORDER BY a.ordinal DESC) FILTER (WHERE a.state='completed'))[1] AS last_verdict,
+      (array_agg(left(a.assessment->>'observed_result',300) ORDER BY a.ordinal DESC) FILTER (WHERE a.state='completed'))[1] AS last_observed_result,
+      (array_agg(f.reason) FILTER (WHERE f.status='blocked'))[1] AS blocked_reason,
+      bool_or(a.dispatched_at IS NOT NULL AND a.state IN ('interrupted','evidence_failed','cancelled')) AS unknown_outcome
+    FROM exploration_frontier f JOIN exploration_states s ON s.run_id=f.run_id AND s.state_id=f.state_id
+    LEFT JOIN runtime_actions a ON a.action_id=f.action_id
+    WHERE f.run_id=ANY($1::uuid[]) AND f.control->>'role'<>'scroll' GROUP BY s.url,f.control_id LIMIT $2`, [runIds, MAX_CONTROLS + 1])).rows;
+  const pages = new Map<string, RememberedPage>(pageRows.slice(0, MAX_PAGES).map(p => [p.url, { url: p.url, title: p.title, visits: p.visits,
+    best_path_score: null, controls_truncated: p.controls_truncated, last_run_id: p.last_run_id, last_action_id: null }]));
+  const controls = new Map<string, RememberedControl>(), byPage = new Map<string, RememberedControl[]>(), withheld = new Set<string>();
+  for (const c of controlRows.slice(0, MAX_CONTROLS)) {
+    if (c.unknown_outcome) withheld.add(c.control_id);
+    if (!pages.has(c.url)) continue;
+    const remembered: RememberedControl = { url: c.url, control_id: c.control_id, role: c.control.role, name: c.control.name, href: c.control.href ?? null,
+      attempts: c.attempts, best_likelihood: null, last_verdict: c.last_verdict ?? null, last_observed_result: c.last_observed_result ?? null, blocked_reason: c.blocked_reason ?? null };
+    controls.set(c.control_id, remembered);
+    byPage.set(c.url, [...(byPage.get(c.url) ?? []), remembered]);
+  }
+  return { version: MEMORY_VERSION, scope_id: runIds.at(-1)!, scope, prior_runs: runIds.length,
+    truncated: pageRows.length > MAX_PAGES || controlRows.length > MAX_CONTROLS, pages, controls, by_page: byPage, withheld };
 }
 
 export class AppMemory {

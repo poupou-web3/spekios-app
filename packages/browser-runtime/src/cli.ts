@@ -29,14 +29,20 @@ try {
       console.log(JSON.stringify({ mode: 'fixture_defined', model_connected: false, runs: results }, null, 2));
     } finally { await target.close(); }
   } else if (command === 'explore-matrix' && id) {
-    const runs = [], appMemory = await memory();
-    for (const profile of Object.keys(viewportProfiles) as ViewportProfile[]) {
-      const result = await explore(store,id,{viewportProfile:profile,appMemory});
-      runs.push({viewport_profile:profile,run_id:result.run_id,lifecycle:result.report.run.lifecycle,manifest_key:result.report.run.manifest_key,
-        error:result.report.run.error,manifest_error:result.manifest_error,export_error:result.export_error});
-      if (result.report.run.lifecycle!=='completed'||result.manifest_error||result.export_error) process.exitCode=1;
-    }
-    console.log(JSON.stringify({mode:'sequential_viewport_matrix',runs},null,2));
+    const appMemory = await memory();
+    const runs = await Promise.all((Object.keys(viewportProfiles) as ViewportProfile[]).map(async profile => {
+      const session = await store.session();
+      try {
+        const result = await explore(session, id, { viewportProfile: profile, appMemory });
+        if (result.report.run.lifecycle !== 'completed' || result.manifest_error || result.export_error) process.exitCode = 1;
+        return { viewport_profile: profile, run_id: result.run_id, lifecycle: result.report.run.lifecycle, manifest_key: result.report.run.manifest_key,
+          error: result.report.run.error, manifest_error: result.manifest_error, export_error: result.export_error };
+      } catch (error) {
+        process.exitCode = 1;
+        return { viewport_profile: profile, error: error instanceof Error ? error.message : 'Exploration failed' };
+      } finally { await session.close(); }
+    }));
+    console.log(JSON.stringify({ mode: 'concurrent_viewport_matrix', runs }, null, 2));
   } else if ((command === 'explore' || command === 'reproduce') && id) {
     const result = command === 'reproduce' ? await reproduce(store, id) : await explore(store, id, { appMemory: await memory() });
     console.log(JSON.stringify({ run_id: result.run_id, lifecycle: result.report.run.lifecycle,

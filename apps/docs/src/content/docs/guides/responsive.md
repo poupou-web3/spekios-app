@@ -8,7 +8,7 @@
   }
 }
 ---
-Scout records each viewport exploration separately. Select a profile in the URL form or use the matrix command to run all three.
+Scout records each viewport exploration separately. Select a profile in the URL form or use the matrix command to run all three at once, one browser each.
 
 | Profile | Viewport in CSS pixels |
 | --- | --- |

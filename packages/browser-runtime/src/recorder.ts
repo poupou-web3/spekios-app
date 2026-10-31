@@ -108,8 +108,9 @@ export async function capture(store: Store, page: Page, runId: string, actionId:
 
 export async function record(store: Store, targetUrl: string, input: ActionSpec[], hooks: Hooks = {}) {
   const specs = validatePlan(targetUrl, input);
-  return store.exclusive(async () => {
-    const runId = randomUUID();
+  const runId = randomUUID();
+  // The run lock keeps recovery off this recording until the connection drops.
+  return store.locked('run:' + runId, async () => {
     await store.transaction(async () => {
       await store.query("INSERT INTO runtime_runs(run_id,workspace_id,user_id,target_url,lifecycle,config) VALUES($1,$2,$3,$4,'active',$5)",
         [runId, store.workspaceId, store.userId, targetUrl, JSON.stringify({ runtime_version: 'recorder-v1', expectation_source: 'fixture_defined',
