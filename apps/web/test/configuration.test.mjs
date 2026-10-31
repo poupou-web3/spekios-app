@@ -21,6 +21,9 @@ test('defaults validate the same supported models, limits and free-only restrict
   assert.equal(ui.configurationError({...values,max_actions:10000,max_minutes:10080,max_tokens:1000000000,max_cost_usd:2.5}),'');
   assert.equal(ui.configurationError({...values,provider:'openai',model:'provider-model',free_only:false}),'');
   assert.equal(ui.configurationError({...values,provider:'meta',model:'muse-wonder-1.0',free_only:false}),'');
+  for(const exploration_strategy of [{breadth:50,depth:30,rewalk:30,adaptive:true},{breadth:0,depth:0,rewalk:100,adaptive:true},{breadth:50.5,depth:29.5,rewalk:20,adaptive:true},{breadth:null,depth:80,rewalk:20,adaptive:true},{breadth:-5,depth:85,rewalk:20,adaptive:true}])
+    assert.ok(ui.configurationError({...values,exploration_strategy}),JSON.stringify(exploration_strategy));
+  assert.equal(ui.configurationError({...values,exploration_strategy:{breadth:0,depth:100,rewalk:0,adaptive:false}}),'');
 });
 test('changing providers never carries another provider model or free-only billing assumption',()=>{
   const ui=workspace();ui.updateConfiguration('provider','openai');let d=ui.configurationDraft();assert.equal(d.values.model,'');assert.equal(d.values.free_only,false);
@@ -75,7 +78,7 @@ test('an old acknowledgement cannot discard a new draft after reconnecting with 
 });
 test('configuration text is escaped, exposes no secret input and clearly separates immutable environment policy',()=>{
   const ui=workspace();ui.updateConfiguration('model','<script>bad()</script>');const html=ui.configurationView();assert.doesNotMatch(html,/<script>|type="password"/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Queued and running jobs keep their original settings/);assert.match(html,/Saving does not call a model/);
-  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','free_only','limit_overrides','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','provider','stop_after_idle_actions','viewport_profile'].sort());
+  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','provider','stop_after_idle_actions','viewport_profile'].sort());
 });
 test('previous and next follow the visible list, preserve comparison, and reject stale targets',()=>{
   const ui=workspace();ui.state.report={run:{},actions:[{action_id:'one'},{action_id:'two'},{action_id:'three'}],events:[]};ui.state.actionId='one';ui.state.image='compare';ui.state.frameId='old';
@@ -116,4 +119,14 @@ test('limits are empty (no limit) unless saved, and overrides for projects and m
   await ui.saveConfiguration();
   assert.equal(sent.max_actions,null,'An empty limit is sent as null: no limit.');assert.equal(sent.max_tokens,200000);
   assert.deepEqual(sent.limit_overrides,[{project_id:project,model:'openrouter/free',limits:{max_actions:300,max_minutes:45}}],'Empty override fields inherit and are omitted.');
+});
+test('the exploration strategy split is a saved default with an adaptive switch',async()=>{
+  let sent;const ui=workspace(async(url,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults,explorationStrategy:{breadth:40,depth:40,rewalk:20,adaptive:false}}},201);});
+  assert.deepEqual(plain(ui.configurationValues().exploration_strategy),{breadth:50,depth:30,rewalk:20,adaptive:true},'The default split applies when nothing is saved.');
+  const html=ui.configurationView();assert.match(html,/Exploration strategy/);assert.match(html,/data-configuration-field="strategy.rewalk"/);assert.match(html,/Total 100% of 100%/);
+  assert.equal(ui.updateConfiguration('strategy.order','bfs'),false,'Only the three shares and the switch exist.');
+  ui.updateConfiguration('strategy.breadth',40);const draft=ui.configurationDraft();assert.match(ui.configurationError(draft.values),/add up to 100%/);
+  ui.updateConfiguration('strategy.depth',40);ui.updateConfiguration('strategy.adaptive',false);assert.equal(ui.configurationError(draft.values),'');
+  await ui.saveConfiguration();
+  assert.deepEqual(sent.exploration_strategy,{breadth:40,depth:40,rewalk:20,adaptive:false});
 });

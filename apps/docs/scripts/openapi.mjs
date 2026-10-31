@@ -200,7 +200,7 @@ export function openapi(catalog) {
   });
   add('/v1/app-memory/{scope_id}/map', 'get', 'getAppMap', 'Settings', 'Read the app map carried between runs for one scope', {
     parameters: [pathParameter('scope_id'), query('offset', bounded(0,100000,0), 'States to skip, ordered by depth then page template.'), query('limit', bounded(1,100,20), 'Maximum states.')],
-    description: 'States by depth from the entry page with where each control led (up to 40 transitions per state), verdict counts and up to 12 controls no run has tried there. A state is a page template (identifiers become :n or :id) plus the controls it offers, with repeated list items collapsed. Written by explorations that use app memory. No model call.',
+    description: 'States by depth from the entry page with where each control led (up to 40 transitions per state), verdict counts and up to 12 controls no run has tried there. The summary reports coverage at each depth (by_depth): control entries any run acted on out of those the screens offer. A state is a page template (identifiers become :n or :id) plus the controls it offers, with repeated list items collapsed. Written by explorations that use app memory. No model call.',
   });
   add('/v1/runs/{run_id}/map-diff', 'get', 'compareRunMap', 'Runs', 'Compare a run with earlier runs of the same app scope', {
     parameters: [pathParameter('run_id')],
@@ -279,6 +279,8 @@ export function openapi(catalog) {
           limit_overrides: { type: 'array', maxItems: 50, items: strict({ project_id: uuid, provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 },
             limits: strict({ ...limitFields, stop_after_idle_actions: { type: ['integer','null'], minimum: 5, maximum: 1000 } }, []) }, ['limits']),
             description: 'Limits for a project, a model, or a model within a project. A job applies matching overrides least specific first (model, project, then both); absent keys inherit and null means no limit.' },
+          exploration_strategy: { ...strict({ breadth: bounded(0,100), depth: bounded(0,100), rewalk: bounded(0,100), adaptive: bool }, ['breadth','depth','rewalk','adaptive']),
+            description: 'How each run shares its actions: new territory across the app\'s areas (breadth), deep journeys that follow one path while it reaches new screens (depth), and re-walking transitions earlier runs recorded to compare outcomes (rewalk). Whole percentages that sum to 100; breadth or depth above zero. Adaptive shares follow what each strategy finds, keeping at least a quarter of their share. Omitted: 50/30/20, adaptive.' },
           viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
           auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,100),
           app_memory: { type: 'boolean', default: true, description: 'Remember explored pages and controls across runs of the same app, viewport and sign-in state.' },

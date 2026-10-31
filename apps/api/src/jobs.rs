@@ -39,6 +39,32 @@ pub const MAX_AUTO_REPLAY_ACTIONS: u32 = MAX_REPLAY_STEPS * 2;
 /// Recorded actions in a verifiable issue path, including skipped plans.
 const MAX_ISSUE_PATH: usize = MAX_REPLAY_STEPS as usize * 2;
 
+/// How a run's actions are shared between new territory (breadth), deep
+/// journeys (depth) and re-walking transitions earlier runs recorded, in
+/// whole percentages that sum to 100. Adaptive shares follow what each finds.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Strategy {
+    breadth: u8,
+    depth: u8,
+    rewalk: u8,
+    adaptive: bool,
+}
+impl Strategy {
+    fn normalize(&self) -> Result<Value, &'static str> {
+        let total = u16::from(self.breadth) + u16::from(self.depth) + u16::from(self.rewalk);
+        if total != 100 || self.breadth == 0 && self.depth == 0 {
+            return Err("invalid_settings_strategy");
+        }
+        Ok(
+            json!({"breadth":self.breadth,"depth":self.depth,"rewalk":self.rewalk,"adaptive":self.adaptive}),
+        )
+    }
+}
+pub fn default_strategy() -> Value {
+    json!({"breadth":50,"depth":30,"rewalk":20,"adaptive":true})
+}
+
 /// Absent stays None; an explicit JSON null becomes Some(None), "no limit".
 fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
@@ -224,6 +250,9 @@ pub struct SettingsSubmission {
     stop_after_idle_actions: Option<Option<u32>>,
     #[serde(default)]
     limit_overrides: Vec<LimitOverride>,
+    /// Absent keeps the default split.
+    #[serde(default)]
+    exploration_strategy: Option<Strategy>,
     viewport_profile: String,
     free_only: bool,
     auto_reproduce: bool,
@@ -291,6 +320,10 @@ impl SettingsSubmission {
             return Err("duplicate_limit_override");
         }
         limits.insert("limitOverrides".into(), json!(overrides));
+        let strategy = match &self.exploration_strategy {
+            Some(strategy) => strategy.normalize()?,
+            None => default_strategy(),
+        };
         if !(1..=3).contains(&self.max_auto_reproductions)
             || !(1..=MAX_AUTO_REPLAY_ACTIONS).contains(&self.max_auto_replay_actions)
         {
@@ -314,7 +347,8 @@ impl SettingsSubmission {
                     "provider":self.provider,"model":model,
                     "viewportProfile":self.viewport_profile,"freeOnly":free_only,
                     "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
-                    "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory
+                    "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory,
+                    "explorationStrategy":strategy
                 });
                 settings.as_object_mut().unwrap().extend(limits);
                 settings
@@ -336,6 +370,7 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
             "maxCostUsd",
             "stopAfterIdleActions",
             "limitOverrides",
+            "explorationStrategy",
             "viewportProfile",
             "freeOnly",
             "autoReproduce",
@@ -912,6 +947,7 @@ impl Queue {
                 "maxActions":optional_setting("SCOUT_EXPLORER_MAX_ACTIONS",MAX_EXPLORATION_ACTIONS),
                 "maxMinutes":optional_setting("SCOUT_EXPLORER_MAX_MINUTES",MAX_EXPLORATION_MINUTES),
                 "maxTokens":null,"maxCostUsd":null,"stopAfterIdleActions":DEFAULT_IDLE_ACTIONS,"limitOverrides":[],
+                "explorationStrategy":default_strategy(),
                 "appMemory":env::var("SCOUT_EXPLORER_APP_MEMORY").as_deref()!=Ok("false"),
                 "autoReproduce":env::var("SCOUT_AUTO_REPRODUCE").as_deref()==Ok("true"),
                 "maxAutoReproductions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_CASES",2,3),
@@ -1288,6 +1324,26 @@ mod tests {
                 "limit_overrides",
                 json!([{"model":"m","limits":{"max_actions":5}},{"model":"m","limits":{"max_minutes":5}}]),
             ),
+            (
+                "exploration_strategy",
+                json!({"breadth":50,"depth":30,"rewalk":30,"adaptive":true}),
+            ),
+            (
+                "exploration_strategy",
+                json!({"breadth":0,"depth":0,"rewalk":100,"adaptive":true}),
+            ),
+            (
+                "exploration_strategy",
+                json!({"breadth":50,"depth":50,"rewalk":0}),
+            ),
+            (
+                "exploration_strategy",
+                json!({"breadth":50,"depth":50,"rewalk":0,"adaptive":true,"order":"bfs"}),
+            ),
+            (
+                "exploration_strategy",
+                json!({"breadth":-10,"depth":90,"rewalk":20,"adaptive":true}),
+            ),
             ("api_key", json!("cannot-save-secrets")),
             ("allowed_origins", json!(["https://other.test"])),
             ("allowedOrigins", json!(["https://other.test"])),
@@ -1332,6 +1388,18 @@ mod tests {
         assert_eq!(
             normalize_settings(fresh).unwrap().settings["appMemory"],
             false
+        );
+        assert_eq!(
+            normalize_settings(settings_input()).unwrap().settings["explorationStrategy"],
+            default_strategy(),
+            "Omitted strategy keeps the default split"
+        );
+        let mut split = settings_input();
+        split["exploration_strategy"] =
+            json!({"breadth":0,"depth":70,"rewalk":30,"adaptive":false});
+        assert_eq!(
+            normalize_settings(split).unwrap().settings["explorationStrategy"],
+            json!({"breadth":0,"depth":70,"rewalk":30,"adaptive":false})
         );
     }
 

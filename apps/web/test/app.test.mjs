@@ -27,6 +27,15 @@ test('untrusted page titles, expectations and model outputs remain text',()=>{
   assert.ok(!html.includes('<script>'));
   assert.match(html,/70\/100/);
   assert.match(html,/Discovery tree/);
+  const graph={states:[{state_id:'blank',url:'about:blank',planning:{depth:0}},{state_id:'root',url:'https://app.test/',planning:{depth:0,parent_state_id:null}},{state_id:'deep',url:'https://app.test/a',planning:{depth:1,parent_state_id:'root'}}],
+    frontier:[{state_id:'root',status:'attempted',control:{role:'link'}},{state_id:'root',status:'blocked',control:{role:'button'}},{state_id:'root',status:'unexplored',control:{role:'scroll'}},{state_id:'deep',status:'unexplored',control:{role:'button'}},{state_id:'deep',status:'attempted',control:{role:'button'}}],
+    selections:[{purpose:'explore',selected:{name:'A',reason:'r'},ranked_paths:[],strategy:{mode:'breadth',shares:{breadth:.6,depth:.25,rewalk:.15}}},{purpose:'explore',selected:{name:'B',reason:'r',rewalk:{}},ranked_paths:[],strategy:{mode:'rewalk',shares:{breadth:.5,depth:.3,rewalk:.2}}}]};
+  const coverage=ui.planningView(graph);
+  assert.match(coverage,/Depth and coverage/);assert.match(coverage,/1 deep/);
+  assert.match(coverage,/<tr><td>0<\/td><td>1<\/td><td>1 \/ 1<\/td><td>100%<\/td><td>1<\/td><\/tr>/,'Scroll affordances and the blank start page are not coverage.');
+  assert.match(coverage,/<tr><td>1<\/td><td>1<\/td><td>1 \/ 2<\/td><td>50%<\/td><td>0<\/td><\/tr>/);
+  assert.match(coverage,/New territory 1 \(share now 50%\) · Deep journey 0 \(share now 30%\) · Re-walk 1 \(share now 20%\)/);
+  assert.match(coverage,/Repeating a recorded transition/);
 });
 test('partial token and cost reports are shown as known subtotals',()=>{
   const ui=view();

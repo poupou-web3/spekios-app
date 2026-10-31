@@ -1,6 +1,6 @@
 # Choosing the next path
 
-Implemented on 23 October 2026 as `frontier-v1` and extended on 30 October as `frontier-v2`. The URL explorer schedules unexplored controls across its recorded state graph, returns to earlier branches, and replans when the screen changes. `frontier-v2` observes controls anywhere in the document, uses [memory from earlier runs](#memory-across-runs) of the same app and allows up to 50 actions. Its discovery tree and ranked choices are shown in the workspace's **Flow** tab.
+Implemented on 23 October 2026 as `frontier-v1`, extended on 30 October as `frontier-v2` and on 31 October as `frontier-v3`. The URL explorer schedules unexplored controls across its recorded state graph, returns to earlier branches, and replans when the screen changes. `frontier-v2` observes controls anywhere in the document and uses [memory from earlier runs](#memory-across-runs) of the same app. `frontier-v3` [shares each run's actions](#sharing-actions-between-strategies) between new territory, deep journeys and re-walking transitions from the app map, and reports coverage at each depth. Its discovery tree, strategy split and ranked choices are shown in the workspace's **Flow** tab.
 
 This is a bounded exploration algorithm. Model scores are hypotheses about the next user action, not measured or calibrated probabilities. It ranks observed possibilities; it does not invent a complete future application tree.
 
@@ -28,7 +28,9 @@ local = max(0.01,
   + 0.10 × never_attempted_control            (this run or earlier runs)
   + 0.10 × new_since_earlier_runs             (page known, control not seen before)
   - 0.15 × min(previous_attempts_of_control, 3)
-  - 0.20 × tried_in_earlier_runs              (0.10 if its last result was not "no issue"))
+  - 0.20 × tried_in_earlier_runs              (0.10 if its last result was not "no issue")
+  - 0.20 × same_entry_tried_in_this_run       (another list item or the same control on an equivalent screen)
+  - 0.20 × same_entry_tried_in_earlier_runs   (app map; only when URL memory has no attempt))
 
 priority = local × (0.6 + 0.4 × sqrt(discovery_path_score))
                  / (1 + 0.3 × return_steps)
@@ -41,6 +43,20 @@ Boolean terms are zero or one. An initial page has discovery path score 1. Later
 Earlier-run terms are zero when memory is off or empty. `new_since_earlier_runs` is withheld when the earlier observation of that page was truncated, so a control cannot look new only because it was not listed before.
 
 The model estimates likely intent; the scheduler also balances useful coverage and travel cost. A newly revealed menu item scored 0.65 can outrank an unchanged Help link scored 0.80 because it continues the interaction and occupies a changed region. Conversely, a high score never makes a blocked control eligible. Exact-state attempts are excluded; repeated control identities in other states receive a penalty rather than being globally forbidden.
+
+## Sharing actions between strategies
+
+Each run's executed actions are shared between three strategies (`strategy-v1`), 50/30/20 by default and configurable per user ([guide](../../apps/docs/src/content/docs/guides/exploration-strategy.md)):
+
+- **breadth** (new territory) ranks with the score above multiplied by an area balance. An area is a depth-1 state and everything discovered from it; actions are counted from each executed transition's source state. With `fair = max(6, actions so far / known areas)`, where known areas are depth-1 states plus untried entry-page controls plus one, a candidate in an area that used `n > fair` actions is multiplied by `fair / n`. Breadth also offers a return to any reachable state with unranked controls (score as a remembered unranked page, 0.30), because one plan ranks at most eight. Remembered pages compete unchanged.
+- **depth** (deep journeys) multiplies the score by `(1 + 0.25 × depth) / (1 + return_steps)`. Remembered pages use their app-map depth and count as one return step.
+- **rewalk** lists app-map transitions from map states equivalent to reachable states, groups them by action key, and maps each to an available control with the same entry and an identical transition key. Clicks, authorized submits, selects and checkbox changes are re-walkable (choices recorded since `strategy-v1`); text entry and navigation are not. Priority is `(0.5 + 0.3 × earlier_suspect_or_inconclusive + 0.2 × several_destinations) × (0.6 + 0.4 × √path) / (1 + 0.3 × return_steps)`. Each `(map state, action key)` is walked at most once per run. Its prediction is a separate `rewalk_prediction` request with earlier results as untrusted hints; the screen is not replanned first.
+
+Scheduling is a deficit round-robin. After each executed action, every strategy that had a candidate gains its current share as credit and the executing one is charged one action; the largest credit minus spent takes the next turn (ties: larger configured share). A turn continues until its first action, while travelling (`return`/`resume`) toward its target, and for depth while each step creates a state new to the run, the next depth candidate needs no travel and the journey is below 12 steps. Breadth and rewalk turns end after one target action.
+
+With adaptive shares (default), each strategy's yield is `(0.5 × 2 + Σ 0.8^age × reward) / (2 + Σ 0.8^age)` and its share is `configured × (0.25 + 0.75 × yield / best_yield)`, normalized over strategies with candidates. Rewards per action: 1 for a map state no run reached before, 0.3 for a state new to this run, 1 for a changed known transition (other destination, or verdict flipped between `no_issue_observed` and `suspect`), 0.2 for a matching one, plus 0.5 for a suspect, capped at 1. An operator testing focus pauses re-walks. Rewards and weights are engineering defaults, not fitted.
+
+Every action whose `(from map state, action key)` the app map already holds is compared, whichever strategy chose it: the assessment request gets `earlier_runs` (same destination, last observed result and verdict, labelled as stale-able hints), and `exploration.compared` records known destinations, the new one and both verdicts. Selections record `strategy` (mode, turn, shares, yields, deficits and candidate counts). At the end the run configuration holds `strategy` and `coverage_by_depth`: per depth, http(s) states, usable controls, tried controls, blocked controls and their ratio.
 
 ## Returning to branches
 
@@ -96,7 +112,7 @@ The matrix runs the three profiles at once. Each has its own browser, run ID, gr
 
 ## Inspecting the evidence
 
-The Flow tab shows ranked candidates with their discovery paths, next-action and path scores, return cost and selection reason, followed by the discovery tree and full recorded graph. PostgreSQL stores the state/frontier projections and decision lineage. The immutable run manifest includes them. `exploration.selected`, `exploration.replanned` and `exploration.return_changed` events export to ClickHouse with run/action/capture references. Model request/response payloads and token usage retain their existing durable records.
+The Flow tab shows ranked candidates with their discovery paths, next-action and path scores, return cost and selection reason, followed by the discovery tree, depth and coverage per level with actions per strategy, and the full recorded graph. PostgreSQL stores the state/frontier projections and decision lineage. The immutable run manifest includes them. `exploration.selected`, `exploration.replanned`, `exploration.return_changed` and `exploration.compared` events export to ClickHouse with run/action/capture references. Model request/response payloads and token usage retain their existing durable records.
 
 Run `just explorer-test` for real Chromium/storage checks with simulated models. Coverage includes dead-end return, route costs and cycles, refreshed scores, changed-control priority, one-pixel mask intersections, covered controls, stale-plan recovery and its limit, the time limit, controls revealed further down the page (and a covered one skipped), memory recording, a resumed page with exact replay, memory-free runs and per-viewport scopes, all three viewports, and fresh replay through a return path. The end-to-end planner record is written to `artifacts/exploration-planner/verification.json`. `just workspace-test` checks profile admission and the queued worker; `just web-contract-test` checks templates against persisted results. Browser layout/interaction verification remains unverified because computer-use access was restricted.
 

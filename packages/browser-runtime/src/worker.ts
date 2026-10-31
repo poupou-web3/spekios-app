@@ -65,6 +65,8 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
           viewportProfile: job.settings.viewportProfile, access, authMode: job.request.auth_mode ?? 'auto', sessionId: job.request.session_id,
           maxDurationMs: minutes == null ? minutes : minutes * 60000,
           maxTokens: limit('maxTokens') ?? null, maxCostUsd: limit('maxCostUsd') ?? null, stopAfterIdleActions: limit('stopAfterIdleActions') ?? null,
+          // Jobs admitted before strategies existed use the default split.
+          strategy: job.settings.explorationStrategy ?? null,
           shutdown: shutdown.signal, resume };
         const result = await (job.request.kind === 'verify_fix' ? verifyFix(session, job.job_id, options) : job.request.kind === 'reproduce'
           ? reproduce(session, job.request.source_action_id, options)

@@ -145,3 +145,13 @@ test('exported focus history preserves command and decision references without t
   const report=fixture();report.steering={revision:2,messages:[{revision:1,focus:'<script>run()</script>',status:'applied',steering_id:id(70),decision_id:id(71)},{revision:2,focus:'',status:'not_applied',steering_id:id(72),decision_id:null}]};
   const md=reportMarkdown(report,options);assert.match(md,/## Testing focus/);assert.ok(md.includes(id(70)));assert.ok(md.includes(id(71)));assert.ok(md.includes('not'+String.fromCharCode(92)+'_applied'));assert.doesNotMatch(md,/<script>/);assert.match(md,/Restore normal exploration/);
 });
+
+test('coverage by depth and the strategy split are reported when the run recorded them',()=>{
+  const report=fixture();assert.doesNotMatch(reportMarkdown(report,options),/Coverage by depth|Exploration strategy/,'Older runs have neither.');
+  report.run.config.coverage_by_depth=[{depth:0,states:1,controls:4,tried:3,blocked:1,coverage:.75},{depth:1,states:2,controls:6,tried:1,blocked:0,coverage:.167}];
+  report.run.config.strategy={settings:{breadth:50,depth:30,rewalk:20,adaptive:true},actions:{breadth:3,depth:1,rewalk:0},turns:{breadth:3,depth:1,rewalk:0},shares:{breadth:.6,depth:.4,rewalk:0},compared_transitions:2,changed_transitions:1,longest_journey:1};
+  const markdown=reportMarkdown(report,options);
+  assert.match(markdown,/\| 0 \| 1 \| 3 \\\/ 4 \| 75% \| 1 \|/);assert.match(markdown,/\| 1 \| 2 \| 1 \\\/ 6 \| 17% \| 0 \|/);
+  assert.match(markdown,/\| New territory \| 50% \| 3 \| 3 \| 60% \|/);assert.match(markdown,/\| Re\\-walk known paths \| 20% \| 0 \| 0 \| 0% \|/);
+  assert.match(markdown,/compared with earlier runs: 2, of which 1 changed/);assert.doesNotMatch(markdown,/undefined|NaN/);
+});

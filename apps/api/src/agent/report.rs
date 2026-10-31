@@ -844,7 +844,9 @@ fn build_report(report: &Value, progress: Option<Value>, options: &ReportQuery) 
         "no_issue_observed_actions":actions.iter().filter(|a|a["assessment"]["verdict"]=="no_issue_observed").count(),
         "categories":totals,"stop_reason":run["config"]["stop_reason"],"total_items":categorized.len(),
         "triage":triage_totals(report,&actions),
-        "execution_issue_count":execution_issues.len()},
+        "execution_issue_count":execution_issues.len(),
+        // Depth reached, coverage per level and how the strategies shared the run, once it ends.
+        "coverage_by_depth":run["config"]["coverage_by_depth"],"strategy":run["config"]["strategy"]},
       "execution_issues":execution_issues,
       "progress":progress,"steering":steering_summary(&report["steering"]),"usage":report["model_usage"],"fix_verification":report["fix_verification"],
       "automatic_checks":list(&report["automatic_reproductions"]).iter().map(automatic_summary).collect::<Vec<_>>(),

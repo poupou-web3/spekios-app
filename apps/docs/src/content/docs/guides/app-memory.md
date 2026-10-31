@@ -42,6 +42,8 @@ The map is updated after every action. For each state it records how deep it is 
 
 A state the run did not reach again was not visited; that is not proof it was removed.
 
+Later runs re-walk transitions from the map and compare their outcomes; see [breadth, depth and re-walks](../exploration-strategy/). The map's **summary.by_depth** reports, for each depth, how many control entries any run has acted on.
+
 ## Turn it on or off
 
 Memory is on by default for explorations with a live model. Turn off **Remember explored pages and controls across runs** in **Settings → Exploration defaults** to explore without it. A run with memory off neither reads nor records it. Runs with simulated test models use memory only when the job explicitly asks for it, so repeated test runs stay independent.

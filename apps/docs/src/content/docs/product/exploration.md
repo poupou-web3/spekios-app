@@ -30,6 +30,10 @@ The frontier records reachable actions that have not yet been explored. Scout ca
 
 Returning consumes the same action budget. It does not restore server-side app data. An authentication-context change discards old return plans and starts from the entry URL in the new context.
 
+## Share the run between breadth, depth and re-walks
+
+Each run [shares its actions](../../guides/exploration-strategy/) between new territory spread across the app's areas, deep journeys that follow one path while it reaches new screens, and re-walking paths earlier runs recorded to compare where they lead now. The default split is 50/30/20 and adapts to what each strategy finds. The **Flow** tab shows depth reached and coverage at each level.
+
 ## Learn from earlier runs
 
 With [app memory](../../guides/app-memory/) on, a run knows which pages and controls earlier runs of the same app explored. Controls already tried rank lower, and controls new to a known page rank higher. A page an earlier run reached but did not finish can be reopened directly. Memory is keyed by page address and control identity, never by exact screenshots, and it never replaces fresh evidence.

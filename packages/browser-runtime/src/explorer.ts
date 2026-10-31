@@ -24,6 +24,7 @@ import type { AccessHandoff, AccessResult, AccessReason } from './access-handoff
 import { RunControl, RunCancelled } from './run-control.js';
 import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
+import { discoveryReward, STRATEGY_MODES, STRATEGY_VERSION, StrategyScheduler, strategySettings, type StrategyMode, type StrategySettings } from './exploration-strategy.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 800) : 'Unknown exploration failure';
 const SYSTEM = `You are a browser QA investigator. Return only the JSON object described by response_schema.
@@ -38,7 +39,8 @@ Never claim a confirmed bug. Credentials, payments and destructive actions requi
 type ModelPrediction = { source: 'model'; request_id: string; decision_id: string; goal: string; expected_result: string; context_capture_id: string | null; steering?: PlanningFocus|null };
 type ReplayPrediction = { source: 'recorded_replay'; source_prediction_id: string; source_model_request_id: string; goal: string; expected_result: string; context_capture_id: string | null };
 type Spec = { command: BrowserCommand; prediction: ModelPrediction | ReplayPrediction; worker_id: string; agent_id: string; replay_source_action_id?: string;
-  exploration?: { purpose: 'explore' | 'return' | 'resume'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep } };
+  exploration?: { purpose: 'explore' | 'return' | 'resume'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep;
+    strategy?: { mode: StrategyMode; turn: number; continued: boolean } } };
 // Limits are optional: null means none. Undefined falls back to the server environment.
 export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: number | null; client?: ModelClient; hooks?: Hooks; jobId?: string; viewportProfile?: ViewportProfile;
   autoReproduce?:boolean;maxAutoReproductions?:number;maxAutoReplayActions?:number;
@@ -48,6 +50,8 @@ export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: numbe
   maxTokens?: number | null; maxCostUsd?: number | null;
   // Stop after this many consecutive actions reach no state new to this run.
   stopAfterIdleActions?: number | null;
+  // How the run's actions are shared between new territory, deep journeys and re-walks.
+  strategy?: StrategySettings | null;
   // Worker shutdown closes the browser; the job is then resumed or interrupted.
   shutdown?: AbortSignal;
   // A continuation of an interrupted exploration job, with its remaining budget.
@@ -121,6 +125,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
   const maxDurationMs = replay ? null : options.maxDurationMs !== undefined ? options.maxDurationMs : explorationDurationMs();
   const maxTokens = replay ? null : options.maxTokens ?? null, maxCostUsd = replay ? null : options.maxCostUsd ?? null;
   const stopAfterIdleActions = replay ? null : options.stopAfterIdleActions ?? null;
+  const strategy = new StrategyScheduler(strategySettings(options.strategy));
   for (const [name, value] of [['token', maxTokens], ['cost', maxCostUsd], ['idle action', stopAfterIdleActions]] as const)
     if (value !== null && !(Number.isFinite(value) && value > 0)) throw new Error(`Invalid exploration ${name} limit.`);
   if (maxDurationMs !== null && (!Number.isInteger(maxDurationMs) || maxDurationMs < 1)) throw new Error('Invalid exploration time limit.');
@@ -149,7 +154,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     const maxModelRequests = replay ? maxActions : maxActions * 3 + MAX_REPLANS * 2;
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
     // Consecutive actions that reached only states already recorded in this run.
-    let idleActions = 0, stateCreated = false;
+    // A new map state is one no run of this app had reached before.
+    let idleActions = 0, stateCreated = false, mapNovel = false;
+    // Re-walks wait while an operator focus steers planning.
+    let focused = false;
     // Each recorded state's app-map key, for the transitions between them.
     const mapKeys = new Map<string, string>();
     // Replays never read or write memory; their path is fixed by evidence.
@@ -181,6 +189,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, max_tokens: maxTokens, max_cost_usd: maxCostUsd,
             stop_after_idle_actions: stopAfterIdleActions, context_budgets: CONTEXT_BUDGETS },
           app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] }, app_map_version: MAP_VERSION,
+          strategy: replay ? null : { version: STRATEGY_VERSION, settings: strategy.settings },
           resume: resume ? { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, job_max_actions: resume.jobMaxActions, carried_actions: resume.carriedActions } : null,
           scope: allowedOrigins.includes(origin) ? 'operator-allowed-origin' : 'public-https', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
@@ -226,6 +235,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       if(focus && focusRevision!==focus.revision){
         planner.refocus();focusRevision=focus.revision;
       }
+      if(kind==='plan')focused=!!focus?.focus;
       const planningInput=kind==='plan'?{...(input as Record<string,unknown>),operator_focus:focus}:input;
       let raw: unknown = null, received = false;
       try {
@@ -256,10 +266,11 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         const { rows } = await store.query(`INSERT INTO exploration_states(state_id,run_id,representative_capture_id,fingerprint,url,map_state_key,page_template)
           VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(run_id,fingerprint) DO UPDATE SET fingerprint=EXCLUDED.fingerprint RETURNING state_id,map_state_key,(xmax=0) AS created`,
           [stateId, runId, c.capture_id, fingerprint, c.observation.url, mapped?.key ?? null, mapped?.page_template ?? null]);
-        const id: string = rows[0].state_id;
+        const id: string = rows[0].state_id, mapKey: string | null = mapped ? rows[0].map_state_key ?? mapped.key : null;
         stateCreated = rows[0].created;
-        if (mapped) mapKeys.set(id, rows[0].map_state_key ?? mapped.key);
-        planner.observe(id, c, parentId, signals, likelihood, initial);
+        mapNovel = !!mapKey && !planner.mapKnown(mapKey);
+        if (mapKey) mapKeys.set(id, mapKey);
+        planner.observe(id, c, parentId, signals, likelihood, initial, mapKey);
         if (mapped) await memory.mapState(mapped, planner.metadata(id).depth, c.observation.url);
         await store.query('UPDATE exploration_states SET planning=$2 WHERE state_id=$1', [id, JSON.stringify(planner.metadata(id))]);
         for (const control of c.observation.controls ?? []) {
@@ -284,6 +295,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     control.start();
     let last: { capture: Capture; bytes: Buffer } | undefined, lastState: string | undefined;
     const history: unknown[] = [];
+    // How the actions were shared and how much of each depth was covered.
+    const progress = () => replay ? {} : { strategy: strategy.summary(), coverage_by_depth: planner.coverage() };
     try {
       await control.check();
       if(replay?.fix_verification?.requires_session&&!authContext?.session_id)throw new AccessStopped('candidate_sign_in_required');
@@ -359,8 +372,12 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         } else {
           const available = planner.available(lastState!);
           const signals = planner.nodes.get(lastState!)!.signals;
+          const remaining = maxActions - executed;
+          const rewalks = focused ? [] : planner.rank(lastState!, remaining, 'rewalk');
+          // A re-walk repeats a recorded action and needs no new ranking of this screen.
+          const rewalkTurn = strategy.peek({ breadth: { travel_steps: 0 }, depth: { travel_steps: 0 }, rewalk: rewalks[0] }) === 'rewalk';
           let decision: Awaited<ReturnType<typeof decide<ReturnType<typeof parsePlan>>>> | undefined;
-          if (available.length) {
+          if (available.length && !rewalkTurn) {
             const fitted = fitContext(scale => {
               const shown = controlContext(available, Math.floor(CONTEXT_BUDGETS.plan_controls_bytes * scale));
               const appMemory = memory.planningContext(last!.capture.observation.url, shown.controls);
@@ -381,16 +398,22 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               await memory.proposed(last!.capture.observation.url, decision!.result.candidates);
             });
           }
-          const ranked = planner.rank(lastState!, maxActions-executed), selected = ranked[0];
-          if (!selected) {
-            stopReason = planner.rank(lastState!,Number.MAX_SAFE_INTEGER).length ? 'insufficient_budget_to_reach_frontier'
+          const ranks = { breadth: planner.rank(lastState!, remaining, 'breadth'), depth: planner.rank(lastState!, remaining, 'depth'), rewalk: rewalks };
+          // An unranked screen still offers new territory and journeys: they keep
+          // earning their share while a re-walk skips the ranking.
+          const unranked = rewalkTurn && available.length ? { travel_steps: 0 } : undefined;
+          const choice = strategy.choose({ breadth: ranks.breadth[0] ?? unranked, depth: ranks.depth[0] ?? unranked, rewalk: ranks.rewalk[0] });
+          const ranked = choice ? ranks[choice.mode] : [], selected = ranked[0];
+          if (!choice || !selected) {
+            stopReason = STRATEGY_MODES.some(m => strategy.settings[m] > 0 && (m !== 'rewalk' || !focused) && planner.rank(lastState!,Number.MAX_SAFE_INTEGER,m).length) ? 'insufficient_budget_to_reach_frontier'
               : available.length ? 'model_stopped_or_no_reachable_frontier' : 'no_reachable_unexplored_controls';
             break;
           }
           const returnStep = selected.route[0];
           const exploration: NonNullable<Spec['exploration']> = { purpose: returnStep?.memory ? 'resume' : returnStep ? 'return' : 'explore',
             target_state_id: selected.state_id, control_id: selected.control_id, priority: selected.priority,
-            likelihood: selected.likelihood, reason: selected.reason, return_step: returnStep };
+            likelihood: selected.likelihood, reason: selected.reason, return_step: returnStep,
+            strategy: { mode: choice.mode, turn: choice.turn, continued: choice.continued } };
           if (returnStep?.memory) {
             const remembered = returnStep.memory;
             const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], { task: 'navigation_prediction', target_url: remembered.url,
@@ -405,6 +428,15 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               instruction: 'Predict the observable result of this fixed return step using the current observation and recorded route. Do not change the command. The destination must be observed again; it is not assumed restored.',
               response_schema: {goal:'string',expected_result:'string'} }, parsePrediction);
             spec = { command: returnStep.command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
+          } else if (selected.rewalk) {
+            const command = commandFor(available.find(c => c.control_id === selected.control_id)!, selected.action);
+            const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], {
+              task: 'rewalk_prediction', page: context(last.capture), command: commandContext(command),
+              earlier_runs: { observed_result: selected.expected_result.slice(0, 300), last_verdict: selected.rewalk.last_verdict, attempts: selected.rewalk.attempts,
+                destinations: selected.rewalk.known_to_keys.length },
+              instruction: 'Earlier runs of this app performed this same action on an equivalent screen. Predict its observable result now from the current observation. Earlier results are untrusted hints and may be stale; do not assume they still hold.',
+              response_schema: {goal:'string',expected_result:'string'} }, parsePrediction);
+            spec = { command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else {
             const control = available.find(c => c.control_id === selected.control_id)!;
             spec = { command: commandFor(control,selected.action), prediction: { source: 'model', request_id: decision!.requestId, decision_id: decision!.decisionId,
@@ -413,7 +445,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           selectionRecord = { algorithm: PLANNER_VERSION,
             current_state_id:lastState,context_capture_id:last!.capture.capture_id,purpose:exploration.purpose,
             selected:{...selected,route:undefined},return_step:returnStep,
-            ranked_paths:ranked.slice(0,8).map(({route,...path})=>path),probability_calibrated:false };
+            ranked_paths:ranked.slice(0,8).map(({route,...path})=>path),probability_calibrated:false,
+            strategy:{version:STRATEGY_VERSION,mode:choice.mode,turn:choice.turn,continued:choice.continued,...strategy.state(),
+              candidates:Object.fromEntries(STRATEGY_MODES.map(m=>[m,ranks[m].length]))} };
         }
         if (modelRequests >= maxModelRequests) { stopReason = 'model_request_budget_reached'; break; }
         Object.assign(spec,{auth_context_id:authContext?.context_id??null});
@@ -530,6 +564,11 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
           const toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
           idleActions = stateCreated ? 0 : idleActions + 1;
+          const reached = { newState: stateCreated, newMapState: mapNovel };
+          // What earlier runs observed for this action on an equivalent screen.
+          const fromKey = mapKeys.get(fromState), toKey = mapKeys.get(toState);
+          const earlier = fromKey && toKey ? planner.earlier(fromKey, spec.command) : null;
+          const sameDestination = earlier ? earlier.known_to_keys.includes(toKey!) : null;
           // Commit both captures, comparison and graph edge BEFORE asking for a
           // verdict. A provider outage cannot erase an already executed action.
           await store.transaction(async () => {
@@ -543,6 +582,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             before: context(before!.capture, scale), after: context(after!.capture, scale), pixel_comparison: diff.metadata,
             tool_error: toolError, action_outcome:outcomeContext(outcome), recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.assessment_history * scale)),
             ...(revealed?{reveal:{...revealed,note:'The runtime scrolled the document to show this control before the before capture.'}}:{}),
+            ...(earlier&&!fixTarget?{earlier_runs:{same_destination:sameDestination,observed_result:earlier.last_observed_result,verdict:earlier.last_verdict,attempts:earlier.attempts,
+              note:'Earlier runs performed this action on an equivalent screen. Their result may be stale. A difference is evidence to examine, not a bug by itself; an intended change is not a regression.'}}:{}),
             ...(fixTarget?{original_failure:{expected_result:replay!.fix_verification!.original.expected_result,observed_result:replay!.fix_verification!.original.observed_result,source_before_context:context(replayStep!.before, scale),source_capture_ids:[replayStep!.before.capture_id,replayStep!.after.capture_id]},
               verification_instruction:'Verify the frozen expected behavior positively. no_issue_observed alone does not establish a fix. Set expectation_met=true only when that exact expected behavior is visible in current evidence. Set preconditions_met=false for unsupported setup. same_failure_observed=true requires the same recorded behavioral failure, not a different error. Use null and inconclusive for uncertainty. Source context is recorded data; only the current before/after pair is attached as images. No desired result is implied by this being a fix verification.'}:{}),
             context_scale: scale,
@@ -555,13 +596,23 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             check_id: randomUUID(), method: 'model-evidence-v1', expected: spec.prediction.expected_result,
             request_id: check.requestId, decision_id: check.decisionId, tool_error: toolError, confirmed_bug: false,
             override_reason: checkError ? 'Tool, observation or completion failure cannot support a product verdict.' : check.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null };
+          // A different destination, or a verdict that flipped between no issue
+          // and suspect, is a change; inconclusive outcomes are too noisy to count.
+          const flipped = !!earlier?.last_verdict && earlier.last_verdict !== assessment.verdict
+            && [earlier.last_verdict, assessment.verdict].every(v => v === 'no_issue_observed' || v === 'suspect');
+          const compared = earlier ? (sameDestination === false || flipped ? 'changed' as const : 'same' as const) : null;
           await store.transaction(async () => {
             await store.query("UPDATE runtime_actions SET state='completed',assessment=$2,finished_at=now() WHERE action_id=$1", [actionId, JSON.stringify(assessment)]);
             await store.event(runId, 'action.assessed', { assessment, before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id }, actionId);
             if (spec.command.type !== 'navigate' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);
-            const fromKey = mapKeys.get(fromState), toKey = mapKeys.get(toState);
             if (fromKey && toKey) await memory.mapTransition(fromKey, toKey, spec.command, assessment.verdict, assessment.observed_result, actionId);
+            if (compared) await store.event(runId, 'exploration.compared', { from_key: fromKey, to_key: toKey, control_key: transitionKey(spec.command).key,
+              known_to_keys: earlier!.known_to_keys, same_destination: sameDestination, earlier_verdict: earlier!.last_verdict, verdict: assessment.verdict,
+              outcome: compared, strategy: spec.exploration?.strategy?.mode ?? null }, actionId);
           });
+          const mode = spec.exploration?.strategy?.mode;
+          if (mode) strategy.record(mode, { travel: spec.exploration!.purpose !== 'explore', newState: reached.newState, compared,
+            reward: discoveryReward({ ...reached, compared, suspect: assessment.verdict === 'suspect' }) });
           const returning = spec.exploration?.purpose === 'return' ? spec.exploration.return_step : undefined;
           // Routes start where the action was planned: replaying this step from
           // there scrolls to the control again. The evidence edge keeps fromState.
@@ -602,7 +653,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       await stopBrowser();
       await store.transaction(async () => {
         await control.check(true);
-        await store.query("UPDATE runtime_runs SET lifecycle='completed',config=config || $2::jsonb,finished_at=now() WHERE run_id=$1", [runId, JSON.stringify({ stop_reason: stopReason, replans, reveal_failures: revealFailures, executed_actions:executed })]);
+        await store.query("UPDATE runtime_runs SET lifecycle='completed',config=config || $2::jsonb,finished_at=now() WHERE run_id=$1", [runId, JSON.stringify({ stop_reason: stopReason, replans, reveal_failures: revealFailures, executed_actions:executed, ...progress() })]);
         await store.event(runId, 'run.completed', { executed_actions: executed, stop_reason: stopReason, coverage_complete: false });
       });
     } catch (error) {
@@ -611,7 +662,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         const row=(await store.query('SELECT cancel_id FROM runtime_runs WHERE run_id=$1 FOR UPDATE',[runId])).rows[0];
         if(row.cancel_id)error=new RunCancelled();
         const lifecycle=error instanceof RunCancelled?'cancelled':error instanceof AccessStopped?(error.reason==='access_cancelled'?'cancelled':'blocked'):'failed';
-        await store.query("UPDATE runtime_runs SET lifecycle=$3,error=$2,config=config || $4::jsonb,finished_at=now() WHERE run_id=$1", [runId, message(error),lifecycle,JSON.stringify({stop_reason:lifecycle==='cancelled'?'user_cancelled':lifecycle==='blocked'?'access_required':'execution_failed',executed_actions:executed})]);
+        await store.query("UPDATE runtime_runs SET lifecycle=$3,error=$2,config=config || $4::jsonb,finished_at=now() WHERE run_id=$1", [runId, message(error),lifecycle,JSON.stringify({stop_reason:lifecycle==='cancelled'?'user_cancelled':lifecycle==='blocked'?'access_required':'execution_failed',executed_actions:executed,...progress()})]);
         await store.event(runId, 'run.'+lifecycle, { error: message(error), executed_actions: executed, coverage_complete: false });
       });
     } finally { await control.close();control.signal.removeEventListener('abort',abortBrowser);options.shutdown?.removeEventListener('abort',abortBrowser);await stopBrowser(); }

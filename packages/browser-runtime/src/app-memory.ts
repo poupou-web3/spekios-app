@@ -11,7 +11,7 @@ import { actionRisk } from './interaction-contract.js';
 // and can reopen a remembered page; it never replaces run evidence, and an
 // exact screenshot state from another run is never treated as reached.
 export const MEMORY_VERSION = 'app-memory-v1';
-const MAX_PAGES = 500, MAX_CONTROLS = 5000;
+const MAX_PAGES = 500, MAX_CONTROLS = 5000, MAX_MAP_STATES = 5000, MAX_MAP_TRANSITIONS = 20000;
 export type AuthScope = 'public' | 'signed_in';
 export type MemoryScope = { origin: string; viewport_profile: ViewportProfile; auth_scope: AuthScope; execution_mode: 'live' | 'protocol_fixture' };
 export type RememberedPage = { url: string; title: string | null; visits: number; best_path_score: number | null;
@@ -19,11 +19,34 @@ export type RememberedPage = { url: string; title: string | null; visits: number
 export type RememberedControl = { url: string; control_id: string; role: string; name: string; href: string | null; attempts: number;
   best_likelihood: number | null; last_verdict: 'no_issue_observed' | 'suspect' | 'inconclusive' | null;
   last_observed_result: string | null; blocked_reason: string | null };
+// What earlier runs did from one map state: the action, the control entry
+// and, for a choice, the option or checkbox value. One row per destination.
+export type MapTransition = { from_key: string; control_key: string; to_key: string; entry_key: string | null; action: string;
+  control: { role?: string; name?: string; href?: string | null; url?: string; choice?: string | boolean };
+  attempts: number; last_verdict: 'no_issue_observed' | 'suspect' | 'inconclusive' | null; last_observed_result: string | null };
+export type MapSnapshot = { states: Map<string, { page_template: string; min_depth: number; runs: number }>;
+  // Newest first within each state, so the first row is the latest outcome.
+  transitions: Map<string, MapTransition[]>;
+  // `${state key}|${entry key}` for every entry an earlier run acted on.
+  tried: Set<string>; depth_by_template: Map<string, number>; truncated: boolean };
 export type MemorySnapshot = { version: typeof MEMORY_VERSION; scope_id: string; scope: MemoryScope; prior_runs: number; truncated: boolean;
   pages: Map<string, RememberedPage>; controls: Map<string, RememberedControl>; by_page: Map<string, RememberedControl[]>;
   // Controls whose action was in flight when a run was interrupted. Their
   // outcome is unknown, so a resumed run never tries them again.
-  withheld?: ReadonlySet<string> };
+  withheld?: ReadonlySet<string>;
+  // The app map earlier runs recorded; absent for runs without memory.
+  map?: MapSnapshot };
+
+export function mapSnapshot(stateRows: { state_key: string; page_template: string; min_depth: number; runs: number }[], transitionRows: MapTransition[], truncated = false): MapSnapshot {
+  const states = new Map(stateRows.map(s => [s.state_key, { page_template: s.page_template, min_depth: s.min_depth, runs: s.runs }]));
+  const transitions = new Map<string, MapTransition[]>(), tried = new Set<string>(), depth = new Map<string, number>();
+  for (const t of transitionRows) {
+    transitions.set(t.from_key, [...(transitions.get(t.from_key) ?? []), t]);
+    if (t.entry_key) tried.add(`${t.from_key}|${t.entry_key}`);
+  }
+  for (const s of stateRows) depth.set(s.page_template, Math.min(depth.get(s.page_template) ?? Infinity, s.min_depth));
+  return { states, transitions, tried, depth_by_template: depth, truncated };
+}
 
 // GET links with secrets, one-time tokens or sign-out semantics are never
 // reopened from memory, even though an earlier run observed them.
@@ -97,14 +120,21 @@ export class AppMemory {
       controls.set(c.control_id, remembered);
       byPage.set(c.url, [...(byPage.get(c.url) ?? []), remembered]);
     }
+    const mapStates = (await store.query(`SELECT state_key,page_template,min_depth,runs FROM app_map_states WHERE scope_id=$1
+      ORDER BY last_seen_at DESC,state_key LIMIT $2`, [row.scope_id, MAX_MAP_STATES + 1])).rows;
+    const mapTransitions = (await store.query(`SELECT from_key,control_key,to_key,entry_key,action,control,attempts,last_verdict,last_observed_result
+      FROM app_map_transitions WHERE scope_id=$1 ORDER BY last_seen_at DESC,from_key,control_key,to_key LIMIT $2`, [row.scope_id, MAX_MAP_TRANSITIONS + 1])).rows;
+    const map = mapSnapshot(mapStates.slice(0, MAX_MAP_STATES), mapTransitions.slice(0, MAX_MAP_TRANSITIONS) as MapTransition[],
+      mapStates.length > MAX_MAP_STATES || mapTransitions.length > MAX_MAP_TRANSITIONS);
     return new AppMemory(store, runId, { version: MEMORY_VERSION, scope_id: row.scope_id, scope, prior_runs: row.runs - 1,
-      truncated: pageRows.length > MAX_PAGES || controlRows.length > MAX_CONTROLS, pages, controls, by_page: byPage });
+      truncated: pageRows.length > MAX_PAGES || controlRows.length > MAX_CONTROLS, pages, controls, by_page: byPage, map });
   }
 
   summary() {
     const s = this.snapshot;
     return s ? { version: MEMORY_VERSION, enabled: true, scope_id: s.scope_id, ...s.scope, prior_runs: s.prior_runs,
-      remembered_pages: s.pages.size, remembered_controls: s.controls.size, snapshot_truncated: s.truncated }
+      remembered_pages: s.pages.size, remembered_controls: s.controls.size, snapshot_truncated: s.truncated,
+      map_states: s.map?.states.size ?? 0, map_transitions: [...s.map?.transitions.values() ?? []].reduce((n, rows) => n + rows.length, 0) }
       : { version: MEMORY_VERSION, enabled: false };
   }
 
@@ -168,8 +198,10 @@ export class AppMemory {
     const s = this.snapshot;
     if (!s) return;
     const { key, entry } = transitionKey(command);
+    // A chosen option or checkbox value is kept so a later run can re-walk it.
+    const choice = command.type === 'select' ? { choice: command.value } : command.type === 'set_checked' ? { choice: command.checked } : {};
     const control = command.type === 'navigate' ? { url: pageTemplate(command.url) }
-      : { role: command.control.role, name: command.control.name.slice(0, 200), href: command.control.href ? pageTemplate(command.control.href) : null };
+      : { role: command.control.role, name: command.control.name.slice(0, 200), href: command.control.href ? pageTemplate(command.control.href) : null, ...choice };
     await this.store.query(`INSERT INTO app_map_transitions(scope_id,from_key,control_key,to_key,entry_key,action,control,verdicts,last_verdict,last_observed_result,first_run_id,last_run_id,last_action_id)
       VALUES($1,$2,$3,$4,$5,$6,$7,jsonb_build_object($8::text,1),$8,$9,$10,$10,$11)
       ON CONFLICT(scope_id,from_key,control_key,to_key) DO UPDATE SET attempts=app_map_transitions.attempts+1,

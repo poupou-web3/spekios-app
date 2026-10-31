@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FrontierPlanner, UNRANKED_MEMORY_SCORE, type BrowserCommand } from '../src/frontier-planner.js';
 import { blockedReason } from '../src/exploration-policy.js';
-import { jumpableUrl, MEMORY_VERSION, type MemorySnapshot, type RememberedControl } from '../src/app-memory.js';
+import { jumpableUrl, mapSnapshot, MEMORY_VERSION, type MapTransition, type MemorySnapshot, type RememberedControl } from '../src/app-memory.js';
+import { transitionKey } from '../src/app-map.js';
+import { commandFor } from '../src/interaction-contract.js';
 import type { Capture, ObservedControl } from '../src/contracts.js';
 import { viewportProfile } from '../src/viewports.js';
 
@@ -194,4 +196,104 @@ test('remembered URLs with secrets, sign-out or risky actions are never reopened
     origin + '/items/delete', origin + '/checkout', origin + '/billing/upgrade', 'https://other.example/products', 'http://app.example/products',
     'https://user:pass@app.example/', origin + '/%E0%A4%A', 'not a url'])
     assert.equal(jumpableUrl(url, origin), false, url);
+});
+
+const link = (id: string, href: string): ObservedControl => ({control_id:id,role:'link',name:id,href,disabled:false,ambiguous:false,submits_form:false});
+const step = (from: string, to: string, cmd: BrowserCommand, id: string) => ({from_state_id:from,to_state_id:to,command:cmd,source_action_id:id,expected_result:`${to} appears`});
+
+test('new territory shares actions between top-level areas; a journey prefers deeper screens nearby',()=>{
+  const planner = new FrontierPlanner('http://app/');
+  start(planner, [button('orders'), button('help')]);
+  planner.plan('root', [proposal('orders', .9), proposal('help', .5)]);
+  planner.attempted('root', command('orders'), false);
+  planner.observe('orders', capture('http://app/orders', [button('next')]), 'root', {}, .9);
+  planner.transition(step('root', 'orders', command('orders'), 'a1'), 'no_issue_observed');
+  let current = 'orders';
+  // Fourteen more actions deep inside the orders area.
+  for (let i = 1; i <= 14; i++) {
+    const id = `orders-${i}`;
+    planner.plan(current, [proposal('next', .9)]);
+    planner.attempted(current, command('next'), false);
+    planner.observe(id, capture(`http://app/orders?page=${i}`, [button('next'), button('details')]), current, {}, .9);
+    planner.transition(step(current, id, command('next'), `n${i}`), 'no_issue_observed');
+    current = id;
+  }
+  planner.plan(current, [proposal('next', .9), proposal('details', .8)]);
+  const plain = planner.rank(current, 20);
+  assert.equal(plain[0].state_id, current, 'Without a strategy the local control wins.');
+  const breadth = planner.rank(current, 20, 'breadth');
+  assert.equal(breadth[0].control_id, 'help', 'An area past its fair share yields to another top-level control.');
+  assert.equal(breadth[0].route[0].reset, true);
+  const local = breadth.find(p => p.state_id === current)!;
+  assert.equal(local.strategy!.branch_state_id, 'orders');
+  assert.equal(local.strategy!.branch_actions, 14);
+  assert.equal(local.strategy!.fair_share, 6, 'Short runs keep the slack: six actions per area.');
+  assert.ok(local.strategy!.factor < .5);
+  assert.match(local.reason, /its area already took 14 actions \(fair share 6\)/);
+  const depth = planner.rank(current, 20, 'depth');
+  assert.equal(depth[0].state_id, current, 'A journey keeps going where it is.');
+  assert.equal(depth[0].strategy!.depth, 15);
+  assert.ok(depth.find(p => p.control_id === 'help')!.priority < depth[0].priority);
+});
+
+test('new territory returns to a screen whose remaining controls were never ranked',()=>{
+  const planner = new FrontierPlanner('http://app/');
+  start(planner, [button('a'), button('b'), button('c')]);
+  planner.plan('root', [proposal('a', .9)]);
+  planner.attempted('root', command('a'), false);
+  planner.observe('leaf', capture('http://app/a', []), 'root', {}, .9);
+  planner.transition(step('root', 'leaf', command('a'), 'a'), 'no_issue_observed');
+  assert.deepEqual(planner.rank('leaf', 5), [], 'Unranked controls are never chosen without a strategy.');
+  assert.deepEqual(planner.rank('leaf', 5, 'depth'), []);
+  const [revisit] = planner.rank('leaf', 5, 'breadth');
+  assert.equal(revisit.unranked, 2);
+  assert.equal(revisit.state_id, 'root');
+  assert.equal(revisit.route.length, 1);
+  assert.match(revisit.reason, /2 controls here have not been ranked yet/);
+  assert.deepEqual(planner.rank('root', 5, 'breadth'), [], 'Where the run is, the next plan ranks them.');
+});
+
+test('a re-walk repeats a transition earlier runs recorded on an equivalent screen, once per run',()=>{
+  const products = link('products', 'http://app/products'), country: ObservedControl = {...button('country'),role:'combobox',options:[{value:'fr',label:'France',disabled:false},{value:'de',label:'Germany',disabled:false}]};
+  const root = 'a'.repeat(32), list = 'b'.repeat(32), elsewhere = 'c'.repeat(32);
+  const click = commandFor(products, {type:'click'}), choose = commandFor(country, {type:'select',value:'de'});
+  const row = (cmd: BrowserCommand, to: string, verdict: MapTransition['last_verdict'], choice?: string) => ({ from_key: root, control_key: transitionKey(cmd).key, to_key: to,
+    entry_key: transitionKey(cmd).entry, action: cmd.type, control: { role: 'x', name: 'x', ...(choice ? { choice } : {}) }, attempts: 2, last_verdict: verdict, last_observed_result: 'Products list' });
+  const snapshot = { ...memory([], []), map: mapSnapshot([{state_key:root,page_template:'http://app/',min_depth:0,runs:2},{state_key:list,page_template:'http://app/products',min_depth:1,runs:2}],
+    [row(click, list, 'no_issue_observed'), row(click, elsewhere, 'suspect'), row(choose, root, 'no_issue_observed', 'de'), row({...choose,value:'fr'} as BrowserCommand, root, 'no_issue_observed')]) };
+  const planner = new FrontierPlanner('http://app/', snapshot);
+  planner.observe('root', capture('http://app/', [products, country]), undefined, {}, 1, true, root);
+  planner.transition({from_state_id:'blank',to_state_id:'root',command:{type:'navigate',url:'http://app/'},source_action_id:'open',expected_result:'Root appears'},'no_issue_observed');
+  const ranked = planner.rank('root', 5, 'rewalk');
+  assert.deepEqual(ranked.map(p => [p.name, p.action]), [['products', {type:'click'}], ['country', {type:'select',value:'de'}]], 'A select without a recorded choice cannot be repeated.');
+  assert.deepEqual(ranked[0].rewalk!.known_to_keys, [list, elsewhere]);
+  assert.equal(ranked[0].expected_result, 'Products list');
+  assert.ok(ranked[0].priority > ranked[1].priority, 'A transition with a suspect outcome or several destinations is rechecked first.');
+  assert.match(ranked[0].reason, /led to 2 different screens/);
+  assert.equal(planner.mapKnown(list), true);
+  assert.equal(planner.mapKnown('d'.repeat(32)), false);
+  assert.deepEqual(planner.earlier(root, click), { known_to_keys: [list, elsewhere], attempts: 4, last_verdict: 'no_issue_observed', last_observed_result: 'Products list' });
+  assert.equal(planner.earlier(root, {...click, type:'submit'} as BrowserCommand), null);
+  planner.attempted('root', click, false);
+  assert.deepEqual(planner.rank('root', 5, 'rewalk').map(p => p.name), ['country']);
+  assert.deepEqual(new FrontierPlanner('http://app/').rank('root', 5, 'rewalk'), [], 'Nothing is re-walked without a map.');
+});
+
+test('another item of a list already tried is deprioritized, and coverage is reported by depth',()=>{
+  const key = 'e'.repeat(32), shoes = link('shoes', 'http://app/products/1'), hats = link('hats', 'http://app/products/2');
+  const planner = new FrontierPlanner('http://app/');
+  planner.observe('root', capture('http://app/', [shoes, hats, button('Delete all')]), undefined, {}, 1, true, key);
+  planner.transition({from_state_id:'blank',to_state_id:'root',command:{type:'navigate',url:'http://app/'},source_action_id:'open',expected_result:'Root appears'},'no_issue_observed');
+  planner.plan('root', [proposal('shoes', .8), proposal('hats', .8)]);
+  assert.equal(planner.rank('root', 3)[0].components.repeated_entry, 0);
+  planner.attempted('root', commandFor(shoes), false);
+  planner.observe('shoes', capture('http://app/products/1', [button('add'), button('back')]), 'root', {}, .8, false, 'f'.repeat(32));
+  planner.transition(step('root', 'shoes', commandFor(shoes), 's'), 'no_issue_observed');
+  const hat = planner.rank('shoes', 5).find(p => p.control_id === 'hats')!;
+  assert.equal(hat.components.repeated_entry, .2);
+  assert.match(hat.reason, /equivalent control was already tried/);
+  assert.deepEqual(planner.coverage(), [
+    { depth: 0, states: 1, controls: 2, tried: 1, blocked: 1, coverage: .5 },
+    { depth: 1, states: 1, controls: 2, tried: 0, blocked: 0, coverage: 0 },
+  ]);
 });

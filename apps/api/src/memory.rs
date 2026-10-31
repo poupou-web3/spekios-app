@@ -105,7 +105,13 @@ pub(crate) async fn read_map(state: &AppState, filters: MapQuery) -> Response {
           'transitions',(SELECT count(*) FROM app_map_transitions WHERE scope_id=(SELECT scope_id FROM scope)),
           'max_depth',(SELECT max(min_depth) FROM app_map_states WHERE scope_id=(SELECT scope_id FROM scope)),
           'suspect_transitions',(SELECT count(*) FROM app_map_transitions WHERE scope_id=(SELECT scope_id FROM scope) AND last_verdict='suspect'),
-          'untried_controls',(SELECT count(*) FROM untried)),
+          'untried_controls',(SELECT count(*) FROM untried),
+          -- Coverage at each depth across runs: control entries acted on in any run.
+          'by_depth',COALESCE((SELECT jsonb_agg(jsonb_build_object('depth',d.min_depth,'states',d.states,'controls',d.controls,'tried',d.controls-d.untried,
+              'coverage',CASE WHEN d.controls>0 THEN round((d.controls-d.untried)::numeric/d.controls,3) ELSE 1 END) ORDER BY d.min_depth)
+            FROM (SELECT st.min_depth,count(*) AS states,sum(jsonb_array_length(st.controls)) AS controls,
+                (SELECT count(*) FROM untried u JOIN app_map_states x ON x.state_key=u.state_key AND x.scope_id=(SELECT scope_id FROM scope) WHERE x.min_depth=st.min_depth) AS untried
+              FROM app_map_states st JOIN scope USING(scope_id) GROUP BY st.min_depth) d),'[]'::jsonb)),
         'states',COALESCE((SELECT jsonb_agg(jsonb_build_object('state_key',p.state_key,'page_template',p.page_template,'example_url',p.example_url,'title',p.title,
             'depth',p.min_depth,'runs',p.runs,'observations',p.observations,'first_seen_at',p.first_seen_at,'last_seen_at',p.last_seen_at,
             'controls',jsonb_array_length(p.controls),'controls_truncated',p.controls_truncated,

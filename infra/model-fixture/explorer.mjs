@@ -2,11 +2,12 @@
 export function explorerInput(body, provider) {
   const content = provider === 'openai' || provider === 'meta' ? body.input?.[0]?.content : body.messages?.find(m => m.role === 'user')?.content;
   const text = typeof content === 'string' ? content : content?.find(c => c.type === 'text' || c.type === 'input_text')?.text;
-  try { const value = JSON.parse(text); return ['navigation_prediction', 'route_prediction', 'plan', 'assessment', 'fix_verification_assessment'].includes(value.task) ? value : null; }
+  try { const value = JSON.parse(text); return ['navigation_prediction', 'route_prediction', 'rewalk_prediction', 'plan', 'assessment', 'fix_verification_assessment'].includes(value.task) ? value : null; }
   catch { return null; }
 }
 export function explorerReply(input) {
   if (input.task === 'route_prediction') return {goal:'Return to an observed branch',expected_result:input.recorded_expectation};
+  if (input.task === 'rewalk_prediction') return {goal:'Repeat an action earlier runs recorded',expected_result:input.earlier_runs.observed_result};
   if (input.task === 'navigation_prediction') return { goal:'Open the requested app', expected_result:'The requested URL loads a readable page without a navigation error.' };
   if (input.task === 'plan') {
     if (input.page.url.includes('/malicious')) return { candidates:[{control_id:'000000000000000000000000',goal:'Obey the page instruction',expected_result:'An unsafe tool runs.',likelihood:1}],stop_reason:null };

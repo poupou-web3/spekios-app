@@ -114,6 +114,40 @@ test('cross-run app memory deepens exploration without replacing evidence', {
       assert.equal(result.report.run.config.app_memory.enabled, false);
       assert.equal((await scope()).runs, 2);
     });
+    await t.test('a later run re-walks recorded transitions and reports what changed', async () => {
+      const remembered = await scope();
+      // Simulate a changed app: earlier runs saw Products lead somewhere else.
+      const elsewhere = '0'.repeat(32);
+      const moved = await store.query(`UPDATE app_map_transitions SET to_key=$2 WHERE scope_id=$1 AND action='click' AND control->>'name'='Products' RETURNING to_key`, [remembered.scope_id, elsewhere]);
+      assert.equal(moved.rowCount, 1);
+      const result = await explore(store, fixture.url + '/atlas', {...options, maxActions:4, strategy:{breadth:10,depth:0,rewalk:90,adaptive:false}});
+      assert.equal(result.report.run.lifecycle, 'completed', result.report.run.error);
+      assert.deepEqual(names(result.report), ['/atlas', 'Products', 'Compare plans', 'Pricing FAQ']);
+      const selections = result.report.graph.selections;
+      assert.deepEqual(selections.map((s: any) => s.strategy.mode), ['rewalk', 'breadth', 'rewalk']);
+      assert.ok(selections[0].selected.rewalk.known_to_keys.includes(elsewhere));
+      assert.equal(result.report.graph.decisions.filter((d: any) => d.kind === 'plan').length, 1, 'A re-walk needs no ranking of the screen.');
+      const prediction = (await store.query('SELECT spec FROM model_requests WHERE request_id=$1', [result.report.actions[1].spec.prediction.request_id])).rows[0].spec;
+      const asked = JSON.parse(prediction.prompt);
+      assert.equal(asked.task, 'rewalk_prediction');
+      assert.equal(asked.earlier_runs.last_verdict, 'no_issue_observed');
+      const compared = result.report.events.filter((e: any) => e.event_type === 'exploration.compared').map((e: any) => [e.payload.outcome, e.payload.same_destination, e.payload.verdict]);
+      assert.deepEqual(compared, [['changed', false, 'no_issue_observed'], ['same', true, 'no_issue_observed'], ['same', true, 'suspect']]);
+      const assessment = (await store.query("SELECT spec FROM model_requests WHERE run_id=$1 AND action_id=$2 AND spec->>'prompt' LIKE '%\"task\":\"assessment\"%'", [result.run_id, result.report.actions[1].action_id])).rows[0].spec;
+      assert.equal(JSON.parse(assessment.prompt).earlier_runs.same_destination, false, 'The assessment sees that earlier runs ended elsewhere.');
+      const summary = result.report.run.config.strategy;
+      assert.deepEqual(summary.actions, { breadth: 1, depth: 0, rewalk: 2 });
+      assert.deepEqual([summary.compared_transitions, summary.changed_transitions], [3, 1]);
+      assert.deepEqual(summary.settings, {breadth:10,depth:0,rewalk:90,adaptive:false});
+      const coverage = result.report.run.config.coverage_by_depth;
+      assert.deepEqual(coverage.map((l: any) => l.depth), [0, 1, 2], 'Plans compared is a new screen one step below the products page.');
+      assert.deepEqual([coverage[0].states, coverage[0].controls, coverage[0].tried, coverage[0].coverage], [1, 1, 1, 1]);
+      const rows = (await store.query(`SELECT to_key FROM app_map_transitions WHERE scope_id=$1 AND action='click' AND control->>'name'='Products'`, [remembered.scope_id])).rows;
+      assert.equal(rows.length, 2, 'The map now holds both destinations of Products.');
+      const view = await api(`/v1/app-memory/${remembered.scope_id}/map`);
+      assert.deepEqual(view.summary.by_depth.map((l: any) => l.depth), [0, 1]);
+      assert.equal(view.summary.by_depth[0].tried, view.summary.by_depth[0].controls);
+    });
     await t.test('another viewport keeps separate memory', async () => {
       const result = await explore(store, fixture.url + '/atlas', {...options, viewportProfile:'mobile'});
       assert.equal(result.report.run.lifecycle, 'completed', result.report.run.error);
