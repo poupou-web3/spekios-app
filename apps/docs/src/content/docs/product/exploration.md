@@ -42,6 +42,6 @@ A zero-pixel difference still receives a check. One changed pixel is retained. N
 
 ## Coverage limits
 
-The default exploration budget is 20 actions; configurable bounds are one to 50, including navigation, returns and reopened pages. A run also stops after 30 minutes by default. Up to 120 controls per page are observed, and model inputs are bounded. Unsupported widgets, access boundaries, continuously changing pages and exhausted budgets leave explicit coverage gaps.
+Explorations have no action, time, token or cost limit by default; each user can [set limits](../../guides/exploration-limits/), with overrides per project or model. A run stops when nothing reachable is left to try, after 50 consecutive actions that find nothing new, or at a configured limit. Every state and transition goes into the [app map](../../guides/app-memory/#the-app-map), which later runs continue from. Up to 120 controls per page are observed, and model inputs are bounded. Unsupported widgets, access boundaries, continuously changing pages and exhausted budgets leave explicit coverage gaps.
 
 [Responsive coverage](../../guides/responsive/) uses separate desktop, tablet and mobile Chromium runs. It does not imply native-device or complete-app coverage.

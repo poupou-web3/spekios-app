@@ -34,10 +34,19 @@ export async function prepareCaptureContext(context: BrowserContext) {
   await context.clock.resume();
 }
 
+// The page clock keeps running between reading it and pausing, and Playwright
+// refuses to pause in its past, so pause slightly ahead and retry once.
 export async function withFrozenClock<T>(page: Page, body: () => Promise<T>): Promise<T> {
-  let now = Date.now();
-  try { now = await page.evaluate(() => Date.now()); } catch { /* Navigation can replace the page world before the read. */ }
-  await page.clock.pauseAt(now);
+  const ahead = async () => {
+    let now = Date.now();
+    try { now = await page.evaluate(() => Date.now()); } catch { /* Navigation can replace the page world before the read. */ }
+    return now + 50;
+  };
+  try { await page.clock.pauseAt(await ahead()); }
+  catch (error) {
+    if (!/fast-forward to the past/.test(String(error))) throw error;
+    await page.clock.pauseAt(await ahead() + 1000);
+  }
   try { return await body(); }
   finally { await page.clock.resume().catch(() => {}); }
 }

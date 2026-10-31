@@ -49,9 +49,9 @@ This gateway request does not execute browser actions. API keys stay server-side
 
 Workspace managers read **GET /v1/exploration-settings**, then POST the complete new preference set to the same path.
 
-Use a fresh **request_id**, the current **expected_revision**, provider, model, **max_actions**, **viewport_profile**, **free_only**, **auto_reproduce**, **max_auto_reproductions** and **max_auto_replay_actions**. The optional boolean **app_memory** defaults to true.
+Use a fresh **request_id**, the current **expected_revision**, provider, model, **viewport_profile**, **free_only**, **auto_reproduce**, **max_auto_reproductions** and **max_auto_replay_actions**. The optional boolean **app_memory** defaults to true. The limits **max_actions**, **max_minutes**, **max_tokens** and **max_cost_usd** are optional; absent or null means no limit. **stop_after_idle_actions** defaults to 50; null turns it off. **limit_overrides** lists limits for a **project_id**, **provider**, **model** or a combination; see [exploration limits](../../guides/exploration-limits/).
 
-The default revision is zero until the first saved preference. Action bounds are 1–50; auto-reproduction case bounds 1–3; total replay-action bounds 1–100.
+The default revision is zero until the first saved preference. Action limits are 1–10,000, minutes 1–10,080, tokens 1,000–1,000,000,000, cost 0.01–100,000 USD; auto-reproduction case bounds 1–3; total replay-action bounds 1–100. A job freezes the limits resolved for its project and model at admission.
 
 A new save returns 201; an identical retry 200. Revision conflicts return 409. New jobs freeze the effective revision; existing jobs and retries do not adopt later defaults.
 

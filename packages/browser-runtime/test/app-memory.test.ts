@@ -19,7 +19,18 @@ test('cross-run app memory deepens exploration without replacing evidence', {
   const scope = async (profile = 'desktop') => (await store.query(`SELECT * FROM app_memory_scopes WHERE workspace_id=$1 AND user_id=$2 AND origin=$3
     AND viewport_profile=$4 AND auth_scope='public' AND execution_mode='protocol_fixture'`, [store.workspaceId, store.userId, fixture.url, profile])).rows[0];
   const controls = async (scopeId: string) => Object.fromEntries((await store.query('SELECT * FROM app_memory_controls WHERE scope_id=$1', [scopeId])).rows.map(r => [r.control.name, r]));
-  let suspect = '';
+  let suspect = '', firstRun = '', secondRun = '';
+  const map = async (scopeId: string) => ({
+    states: (await store.query('SELECT page_template,min_depth,runs FROM app_map_states WHERE scope_id=$1 ORDER BY min_depth,page_template', [scopeId])).rows
+      .map(r => [r.page_template.replace(fixture.url, ''), r.min_depth, r.runs]),
+    transitions: (await store.query('SELECT action,control,attempts,last_verdict FROM app_map_transitions WHERE scope_id=$1 ORDER BY first_seen_at,last_action_id', [scopeId])).rows
+      .map(r => [r.action, r.control.name ?? r.control.url.replace(fixture.url, ''), r.attempts, r.last_verdict]),
+  });
+  const api = async (path: string) => {
+    const response = await fetch((process.env.SCOUT_API_URL ?? 'http://api:8080') + path, { headers: { Authorization: `Bearer ${process.env.SCOUT_API_TOKEN}` } });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
   try {
     await t.test('a memory-free run neither reads nor writes memory', async () => {
       const result = await explore(store, fixture.url + '/atlas', {...options, appMemory:false});
@@ -48,6 +59,11 @@ test('cross-run app memory deepens exploration without replacing evidence', {
       assert.equal(byName['Pricing FAQ'].attempts, 0);
       assert.equal(byName['Pricing FAQ'].best_likelihood, .6);
       assert.equal(byName['Pricing FAQ'].last_run_id, result.run_id);
+      firstRun = result.run_id;
+      const recorded = await map(remembered.scope_id);
+      assert.deepEqual(recorded.states.slice(0, 2), [['/atlas', 0, 1], ['/atlas/products', 1, 1]], 'The map keeps pages by depth from the entry page.');
+      assert.deepEqual(recorded.transitions.map(t => t.slice(0, 2)), [['click', 'Products'], ['click', 'Compare plans']], 'The start page and navigation into it are not app transitions.');
+      assert.ok(result.report.run.config.limits.max_actions === 3);
     });
     await t.test('the next run resumes the unfinished page instead of repeating the journey', async () => {
       const result = await explore(store, fixture.url + '/atlas', options);
@@ -76,6 +92,19 @@ test('cross-run app memory deepens exploration without replacing evidence', {
       assert.equal(byName['Pricing FAQ'].attempts, 1);
       assert.equal(byName['Pricing FAQ'].last_verdict, 'suspect');
       assert.equal(byName['Products'].attempts, 1, 'The repeated journey was skipped.');
+      secondRun = result.run_id;
+      const recorded = await map(remembered.scope_id);
+      assert.deepEqual(recorded.states.slice(0, 2).map(s => [s[0], s[2]]), [['/atlas', 2], ['/atlas/products', 2]], 'Both runs reached the same pages.');
+      assert.ok(recorded.transitions.some(t => t[1] === 'Pricing FAQ' && t[3] === 'suspect'));
+      const diff = await api(`/v1/runs/${secondRun}/map-diff`);
+      assert.equal(diff.compared_runs, 1); assert.equal(diff.previous_run_id, firstRun);
+      assert.ok(diff.new_transitions.some((t: any) => t.name === 'Pricing FAQ' && t.verdict === 'suspect'), JSON.stringify(diff.new_transitions));
+      assert.ok(!diff.new_transitions.some((t: any) => t.name === 'Products'), 'Products repeats nothing new.');
+      assert.equal(diff.counts.regressions, 0);
+      const view = await api(`/v1/app-memory/${remembered.scope_id}/map`);
+      assert.equal(view.summary.states, recorded.states.length); assert.ok(view.summary.untried_controls >= 0);
+      const root = view.states.find((s: any) => s.depth === 0);
+      assert.ok(root.transitions.some((t: any) => t.control.name === 'Products' && t.to_page_template.endsWith('/atlas/products')));
     });
     await t.test('a suspect reached through a resumed page replays exactly and leaves memory unchanged', async () => {
       const result = await reproduce(store, suspect, {client,allowedOrigins:[fixture.url]});
@@ -91,6 +120,19 @@ test('cross-run app memory deepens exploration without replacing evidence', {
       assert.equal(result.report.run.config.app_memory.scopes[0].prior_runs, 0);
       assert.deepEqual(names(result.report), ['/atlas', 'Products', 'Compare plans']);
       assert.equal((await scope('mobile')).runs, 1);
+    });
+    await t.test('without an action limit a run explores until nothing new is left', async () => {
+      const result = await explore(store, fixture.url + '/atlas', {...options, viewportProfile:'tablet', appMemory:false, maxActions:null, stopAfterIdleActions:5});
+      assert.equal(result.report.run.lifecycle, 'completed', result.report.run.error);
+      assert.equal(result.report.run.config.limits.max_actions, null);
+      assert.ok(['no_reachable_unexplored_controls','model_stopped_or_no_reachable_frontier','no_new_states'].includes(result.report.run.config.stop_reason), result.report.run.config.stop_reason);
+      assert.ok(result.report.actions.length > 3, 'It goes past the three-action budget the other runs use.');
+    });
+    await t.test('a token limit stops before the next action once reported usage reaches it', async () => {
+      const result = await explore(store, fixture.url + '/atlas', {...options, viewportProfile:'tablet', appMemory:false, maxActions:null, maxTokens:8});
+      assert.equal(result.report.run.config.stop_reason, 'token_budget_reached');
+      assert.equal(result.report.run.config.limits.max_tokens, 8);
+      assert.ok(result.report.actions.length < 4);
     });
     await store.flush();
   } finally { await fixture.close(); await store.close(); }

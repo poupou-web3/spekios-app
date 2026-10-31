@@ -3,7 +3,7 @@ import type { Browser } from 'playwright';
 import { comparePng, changedPixelsInRects } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
 import { CAPTURE_POLICY, capture, installNetworkGate, prepareCaptureContext, type Hooks } from './recorder.js';
-import { DEFAULT_EXPLORATION_ACTIONS, MAX_EXPLORATION_ACTIONS, isUuid, type Capture, type ObservedControl } from './contracts.js';
+import { MAX_EXPLORATION_ACTIONS, MAX_EXPLORATION_MINUTES, isUuid, type Capture, type ObservedControl } from './contracts.js';
 import { ModelClient, modelSettings } from './model-client.js';
 import { blockedReason, documentFingerprint, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
 import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reproduction.js';
@@ -14,6 +14,7 @@ import { commandFor, INTERACTION_VERSION } from './interaction-contract.js';
 import { dispatch, observedCommand, revealControl, validateDispatch, type Reveal } from './browser-interactions.js';
 import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyContext, pageContext as context } from './model-context.js';
 import { AppMemory, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
+import { MAP_VERSION, mapState, transitionKey } from './app-map.js';
 import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged } from './access-detection.js';
 import { AuthVault } from './auth-session.js';
 import { openBrowser } from './browser-sandbox.js';
@@ -38,22 +39,34 @@ type ModelPrediction = { source: 'model'; request_id: string; decision_id: strin
 type ReplayPrediction = { source: 'recorded_replay'; source_prediction_id: string; source_model_request_id: string; goal: string; expected_result: string; context_capture_id: string | null };
 type Spec = { command: BrowserCommand; prediction: ModelPrediction | ReplayPrediction; worker_id: string; agent_id: string; replay_source_action_id?: string;
   exploration?: { purpose: 'explore' | 'return' | 'resume'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep } };
-export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: number; client?: ModelClient; hooks?: Hooks; jobId?: string; viewportProfile?: ViewportProfile;
+// Limits are optional: null means none. Undefined falls back to the server environment.
+export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: number | null; client?: ModelClient; hooks?: Hooks; jobId?: string; viewportProfile?: ViewportProfile;
   autoReproduce?:boolean;maxAutoReproductions?:number;maxAutoReplayActions?:number;
   // Library callers opt in; queued jobs pass the setting frozen at admission.
-  appMemory?: boolean; maxDurationMs?: number;
+  appMemory?: boolean; maxDurationMs?: number | null;
+  // Reported tokens (input plus output) and provider-reported cost for this run.
+  maxTokens?: number | null; maxCostUsd?: number | null;
+  // Stop after this many consecutive actions reach no state new to this run.
+  stopAfterIdleActions?: number | null;
   // Worker shutdown closes the browser; the job is then resumed or interrupted.
   shutdown?: AbortSignal;
   // A continuation of an interrupted exploration job, with its remaining budget.
-  resume?: { attempt: number; previousRunIds: string[]; jobMaxActions: number };
+  resume?: { attempt: number; previousRunIds: string[]; jobMaxActions: number | null; carriedActions: number };
   testFormRules?: TestFormRule[]; access?: AccessHandoff; authMode?: 'auto'|'sign_in'|'public'; sessionId?:string; accessTimeoutMs?:number };
 const MAX_REPLANS = 3;
 // Each failed reveal permanently removes one control from this run's frontier.
 const MAX_REVEAL_FAILURES = 5;
+// An empty or unset server limit means no limit.
+function environmentLimit(name: string, max: number): number | null {
+  const value = process.env[name]?.trim();
+  if (!value) return null;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > max) throw new Error(`${name} must be empty or an integer from 1 to ${max}.`);
+  return limit;
+}
 export function explorationDurationMs() {
-  const minutes = Number(process.env.SCOUT_EXPLORER_MAX_MINUTES ?? '30');
-  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 180) throw new Error('SCOUT_EXPLORER_MAX_MINUTES must be an integer from 1 to 180.');
-  return minutes * 60000;
+  const minutes = environmentLimit('SCOUT_EXPLORER_MAX_MINUTES', MAX_EXPLORATION_MINUTES);
+  return minutes === null ? null : minutes * 60000;
 }
 function changes(before: Capture, after: Capture, mask: Buffer): Record<string, ChangeSignal> {
   const controls = after.observation.controls ?? [];
@@ -100,10 +113,16 @@ export async function verifyFix(store:Store,verificationId:string,options:Explor
 async function execute(store: Store, inputUrl: string, options: ExplorationOptions, replay?: Replay) {
   const allowedOrigins = options.allowedOrigins ?? (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
   const targetUrl = validateTarget(inputUrl, allowedOrigins);
-  const maxActions = replay?.steps.length ?? options.maxActions ?? Number(process.env.SCOUT_EXPLORER_MAX_ACTIONS ?? String(DEFAULT_EXPLORATION_ACTIONS));
-  if (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > MAX_EXPLORATION_ACTIONS) throw new Error(`The explorer action limit must be between 1 and ${MAX_EXPLORATION_ACTIONS}.`);
-  // Replays are bounded by their recorded path instead of wall time.
-  const maxDurationMs = replay ? null : options.maxDurationMs ?? explorationDurationMs();
+  const configuredActions = options.maxActions !== undefined ? options.maxActions : environmentLimit('SCOUT_EXPLORER_MAX_ACTIONS', MAX_EXPLORATION_ACTIONS);
+  // Infinity means no action limit; it is recorded as null. Replays are bounded by their path.
+  const maxActions = replay?.steps.length ?? configuredActions ?? Infinity;
+  if (maxActions !== Infinity && (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > MAX_EXPLORATION_ACTIONS)) throw new Error(`The explorer action limit must be empty or between 1 and ${MAX_EXPLORATION_ACTIONS}.`);
+  // Replays are bounded by their recorded path instead of wall time or usage.
+  const maxDurationMs = replay ? null : options.maxDurationMs !== undefined ? options.maxDurationMs : explorationDurationMs();
+  const maxTokens = replay ? null : options.maxTokens ?? null, maxCostUsd = replay ? null : options.maxCostUsd ?? null;
+  const stopAfterIdleActions = replay ? null : options.stopAfterIdleActions ?? null;
+  for (const [name, value] of [['token', maxTokens], ['cost', maxCostUsd], ['idle action', stopAfterIdleActions]] as const)
+    if (value !== null && !(Number.isFinite(value) && value > 0)) throw new Error(`Invalid exploration ${name} limit.`);
   if (maxDurationMs !== null && (!Number.isInteger(maxDurationMs) || maxDurationMs < 1)) throw new Error('Invalid exploration time limit.');
   const automaticPolicy=automaticReproductionPolicy({...options,autoReproduce:!replay&&options.autoReproduce===true});
   const client = options.client ?? new ModelClient(modelSettings());
@@ -129,6 +148,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       } };
     const maxModelRequests = replay ? maxActions : maxActions * 3 + MAX_REPLANS * 2;
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
+    // Consecutive actions that reached only states already recorded in this run.
+    let idleActions = 0, stateCreated = false;
+    // Each recorded state's app-map key, for the transitions between them.
+    const mapKeys = new Map<string, string>();
     // Replays never read or write memory; their path is fixed by evidence.
     const memoryEnabled = !replay && options.appMemory === true;
     let memory = AppMemory.disabled(store, runId);
@@ -155,9 +178,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           replay_of: replay ? { ...(replay.fix_verification?{verification_id:replay.fix_verification.verification_id}:{reproduction_id: replay.reproduction_id}), source_run_id: replay.source_run_id, source_action_id: replay.source_action_id } : null,
           fix_verification:replay?.fix_verification?{verification_id:replay.fix_verification.verification_id,issue_id:replay.fix_verification.issue_id,source_entry:replay.fix_verification.source_entry,candidate_url:replay.fix_verification.candidate_url}:null,
           limits: { max_actions: maxActions, max_replans: replay ? 0 : MAX_REPLANS, max_reveal_failures: replay ? 0 : MAX_REVEAL_FAILURES, max_model_requests: maxModelRequests,
-            max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, context_budgets: CONTEXT_BUDGETS },
-          app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] },
-          resume: resume ? { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, job_max_actions: resume.jobMaxActions, carried_actions: resume.jobMaxActions - maxActions } : null,
+            max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, max_tokens: maxTokens, max_cost_usd: maxCostUsd,
+            stop_after_idle_actions: stopAfterIdleActions, context_budgets: CONTEXT_BUDGETS },
+          app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] }, app_map_version: MAP_VERSION,
+          resume: resume ? { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, job_max_actions: resume.jobMaxActions, carried_actions: resume.carriedActions } : null,
           scope: allowedOrigins.includes(origin) ? 'operator-allowed-origin' : 'public-https', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
       await openMemory();
@@ -226,13 +250,17 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       }
     }
     async function state(c: Capture, parentId?: string, signals: Record<string, ChangeSignal> = {}, likelihood = 1, initial = false) {
-      const fingerprint = stateFingerprint(c), stateId = randomUUID();
+      // The blank page a run starts from is not part of the app's map.
+      const fingerprint = stateFingerprint(c), stateId = randomUUID(), mapped = /^https?:/.test(c.observation.url) ? mapState(c) : null;
       return store.transaction(async () => {
-        const { rows } = await store.query(`INSERT INTO exploration_states(state_id,run_id,representative_capture_id,fingerprint,url)
-          VALUES($1,$2,$3,$4,$5) ON CONFLICT(run_id,fingerprint) DO UPDATE SET fingerprint=EXCLUDED.fingerprint RETURNING state_id`,
-          [stateId, runId, c.capture_id, fingerprint, c.observation.url]);
+        const { rows } = await store.query(`INSERT INTO exploration_states(state_id,run_id,representative_capture_id,fingerprint,url,map_state_key,page_template)
+          VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(run_id,fingerprint) DO UPDATE SET fingerprint=EXCLUDED.fingerprint RETURNING state_id,map_state_key,(xmax=0) AS created`,
+          [stateId, runId, c.capture_id, fingerprint, c.observation.url, mapped?.key ?? null, mapped?.page_template ?? null]);
         const id: string = rows[0].state_id;
+        stateCreated = rows[0].created;
+        if (mapped) mapKeys.set(id, rows[0].map_state_key ?? mapped.key);
         planner.observe(id, c, parentId, signals, likelihood, initial);
+        if (mapped) await memory.mapState(mapped, planner.metadata(id).depth, c.observation.url);
         await store.query('UPDATE exploration_states SET planning=$2 WHERE state_id=$1', [id, JSON.stringify(planner.metadata(id))]);
         for (const control of c.observation.controls ?? []) {
           const reason = blockedReason(control, origin);
@@ -306,6 +334,13 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       for (let ordinal = 1; executed < maxActions; ordinal++) {
         await control.check();
         if (maxDurationMs !== null && Date.now() - startedAt >= maxDurationMs) { stopReason = 'time_budget_reached'; break; }
+        if (stopAfterIdleActions !== null && idleActions >= stopAfterIdleActions) { stopReason = 'no_new_states'; break; }
+        // Usage counts settled model calls only; one in-flight action can still finish.
+        if (maxTokens !== null || maxCostUsd !== null) {
+          const usage = (await store.query('SELECT scout_run_usage($1) AS usage', [runId])).rows[0].usage;
+          if (maxTokens !== null && Number(usage.known_input_tokens ?? 0) + Number(usage.known_output_tokens ?? 0) >= maxTokens) { stopReason = 'token_budget_reached'; break; }
+          if (maxCostUsd !== null && Number(usage.provider_reported_cost_usd ?? 0) >= maxCostUsd) { stopReason = 'cost_budget_reached'; break; }
+        }
         if(options.access&&!replay&&(await accessSignals(page)).login_form)await handoff(authContext?'session_expired':'login_required');
         if (!replay && modelRequests >= maxModelRequests - 1) { stopReason = 'model_request_budget_reached'; break; }
         let spec: Spec;
@@ -494,11 +529,12 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             geometry_mask_artifact: diff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', diff.geometryMaskPng, 'png') : null };
           const comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
           const toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
+          idleActions = stateCreated ? 0 : idleActions + 1;
           // Commit both captures, comparison and graph edge BEFORE asking for a
           // verdict. A provider outage cannot erase an already executed action.
           await store.transaction(async () => {
             await store.query('UPDATE runtime_actions SET after_capture_id=$2,comparison=$3,tool_error=$4 WHERE action_id=$1', [actionId, after!.capture.capture_id, JSON.stringify({ ...comparison, metadata_artifact: comparisonArtifact }), toolError]);
-            await store.query('INSERT INTO exploration_edges(action_id,run_id,from_state_id,to_state_id) VALUES($1,$2,$3,$4)', [actionId, runId, fromState, toState]);
+            await store.query('INSERT INTO exploration_edges(action_id,run_id,from_state_id,to_state_id,control_key) VALUES($1,$2,$3,$4,$5)', [actionId, runId, fromState, toState, transitionKey(spec.command).key]);
             await store.event(runId, 'action.evidence_recorded', { before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id, comparison_id: diff.metadata.difference_id, changed_pixels: diff.metadata.counts.changed_pixels }, actionId);
           });
           const captureIds = [before.capture.capture_id, after.capture.capture_id];
@@ -523,6 +559,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             await store.query("UPDATE runtime_actions SET state='completed',assessment=$2,finished_at=now() WHERE action_id=$1", [actionId, JSON.stringify(assessment)]);
             await store.event(runId, 'action.assessed', { assessment, before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id }, actionId);
             if (spec.command.type !== 'navigate' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);
+            const fromKey = mapKeys.get(fromState), toKey = mapKeys.get(toState);
+            if (fromKey && toKey) await memory.mapTransition(fromKey, toKey, spec.command, assessment.verdict, assessment.observed_result, actionId);
           });
           const returning = spec.exploration?.purpose === 'return' ? spec.exploration.return_step : undefined;
           // Routes start where the action was planned: replaying this step from

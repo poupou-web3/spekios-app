@@ -38,18 +38,22 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
     await session.withScope({ workspaceId: job.workspace_id, userId: job.user_id, agentId: job.agent_id, projectId: job.project_id, taskId: job.task_id }, async () => {
       if (!await new AutomaticReproductionScheduler(session).beforeDispatch(job, gateway)) return;
       const previous = runIdList(job.previous_run_ids);
-      let maxActions = job.settings.maxActions as number | undefined;
-      let resume: { attempt: number; previousRunIds: string[]; jobMaxActions: number } | undefined;
+      // Admission froze the resolved limits; null means none, and a missing key
+      // (a job admitted before limits existed) falls back to the server default.
+      const limit = (key: string) => key in job.settings ? (job.settings[key] ?? null) as number | null : undefined;
+      const budget = limit('maxActions'), minutes = limit('maxMinutes');
+      let maxActions = budget;
+      let resume: { attempt: number; previousRunIds: string[]; jobMaxActions: number | null; carriedActions: number } | undefined;
       if (previous.length) {
-        const budget = Number(job.settings.maxActions);
-        const remaining = budget - await dispatchedCount(session, previous);
-        if (!Number.isInteger(remaining) || remaining < 1) {
+        const carried = await dispatchedCount(session, previous);
+        const remaining = budget == null ? Infinity : budget - carried;
+        if (!(remaining >= 1)) {
           await session.query("UPDATE browser_jobs SET status='interrupted', error=$2, finished_at=now() WHERE job_id=$1 AND status='running' AND worker_id=$3",
             [job.job_id, 'Exploration stopped after its action budget was used. In-flight actions were not repeated.', workerId]);
           return;
         }
-        maxActions = remaining;
-        resume = { attempt: Number(job.resumes), previousRunIds: previous, jobMaxActions: budget };
+        maxActions = remaining === Infinity ? null : remaining;
+        resume = { attempt: Number(job.resumes), previousRunIds: previous, jobMaxActions: budget ?? null, carriedActions: carried };
       }
       try {
         const currentOrigins = (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());
@@ -59,6 +63,8 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
           // Jobs admitted before memory existed omit the setting and stay memory-free.
           appMemory: job.settings.appMemory === true,
           viewportProfile: job.settings.viewportProfile, access, authMode: job.request.auth_mode ?? 'auto', sessionId: job.request.session_id,
+          maxDurationMs: minutes == null ? minutes : minutes * 60000,
+          maxTokens: limit('maxTokens') ?? null, maxCostUsd: limit('maxCostUsd') ?? null, stopAfterIdleActions: limit('stopAfterIdleActions') ?? null,
           shutdown: shutdown.signal, resume };
         const result = await (job.request.kind === 'verify_fix' ? verifyFix(session, job.job_id, options) : job.request.kind === 'reproduce'
           ? reproduce(session, job.request.source_action_id, options)

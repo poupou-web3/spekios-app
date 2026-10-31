@@ -14,9 +14,11 @@ function workspace(fetch=async()=>response({})){const handlers={},node={innerHTM
 const plain=value=>JSON.parse(JSON.stringify(value));
 test('defaults validate the same supported models, limits and free-only restriction as the API',()=>{
   const ui=workspace(),values=ui.configurationValues();assert.equal(ui.configurationError(values),'');
-  for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:null},{max_actions:51},{max_auto_reproductions:4},{max_auto_replay_actions:101},{viewport_profile:'watch'},{provider:'other'},{model:'paid/model'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
+  for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:10001},{max_minutes:0},{max_minutes:10081},{max_tokens:999},{max_cost_usd:0},{stop_after_idle_actions:4},{max_auto_reproductions:4},{max_auto_replay_actions:101},{viewport_profile:'watch'},{provider:'other'},{model:'paid/model'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
   assert.equal(ui.configurationError({...values,model:'vendor/model:free'}),'');
   assert.equal(ui.configurationError({...values,max_actions:50,max_auto_replay_actions:100}),'');
+  assert.equal(ui.configurationError({...values,max_actions:null,max_minutes:null,max_tokens:null,max_cost_usd:null,stop_after_idle_actions:null}),'','Every limit can be empty: no limit.');
+  assert.equal(ui.configurationError({...values,max_actions:10000,max_minutes:10080,max_tokens:1000000000,max_cost_usd:2.5}),'');
   assert.equal(ui.configurationError({...values,provider:'openai',model:'provider-model',free_only:false}),'');
   assert.equal(ui.configurationError({...values,provider:'meta',model:'muse-wonder-1.0',free_only:false}),'');
 });
@@ -73,7 +75,7 @@ test('an old acknowledgement cannot discard a new draft after reconnecting with 
 });
 test('configuration text is escaped, exposes no secret input and clearly separates immutable environment policy',()=>{
   const ui=workspace();ui.updateConfiguration('model','<script>bad()</script>');const html=ui.configurationView();assert.doesNotMatch(html,/<script>|type="password"/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Queued and running jobs keep their original settings/);assert.match(html,/Saving does not call a model/);
-  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','free_only','max_actions','max_auto_replay_actions','max_auto_reproductions','model','provider','viewport_profile'].sort());
+  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','free_only','limit_overrides','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','provider','stop_after_idle_actions','viewport_profile'].sort());
 });
 test('previous and next follow the visible list, preserve comparison, and reject stale targets',()=>{
   const ui=workspace();ui.state.report={run:{},actions:[{action_id:'one'},{action_id:'two'},{action_id:'three'}],events:[]};ui.state.actionId='one';ui.state.image='compare';ui.state.frameId='old';
@@ -95,4 +97,23 @@ test('app memory is a saved default that can be turned off, and remembered scope
   assert.match(html,/Test data · desktop · public · 1 run ·/);
   assert.match(html,/In use by a running test/);assert.equal((html.match(/forget-memory/g)||[]).length,1,'A scope in use cannot be forgotten.');
   assert.match(html,/recorded runs and evidence stay/);
+});
+
+test('limits are empty (no limit) unless saved, and overrides for projects and models are validated and sent as rules',async()=>{
+  let sent=null;const ui=workspace(async(path,options)=>{if(path==='/v1/exploration-settings'&&options?.method==='POST'){sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults,maxActions:null}});}return response({revision:4,settings:defaults});});
+  ui.applyConfiguration({revision:3,settings:{provider:'openrouter',model:'openrouter/free',freeOnly:true,viewportProfile:'desktop',maxAutoReproductions:2,maxAutoReplayActions:12}});
+  const values=ui.configurationValues();assert.equal(values.max_actions,null);assert.equal(values.max_tokens,null);assert.equal(values.stop_after_idle_actions,50,'Idle stop follows the server default when unset.');
+  assert.match(ui.configurationView(),/Leave a limit empty for no limit/);
+  const project='11111111-1111-4111-8111-111111111111';
+  ui.applyConfiguration({revision:4,settings:{...defaults,maxActions:null,limitOverrides:[{projectId:project,limits:{maxActions:300,maxTokens:null}}]}});
+  const loaded=ui.configurationValues().limit_overrides[0];assert.equal(loaded.project_id,project);assert.equal(loaded.max_actions,300);assert.equal(loaded.max_minutes,null);
+  ui.updateConfiguration('max_tokens',200000);ui.updateConfiguration('override.0.max_minutes',45);
+  const draft=ui.configurationDraft();assert.equal(draft.values.limit_overrides[0].max_minutes,45);assert.equal(ui.configurationError(draft.values),'');
+  for(const [field,value,message] of [['override.0.project_id','not-a-uuid',/UUID/],['override.0.project_id','',/project ID, a provider or a model/]]){
+    const before=draft.values.limit_overrides[0].project_id;ui.updateConfiguration(field,value);assert.match(ui.configurationError(draft.values),message);ui.updateConfiguration('override.0.project_id',before);
+  }
+  ui.updateConfiguration('override.0.model','openrouter/free');assert.equal(ui.configurationError(draft.values),'');
+  await ui.saveConfiguration();
+  assert.equal(sent.max_actions,null,'An empty limit is sent as null: no limit.');assert.equal(sent.max_tokens,200000);
+  assert.deepEqual(sent.limit_overrides,[{project_id:project,model:'openrouter/free',limits:{max_actions:300,max_minutes:45}}],'Empty override fields inherit and are omitted.');
 });

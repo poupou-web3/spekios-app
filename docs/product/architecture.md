@@ -10,11 +10,11 @@ This section is the current state. Everything below it is the design; dated impl
 
 Built:
 
-- **Explore:** URL-only exploration with a scored [frontier planner](../exploration/planner.md), memory across runs, document-wide controls, viewport profiles, [private sign-in](../exploration/private-login.md) and [testing focus](../../apps/docs/src/content/docs/guides/testing-focus.md).
+- **Explore:** URL-only exploration with a scored [frontier planner](../exploration/planner.md), an [app map](../../apps/docs/src/content/docs/guides/app-memory.md#the-app-map) of states and transitions carried between runs and compared run to run, memory across runs, document-wide controls, viewport profiles, [private sign-in](../exploration/private-login.md) and [testing focus](../../apps/docs/src/content/docs/guides/testing-focus.md).
 - **Decide:** a prediction before every action and an assessment after it; [fresh-browser reproduction](../exploration/reproduction.md) and [automatic rechecks](../exploration/automatic-reproduction.md); [triage](../exploration/triage.md) of every issue as bug, intended behavior, duplicate or needs review, by people, agents or Scout itself.
 - **Record:** append-only actions, captures, assessments, issues, triage, verifications and [human reviews](../exploration/finding-reviews.md), with evidence in the bucket and events in ClickHouse.
 - **Make available:** the workspace, the issues page, the back office, [run reports and exports](../runtime/reports.md).
-- **Report back:** 30 MCP/HTTP tools, coding-agent reports that separate new findings from known behavior, [fix verification](../../apps/docs/src/content/docs/guides/fix-verification.md) and [deployment rechecks](../exploration/triage.md#recheck-after-a-deploy) with a CI script.
+- **Report back:** 32 MCP/HTTP tools, coding-agent reports that separate new findings from known behavior, [fix verification](../../apps/docs/src/content/docs/guides/fix-verification.md) and [deployment rechecks](../exploration/triage.md#recheck-after-a-deploy) with a CI script.
 - **Run safely:** target sites in an [isolated browser sandbox](../../apps/docs/src/content/docs/operators/security.md), several jobs at once, interrupted explorations resumed.
 
 Spec decisions:
@@ -25,7 +25,7 @@ Spec decisions:
 | Test cases and verdicts | A permanent issue with its frozen path is the regression case. Each fix verification or recheck item is a verdict: resolved, still reproducible, blocked or inconclusive. Hand-written test cases are deferred. |
 | Knowledge base | Implemented as triage: intended behavior and known bugs, matched in later runs by page, control, viewport and sign-in state. Free-text product notes are deferred. |
 | Triage | `bug`, `intended_behavior`, `duplicate`, `needs_review`. Agents decide, but never replace a person's decision. Known behavior is labelled, never dropped. |
-| Budgets | Per-run action, time and model-request limits exist. Workspace spend budgets are deferred. |
+| Budgets | No limit by default. Each user sets optional action, time, token and cost limits per run, with project and model overrides ([exploration limits](../../apps/docs/src/content/docs/guides/exploration-limits.md)). Workspace-wide spend budgets are deferred. |
 | Schedules and CI | Deployment rechecks through the API, MCP and `scripts/scout-recheck.mjs`. A built-in scheduler is deferred: run the script from CI or cron. |
 
 ## Recommended direction

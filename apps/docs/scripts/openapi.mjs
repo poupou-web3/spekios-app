@@ -1,5 +1,12 @@
 const ref = (name) => ({ $ref: '#/components/schemas/' + name });
 const uuid = { type: 'string', format: 'uuid', not: { const: '00000000-0000-0000-0000-000000000000' } };
+// Exploration limits are optional: absent or null means no limit.
+const limitFields = {
+  max_actions: { type: ['integer','null'], minimum: 1, maximum: 10000, description: 'Executed actions per exploration, including navigation and returns. null: no limit.' },
+  max_minutes: { type: ['integer','null'], minimum: 1, maximum: 10080, description: 'Wall-clock minutes per exploration attempt. null: no limit.' },
+  max_tokens: { type: ['integer','null'], minimum: 1000, maximum: 1000000000, description: 'Provider-reported input plus output tokens per run, checked before each new action. null: no limit.' },
+  max_cost_usd: { type: ['number','null'], minimum: 0.01, maximum: 100000, description: 'Provider-reported cost per run, checked before each new action; unpriced calls do not count. null: no limit.' },
+};
 const string = { type: 'string' };
 const bool = { type: 'boolean' };
 const object = { type: 'object', additionalProperties: true };
@@ -189,11 +196,19 @@ export function openapi(catalog) {
   });
   add('/v1/model-requests/{request_id}', 'get', 'getModelRequest', 'Models', 'Read recorded model request and attempts', { parameters: [pathParameter('request_id')] });
   add('/v1/app-memory', 'get', 'listAppMemory', 'Settings', 'List remembered app scopes from earlier explorations', {
-    description: 'One scope per origin, viewport profile, sign-in state and execution mode, newest first (at most 100). Counts pages and tried/untried controls. Memory is derived from runs; it never contains screenshots or field values.',
+    description: 'One scope per origin, viewport profile, sign-in state and execution mode, newest first (at most 100). Counts pages, tried/untried controls, map states, transitions and depth. Memory is derived from runs; it never contains screenshots or field values.',
+  });
+  add('/v1/app-memory/{scope_id}/map', 'get', 'getAppMap', 'Settings', 'Read the app map carried between runs for one scope', {
+    parameters: [pathParameter('scope_id'), query('offset', bounded(0,100000,0), 'States to skip, ordered by depth then page template.'), query('limit', bounded(1,100,20), 'Maximum states.')],
+    description: 'States by depth from the entry page with where each control led (up to 40 transitions per state), verdict counts and up to 12 controls no run has tried there. A state is a page template (identifiers become :n or :id) plus the controls it offers, with repeated list items collapsed. Written by explorations that use app memory. No model call.',
+  });
+  add('/v1/runs/{run_id}/map-diff', 'get', 'compareRunMap', 'Runs', 'Compare a run with earlier runs of the same app scope', {
+    parameters: [pathParameter('run_id')],
+    description: 'New states and transitions, states the previous run reached but this run did not, controls that now lead to a different state, and verdict changes on the same transition (regression: no_issue_observed before, suspect now). Lists are capped at 50 with full counts. A run without app memory has no scope to compare. No model call.',
   });
   add('/v1/app-memory/{scope_id}/forget', 'post', 'forgetAppMemory', 'Settings', 'Forget one remembered app scope; run evidence is kept', {
     parameters: [pathParameter('scope_id')],
-    description: 'Deletes the derived pages and controls for this scope. Recorded runs, captures and model requests are unchanged. A scope that an active run is still using returns 409 memory_scope_in_use.',
+    description: 'Deletes the derived pages, controls and app map for this scope. Recorded runs, captures and model requests are unchanged. A scope that an active run is still using returns 409 memory_scope_in_use.',
     responses: { '200': response('Scope forgotten.'), ...errors },
   });
   add('/v1/browser-access', 'get', 'getAccessRequests', 'Access', 'Read human access requests and nonsecret session metadata', {
@@ -260,10 +275,14 @@ export function openapi(catalog) {
         SettingsSubmission: strict({
           request_id: uuid, expected_revision: { type: 'integer', minimum: 0, description: 'Signed 64-bit integer below 9223372036854775807.' },
           provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, description: 'Trimmed model ID with ASCII letters, digits and / : . _ - only.' },
-          max_actions: bounded(1,50), viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
+          ...limitFields, stop_after_idle_actions: { type: ['integer','null'], minimum: 5, maximum: 1000, description: 'Stop after this many consecutive actions reach no state new to the run. Omitted: 50. null: never.' },
+          limit_overrides: { type: 'array', maxItems: 50, items: strict({ project_id: uuid, provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 },
+            limits: strict({ ...limitFields, stop_after_idle_actions: { type: ['integer','null'], minimum: 5, maximum: 1000 } }, []) }, ['limits']),
+            description: 'Limits for a project, a model, or a model within a project. A job applies matching overrides least specific first (model, project, then both); absent keys inherit and null means no limit.' },
+          viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
           auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,100),
           app_memory: { type: 'boolean', default: true, description: 'Remember explored pages and controls across runs of the same app, viewport and sign-in state.' },
-        }, ['request_id','expected_revision','provider','model','max_actions','viewport_profile','free_only','auto_reproduce','max_auto_reproductions','max_auto_replay_actions']),
+        }, ['request_id','expected_revision','provider','model','viewport_profile','free_only','auto_reproduce','max_auto_reproductions','max_auto_replay_actions']),
         ModelRequest: strict({
           request_id: uuid, provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[A-Za-z0-9/:._-]+$' },
           prompt: { type: 'string', minLength: 1, maxLength: 65536, description: 'Nonblank, no NUL, at most 65536 UTF-8 bytes. This route accepts request bodies up to 192 KiB.' },

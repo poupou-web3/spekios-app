@@ -51,12 +51,14 @@ export type Capture = {
   sha256: string; object_key: string; metadata_key: string; byte_length: number; observation: Observation;
   purpose: 'runtime_validation' | 'exploration'; training_status: 'excluded_fixture' | 'unreviewed';
 };
-// Executed browser actions per exploration, including navigation and returns.
-// A replay path is at most one exploration long; its ordinals also count
-// skipped stale plans and reveals, so they get twice the room.
-export const MAX_EXPLORATION_ACTIONS = 50;
-export const DEFAULT_EXPLORATION_ACTIONS = 20;
-export const MAX_REPLAY_ORDINAL = MAX_EXPLORATION_ACTIONS * 2;
+// Explorations have no limit unless the user configures one; these cap a
+// configured limit (executed actions include navigation and returns).
+export const MAX_EXPLORATION_ACTIONS = 10_000;
+export const MAX_EXPLORATION_MINUTES = 10_080;
+// Replays follow a recorded prefix and keep their own bound: at most 50 steps
+// within 100 recorded ordinals, which also count skipped plans and reveals.
+export const MAX_REPLAY_STEPS = 50;
+export const MAX_REPLAY_ORDINAL = MAX_REPLAY_STEPS * 2;
 export const workspaceId = '00000000-0000-4000-8000-000000000001';
 export const userId = '00000000-0000-4000-8000-000000000002';
 export const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);

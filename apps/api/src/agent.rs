@@ -516,6 +516,16 @@ async fn dispatch_inner(
             )
             .await
         }
+        "scout_get_app_map" => {
+            let filters: crate::memory::MapQuery = args(input)?;
+            decode(crate::memory::read_map(state, filters).await).await
+        }
+        "scout_compare_run" => {
+            decode(
+                crate::memory::compare_run(state, checked(args::<RunArgs>(input)?.run_id)?).await,
+            )
+            .await
+        }
         "scout_list_knowledge" => {
             let filters: issues::KnowledgeFilters = args(input)?;
             decode(issues::knowledge(ScopedState(state.clone()), Query(filters)).await).await
@@ -1020,7 +1030,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let value = body(response).await;
         let catalog = list(&value["result"]["tools"]);
-        assert_eq!(catalog.len(), 30);
+        assert_eq!(catalog.len(), 32);
         assert!(
             catalog
                 .iter()

@@ -418,6 +418,7 @@ pub fn permitted(p: &Principal, method: &str, path: &str) -> bool {
             || path.starts_with("/v1/issues")
             || path.starts_with("/v1/issue-verifications")
             || path == "/v1/knowledge"
+            || path.starts_with("/v1/app-memory")
             || path.starts_with("/v1/rechecks/"))
     {
         return p.allows("runs:read");

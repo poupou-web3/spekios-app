@@ -13,7 +13,7 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,launchUrlError,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {rebaseConfiguration,saveConfiguration,updateConfiguration} from './views/settings.js';
+import {editOverrides,rebaseConfiguration,saveConfiguration,updateConfiguration} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 root.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -63,6 +63,7 @@ root.addEventListener('click',async e=>{
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Workspace refreshed.');}
   if(action==='logout'){closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
+  if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
   if(action==='prev-action'||action==='next-action'){navigateAction(action==='prev-action'?-1:1,el.dataset.id);}
   if(action==='settling-frame'){state.image='frame';state.frameId=el.dataset.id;render();}
   if(action==='outcome-json'){state.drawer={title:'Action completion and diagnostics',raw:{outcome:selectedAction()?.outcome,frames:(state.report.events||[]).filter(e=>e.action_id===state.actionId&&e.event_type==='action.settling_frame').map(e=>e.payload)}};render();}

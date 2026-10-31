@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Store } from './store.js';
-import { MAX_EXPLORATION_ACTIONS, MAX_REPLAY_ORDINAL, isUuid, type BrowserCommand, type Capture } from './contracts.js';
+import { MAX_REPLAY_ORDINAL, MAX_REPLAY_STEPS, isUuid, type BrowserCommand, type Capture } from './contracts.js';
 import { sameObservedState, stateFingerprint } from './exploration-policy.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
 import { observedCommand } from './browser-interactions.js';
@@ -71,7 +71,7 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
     steps.push({ source_action_id: action.action_id, source_prediction_id: action.prediction_id, source_model_request_id: prediction.request_id,
       command: structuredClone(command), goal: prediction.goal, expected_result: prediction.expected_result, before, after });
   }
-  if (!steps.length || steps.length > MAX_EXPLORATION_ACTIONS || actions.length !== source.ordinal-startOrdinal+1) throw new Error('Source path has missing steps or exceeds the replay budget.');
+  if (!steps.length || steps.length > MAX_REPLAY_STEPS || actions.length !== source.ordinal-startOrdinal+1) throw new Error('Source path has missing steps or exceeds the replay budget.');
   return { reproduction_id: randomUUID(), source_run_id: source.run_id, source_action_id: sourceActionId,
     target_url: source.target_url, training_status: source.config.training_status, viewport_profile: profile, steps,auth_context:authContext };
 }

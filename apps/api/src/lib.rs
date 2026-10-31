@@ -208,6 +208,8 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(jobs::cancel_job),
         )
         .route("/v1/app-memory", get(memory::list))
+        .route("/v1/app-memory/{scope_id}/map", get(memory::map))
+        .route("/v1/runs/{run_id}/map-diff", get(memory::compare))
         .route(
             "/v1/app-memory/{scope_id}/forget",
             axum::routing::post(memory::forget),
@@ -664,7 +666,7 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         "browser_isolation":{"sandbox_container":true,"scout_credentials":false,"saved_login_vault":false,"storage_network":false,"chromium_sandbox":"default_on","fresh_container_per_run":true},
         "app_login":{"manual_handoff":true,"session_reuse":true,"saved_session_hours":24,"google_oauth":false,"private_login_recording":false},
         "frontier_planning":{"version":"frontier-v2","automatic_return":true,"stale_plan_recovery":true,"max_replans":3,"probability_calibrated":false,
-            "max_actions":jobs::MAX_EXPLORATION_ACTIONS,"document_controls":true,"reveal_before_action":true,"max_observed_controls":120,"max_prompt_bytes":65536,"max_duration_minutes_env":"SCOUT_EXPLORER_MAX_MINUTES"},
+            "max_actions":jobs::MAX_EXPLORATION_ACTIONS,"limits":{"default":"none","configurable_per":["user","project","model"],"keys":jobs::LIMIT_KEYS,"max_minutes":jobs::MAX_EXPLORATION_MINUTES,"default_stop_after_idle_actions":jobs::DEFAULT_IDLE_ACTIONS,"usage_limits_count":"settled_reported_usage"},"document_controls":true,"reveal_before_action":true,"max_observed_controls":120,"max_prompt_bytes":65536,"max_duration_minutes_env":"SCOUT_EXPLORER_MAX_MINUTES"},
         "app_memory":{"version":"app-memory-v1","enabled_by_default":effective_settings["appMemory"],"scope":["origin","viewport_profile","auth_scope","execution_mode"],"keyed_by":"url_and_control_identity","resume_remembered_pages":true,"replays_use_memory":false,"forget":"/v1/app-memory/{scope_id}/forget"},
         "viewport_profiles":["desktop","tablet","mobile"],
         "model_gateway":true,"model_inference":configured && state.gateway.as_ref().is_some_and(|g|g.is_ready()),

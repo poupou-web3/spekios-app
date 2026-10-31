@@ -13,13 +13,185 @@ use serde_json::{Value, json};
 use std::{env, sync::Arc};
 use uuid::Uuid;
 
-/// Executed browser actions per exploration, matching the browser runtime.
-pub const MAX_EXPLORATION_ACTIONS: u32 = 50;
-const DEFAULT_EXPLORATION_ACTIONS: u32 = 20;
+/// Explorations have no limit unless a user configures one. These cap a
+/// configured limit and match the browser runtime.
+pub const MAX_EXPLORATION_ACTIONS: u32 = 10_000;
+pub const MAX_EXPLORATION_MINUTES: u32 = 10_080;
+const TOKEN_LIMITS: std::ops::RangeInclusive<u64> = 1_000..=1_000_000_000;
+const COST_LIMITS: std::ops::RangeInclusive<f64> = 0.01..=100_000.0;
+const IDLE_LIMITS: std::ops::RangeInclusive<u32> = 5..=1_000;
+/// Stop after this many consecutive actions find no new state. Not a budget:
+/// it ends explorations that keep revisiting what they already recorded.
+pub const DEFAULT_IDLE_ACTIONS: u32 = 50;
+const MAX_LIMIT_OVERRIDES: usize = 50;
+/// The resolved limits frozen into every job, in precedence order of overrides.
+pub const LIMIT_KEYS: [&str; 5] = [
+    "maxActions",
+    "maxMinutes",
+    "maxTokens",
+    "maxCostUsd",
+    "stopAfterIdleActions",
+];
+/// Replays follow a recorded prefix and keep their own bounds: 50 steps.
+const MAX_REPLAY_STEPS: u32 = 50;
 /// Total automatic replay actions per exploration; one full path fits twice.
-pub const MAX_AUTO_REPLAY_ACTIONS: u32 = MAX_EXPLORATION_ACTIONS * 2;
+pub const MAX_AUTO_REPLAY_ACTIONS: u32 = MAX_REPLAY_STEPS * 2;
 /// Recorded actions in a verifiable issue path, including skipped plans.
-const MAX_ISSUE_PATH: usize = MAX_EXPLORATION_ACTIONS as usize * 2;
+const MAX_ISSUE_PATH: usize = MAX_REPLAY_STEPS as usize * 2;
+
+/// Absent stays None; an explicit JSON null becomes Some(None), "no limit".
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Optional limits. A missing key inherits; null means no limit.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Limits {
+    #[serde(default, deserialize_with = "present")]
+    max_actions: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "present")]
+    max_minutes: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "present")]
+    max_tokens: Option<Option<u64>>,
+    #[serde(default, deserialize_with = "present")]
+    max_cost_usd: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "present")]
+    stop_after_idle_actions: Option<Option<u32>>,
+}
+impl Limits {
+    /// The present keys, camelCase, each a number or null.
+    fn normalize(&self) -> Result<serde_json::Map<String, Value>, &'static str> {
+        let mut limits = serde_json::Map::new();
+        let invalid = Err("invalid_settings_limits");
+        if let Some(value) = self.max_actions {
+            if value.is_some_and(|n| !(1..=MAX_EXPLORATION_ACTIONS).contains(&n)) {
+                return invalid;
+            }
+            limits.insert("maxActions".into(), json!(value));
+        }
+        if let Some(value) = self.max_minutes {
+            if value.is_some_and(|n| !(1..=MAX_EXPLORATION_MINUTES).contains(&n)) {
+                return invalid;
+            }
+            limits.insert("maxMinutes".into(), json!(value));
+        }
+        if let Some(value) = self.max_tokens {
+            if value.is_some_and(|n| !TOKEN_LIMITS.contains(&n)) {
+                return invalid;
+            }
+            limits.insert("maxTokens".into(), json!(value));
+        }
+        if let Some(value) = self.max_cost_usd {
+            if value.is_some_and(|c| !c.is_finite() || !COST_LIMITS.contains(&c)) {
+                return invalid;
+            }
+            limits.insert(
+                "maxCostUsd".into(),
+                json!(value.map(|c| (c * 100.0).round() / 100.0)),
+            );
+        }
+        if let Some(value) = self.stop_after_idle_actions {
+            if value.is_some_and(|n| !IDLE_LIMITS.contains(&n)) {
+                return invalid;
+            }
+            limits.insert("stopAfterIdleActions".into(), json!(value));
+        }
+        Ok(limits)
+    }
+}
+
+/// Limits for one project, one model, or one model within a project.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LimitOverride {
+    #[serde(default)]
+    project_id: Option<Uuid>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    limits: Limits,
+}
+impl LimitOverride {
+    fn normalize(&self) -> Result<Value, &'static str> {
+        let invalid = Err("invalid_limit_override");
+        if self.project_id.is_none() && self.provider.is_none() && self.model.is_none()
+            || self.project_id.is_some_and(|id| id.is_nil())
+            || self
+                .provider
+                .as_deref()
+                .is_some_and(|p| !matches!(p, "openai" | "anthropic" | "openrouter" | "meta"))
+            || self.model.as_deref().is_some_and(|m| {
+                m.is_empty()
+                    || m.len() > 200
+                    || !m
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"/:._-".contains(&c))
+            })
+        {
+            return invalid;
+        }
+        let limits = self.limits.normalize()?;
+        if limits.is_empty() {
+            return invalid;
+        }
+        let mut value = json!({"limits":limits});
+        for (key, field) in [
+            ("projectId", json!(self.project_id)),
+            ("provider", json!(self.provider)),
+            ("model", json!(self.model)),
+        ] {
+            if !field.is_null() {
+                value[key] = field;
+            }
+        }
+        Ok(value)
+    }
+}
+
+/// Applies matching overrides onto the user's limits, least specific first:
+/// model, then project, then model within the project. A job keeps the result.
+fn resolve_limits(settings: &mut Value, project_id: Option<Uuid>) {
+    let overrides = settings["limitOverrides"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let (provider, model) = (settings["provider"].clone(), settings["model"].clone());
+    let mut matching: Vec<(u8, Value)> = overrides
+        .into_iter()
+        .filter(|o| {
+            o.get("projectId").is_none_or(|v| *v == json!(project_id))
+                && o.get("provider").is_none_or(|v| *v == provider)
+                && o.get("model").is_none_or(|v| *v == model)
+        })
+        .map(|o| {
+            (
+                u8::from(o.get("projectId").is_some()) * 2
+                    + u8::from(o.get("provider").is_some() || o.get("model").is_some()),
+                o,
+            )
+        })
+        .collect();
+    matching.sort_by_key(|(specificity, _)| *specificity);
+    let mut applied = Vec::new();
+    for (_, item) in matching {
+        for key in LIMIT_KEYS {
+            if let Some(value) = item["limits"].get(key) {
+                settings[key] = value.clone();
+            }
+        }
+        applied.push(json!({"projectId":item.get("projectId"),"provider":item.get("provider"),"model":item.get("model")}));
+    }
+    if let Some(object) = settings.as_object_mut() {
+        object.remove("limitOverrides");
+        object.insert("limitOverridesApplied".into(), json!(applied));
+    }
+}
 
 fn enabled() -> bool {
     true
@@ -39,7 +211,19 @@ pub struct SettingsSubmission {
     expected_revision: i64,
     provider: String,
     model: String,
-    max_actions: u32,
+    /// Absent or null: no limit. The idle stop defaults when absent.
+    #[serde(default, deserialize_with = "present")]
+    max_actions: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "present")]
+    max_minutes: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "present")]
+    max_tokens: Option<Option<u64>>,
+    #[serde(default, deserialize_with = "present")]
+    max_cost_usd: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "present")]
+    stop_after_idle_actions: Option<Option<u32>>,
+    #[serde(default)]
+    limit_overrides: Vec<LimitOverride>,
     viewport_profile: String,
     free_only: bool,
     auto_reproduce: bool,
@@ -81,8 +265,33 @@ impl SettingsSubmission {
         {
             return Err("invalid_settings_model");
         }
-        if !(1..=MAX_EXPLORATION_ACTIONS).contains(&self.max_actions)
-            || !(1..=3).contains(&self.max_auto_reproductions)
+        let mut limits = Limits {
+            max_actions: Some(self.max_actions.flatten()),
+            max_minutes: Some(self.max_minutes.flatten()),
+            max_tokens: Some(self.max_tokens.flatten()),
+            max_cost_usd: Some(self.max_cost_usd.flatten()),
+            stop_after_idle_actions: Some(
+                self.stop_after_idle_actions
+                    .unwrap_or(Some(DEFAULT_IDLE_ACTIONS)),
+            ),
+        }
+        .normalize()?;
+        if self.limit_overrides.len() > MAX_LIMIT_OVERRIDES {
+            return Err("invalid_limit_override");
+        }
+        let overrides = self
+            .limit_overrides
+            .iter()
+            .map(LimitOverride::normalize)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut seen = std::collections::HashSet::new();
+        if !overrides.iter().all(|o| {
+            seen.insert(json!([o.get("projectId"), o.get("provider"), o.get("model")]).to_string())
+        }) {
+            return Err("duplicate_limit_override");
+        }
+        limits.insert("limitOverrides".into(), json!(overrides));
+        if !(1..=3).contains(&self.max_auto_reproductions)
             || !(1..=MAX_AUTO_REPLAY_ACTIONS).contains(&self.max_auto_replay_actions)
         {
             return Err("invalid_settings_limits");
@@ -100,12 +309,16 @@ impl SettingsSubmission {
         Ok(NormalizedSettings {
             request_id: self.request_id,
             expected_revision: self.expected_revision,
-            settings: json!({
-                "provider":self.provider,"model":model,"maxActions":self.max_actions,
-                "viewportProfile":self.viewport_profile,"freeOnly":free_only,
-                "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
-                "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory
-            }),
+            settings: {
+                let mut settings = json!({
+                    "provider":self.provider,"model":model,
+                    "viewportProfile":self.viewport_profile,"freeOnly":free_only,
+                    "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
+                    "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory
+                });
+                settings.as_object_mut().unwrap().extend(limits);
+                settings
+            },
         })
     }
 }
@@ -118,6 +331,11 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
             "provider",
             "model",
             "maxActions",
+            "maxMinutes",
+            "maxTokens",
+            "maxCostUsd",
+            "stopAfterIdleActions",
+            "limitOverrides",
             "viewportProfile",
             "freeOnly",
             "autoReproduce",
@@ -216,6 +434,16 @@ impl Submission {
             queue_limit: Some(queue_limit),
         }
     }
+}
+
+/// An unset, empty or out-of-range server limit means no limit.
+fn optional_setting(name: &str, max: u32) -> Value {
+    json!(
+        env::var(name)
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .filter(|n| (1..=max).contains(n))
+    )
 }
 
 fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
@@ -681,7 +909,9 @@ impl Queue {
             principal: crate::identity::Principal::default(),
             settings: json!({
                 "provider":provider,"model":model,"freeOnly":provider=="openrouter" && env::var("SCOUT_EXPLORER_FREE_ONLY").as_deref()!=Ok("false"),
-                "maxActions":bounded_setting("SCOUT_EXPLORER_MAX_ACTIONS",DEFAULT_EXPLORATION_ACTIONS,MAX_EXPLORATION_ACTIONS),
+                "maxActions":optional_setting("SCOUT_EXPLORER_MAX_ACTIONS",MAX_EXPLORATION_ACTIONS),
+                "maxMinutes":optional_setting("SCOUT_EXPLORER_MAX_MINUTES",MAX_EXPLORATION_MINUTES),
+                "maxTokens":null,"maxCostUsd":null,"stopAfterIdleActions":DEFAULT_IDLE_ACTIONS,"limitOverrides":[],
                 "appMemory":env::var("SCOUT_EXPLORER_APP_MEMORY").as_deref()!=Ok("false"),
                 "autoReproduce":env::var("SCOUT_AUTO_REPRODUCE").as_deref()==Ok("true"),
                 "maxAutoReproductions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_CASES",2,3),
@@ -734,6 +964,8 @@ impl Queue {
             .unwrap_or((0, None));
         let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
         let (request, mut settings) = prepare_submission(&input, &defaults)?;
+        // The job keeps the limits resolved now; later setting changes never alter it.
+        resolve_limits(&mut settings, input.project_id);
         let verification_source = if let Some(issue_id) = input.issue_id {
             let row=tx.query_opt("SELECT to_jsonb(i),r.lifecycle,r.config,scout_issue_path(a.run_id,a.ordinal),a.state,a.assessment,a.tool_error FROM issues i JOIN runtime_runs r ON r.run_id=i.source_run_id JOIN runtime_actions a ON a.action_id=i.source_action_id AND a.run_id=r.run_id WHERE i.issue_id=$1 AND i.workspace_id=$2 AND i.user_id=$3",&[&issue_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("issue_not_found")?;
             let issue: Value = row.get(0);
@@ -1024,6 +1256,38 @@ mod tests {
             ("free_only", json!("true")),
             ("auto_reproduce", json!(1)),
             ("max_actions", json!(1.5)),
+            ("max_minutes", json!(0)),
+            ("max_minutes", json!(MAX_EXPLORATION_MINUTES + 1)),
+            ("max_tokens", json!(999)),
+            ("max_cost_usd", json!(0)),
+            ("max_cost_usd", json!(-1)),
+            ("stop_after_idle_actions", json!(4)),
+            ("limit_overrides", json!([{"limits":{"max_actions":5}}])),
+            (
+                "limit_overrides",
+                json!([{"project_id":Uuid::nil(),"limits":{"max_actions":5}}]),
+            ),
+            (
+                "limit_overrides",
+                json!([{"provider":"other","limits":{"max_actions":5}}]),
+            ),
+            (
+                "limit_overrides",
+                json!([{"model":"a b","limits":{"max_actions":5}}]),
+            ),
+            ("limit_overrides", json!([{"model":"m","limits":{}}])),
+            (
+                "limit_overrides",
+                json!([{"model":"m","limits":{"max_actions":0}}]),
+            ),
+            (
+                "limit_overrides",
+                json!([{"model":"m","limits":{"budget":5}}]),
+            ),
+            (
+                "limit_overrides",
+                json!([{"model":"m","limits":{"max_actions":5}},{"model":"m","limits":{"max_minutes":5}}]),
+            ),
             ("api_key", json!("cannot-save-secrets")),
             ("allowed_origins", json!(["https://other.test"])),
             ("allowedOrigins", json!(["https://other.test"])),
@@ -1038,7 +1302,6 @@ mod tests {
             "expected_revision",
             "provider",
             "model",
-            "max_actions",
             "viewport_profile",
             "free_only",
             "auto_reproduce",
@@ -1070,6 +1333,60 @@ mod tests {
             normalize_settings(fresh).unwrap().settings["appMemory"],
             false
         );
+    }
+
+    #[test]
+    fn limits_are_unlimited_by_default_and_overrides_resolve_most_specific_last() {
+        let mut input = settings_input();
+        input.as_object_mut().unwrap().remove("max_actions");
+        let settings = normalize_settings(input).unwrap().settings;
+        for key in ["maxActions", "maxMinutes", "maxTokens", "maxCostUsd"] {
+            assert_eq!(settings[key], Value::Null, "{key} has no default limit");
+        }
+        assert_eq!(settings["stopAfterIdleActions"], DEFAULT_IDLE_ACTIONS);
+        let mut disabled = settings_input();
+        disabled["stop_after_idle_actions"] = Value::Null;
+        disabled["max_cost_usd"] = json!(2.345);
+        let disabled = normalize_settings(disabled).unwrap().settings;
+        assert_eq!(disabled["stopAfterIdleActions"], Value::Null);
+        assert_eq!(disabled["maxCostUsd"], 2.35);
+
+        let project = Uuid::new_v4();
+        let mut input = settings_input();
+        input["max_actions"] = json!(100);
+        input["max_tokens"] = json!(50_000);
+        input["limit_overrides"] = json!([
+            {"project_id":project,"model":"openrouter/free","limits":{"max_actions":7}},
+            {"project_id":project,"limits":{"max_actions":null,"max_minutes":15}},
+            {"provider":"openrouter","model":"openrouter/free","limits":{"max_actions":40,"max_tokens":null}},
+            {"provider":"anthropic","limits":{"max_actions":1}}
+        ]);
+        let mut saved = normalize_settings(input).unwrap().settings;
+        assert_eq!(saved["limitOverrides"].as_array().unwrap().len(), 4);
+        let mut other = saved.clone();
+        resolve_limits(&mut other, Some(Uuid::new_v4()));
+        assert_eq!(
+            (other["maxActions"].clone(), other["maxTokens"].clone()),
+            (json!(40), Value::Null),
+            "Model override only"
+        );
+        assert!(
+            other.get("limitOverrides").is_none(),
+            "Jobs keep resolved limits, not the rules"
+        );
+        resolve_limits(&mut saved, Some(project));
+        assert_eq!(saved["maxActions"], 7, "Model within the project wins");
+        assert_eq!(saved["maxMinutes"], 15, "Project override");
+        assert_eq!(
+            saved["maxTokens"],
+            Value::Null,
+            "Model override cleared the token limit"
+        );
+        assert_eq!(saved["limitOverridesApplied"].as_array().unwrap().len(), 3);
+        let mut none = normalize_settings(settings_input()).unwrap().settings;
+        resolve_limits(&mut none, None);
+        assert_eq!(none["maxActions"], 6);
+        assert_eq!(none["limitOverridesApplied"], json!([]));
     }
 
     #[test]

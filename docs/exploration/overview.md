@@ -22,8 +22,8 @@ The same loop is available from the [workspace](../platform/workspace.md) at **h
 | `SCOUT_EXPLORER_PROVIDER` | `openrouter` | `openai`, `anthropic`, `openrouter`, or `meta` |
 | `SCOUT_EXPLORER_MODEL` | `openrouter/free` | Model ID. OpenRouter defaults to `openrouter/free`; Meta defaults to `muse-wonder-1.0` |
 | `SCOUT_EXPLORER_FREE_ONLY` | `true` | OpenRouter free-route constraint; not applicable to direct OpenAI, Claude, or Meta billing |
-| `SCOUT_EXPLORER_MAX_ACTIONS` | `20` | Includes initial navigation, returns and resumes; integer 1–50 |
-| `SCOUT_EXPLORER_MAX_MINUTES` | `30` | Wall-clock stop for one exploration; integer 1–180 |
+| `SCOUT_EXPLORER_MAX_ACTIONS` | empty | Server default for users without saved limits; empty means no limit. Integer 1–10000; includes navigation, returns and resumes |
+| `SCOUT_EXPLORER_MAX_MINUTES` | empty | Server default wall-clock limit per exploration attempt; empty means no limit. Integer 1–10080 |
 | `SCOUT_EXPLORER_APP_MEMORY` | `true` | Default for remembering explored pages and controls across runs; see [memory across runs](./planner.md#memory-across-runs) |
 | `SCOUT_EXPLORER_VIEWPORT` | `desktop` | `desktop` (800×600), `tablet` (768×1024), or `mobile` (390×844) |
 | `SCOUT_ALLOWED_ORIGINS` | `http://exploration-fixture:8082` | Extra origins for private, HTTP and internal apps. Public https sites do not need an entry |

@@ -18,6 +18,7 @@ test('an interrupted exploration continues until its budget or three continuatio
   assert.deepEqual(continuation({ ...explore, resumes: 3 }, 0, 8), { kind: 'finish', status: 'interrupted', error: CONTINUATION_LIMIT });
   assert.deepEqual(continuation({ ...explore, resumes: 3 }, 2, 8), { kind: 'finish', status: 'interrupted', error: CONTINUATION_LIMIT });
   assert.deepEqual(continuation(explore, 5, 15), { kind: 'finish', status: 'interrupted', error: BUDGET_USED });
+  assert.equal(continuation({ ...explore, maxActions: null }, 400, 900).kind, 'resume', 'An exploration without an action limit can always continue.');
   assert.deepEqual(continuation({ ...explore, kind: 'reproduce' }, 2, 0), { kind: 'finish', status: 'interrupted', error: INTERRUPTED });
   assert.deepEqual(continuation({ ...explore, kind: 'verify_fix' }, 1, 0), { kind: 'finish', status: 'interrupted', error: INTERRUPTED });
   assert.deepEqual(continuation({ ...explore, cancelId: 'cancel' }, 3, 0), { kind: 'finish', status: 'cancelled', error: CANCELLED });

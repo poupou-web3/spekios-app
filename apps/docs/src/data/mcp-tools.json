@@ -262,6 +262,87 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
+      "description": "Read the app map carried between runs for one app scope (an app origin, screen size and sign-in state): states by depth from the entry page, where each control led, verdicts, and controls no run has tried yet. Pass scope_id, or origin with optional viewport_profile and auth_scope for the most recent matching scope. A state is a page template plus the controls it offers; exact screens stay per-run evidence. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_scope": {
+            "enum": [
+              "public",
+              "signed_in"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "origin": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "scope_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "viewport_profile": {
+            "enum": [
+              "desktop",
+              "tablet",
+              "mobile"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_get_app_map",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Compare a run's map with earlier runs of the same app scope: states and transitions seen for the first time, states the previous run reached but this one did not, controls that now lead somewhere else, and verdict changes such as a former no-issue transition that is now suspect. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_compare_run",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
       "description": "List known behavior for an origin: issues triaged as bugs or intended behavior, who decided and why, with duplicates and repeat occurrences rolled up. Read this before triaging new findings. No model call.",
       "inputSchema": {
         "additionalProperties": false,

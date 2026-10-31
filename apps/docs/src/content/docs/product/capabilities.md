@@ -17,7 +17,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 | Input | URL-only exploration of explicitly permitted HTTP(S) origins. |
 | Browser | Chromium with desktop, tablet and mobile viewport profiles. |
 | Actions | Native navigation, click, text/search fill, single-select, checkbox/radio, document scroll and permitted form submission. |
-| Planning | Likely-action ranking, recorded graph/frontier, duplicate avoidance, branch returns, stale-state replanning, controls further down the page, versioned active-run testing focus and [memory across runs](../../guides/app-memory/) with reopening of unfinished pages. Runs allow up to 50 actions and stop after 30 minutes by default. |
+| Planning | Likely-action ranking, recorded graph/frontier, duplicate avoidance, branch returns, stale-state replanning, controls further down the page, versioned active-run testing focus and [memory across runs](../../guides/app-memory/) with reopening of unfinished pages. An [app map](../../guides/app-memory/#the-app-map) of states and transitions carried between runs and compared run to run. No action, time, token or cost limit unless a user [sets one](../../guides/exploration-limits/). |
 | Checks | Pre-action expectations, per-action assessments, exact image differences, sampled completion frames and redacted diagnostics. |
 | Findings | Original suspicions, fresh-browser replay, optional bounded automatic replay and append-only human review. |
 | Triage | Bug, intended behavior, duplicate or needs review, decided by people, agents or Scout; later runs recognize known behavior by page, control, viewport and sign-in state. See [triage and rechecks](../../guides/triage/). |
@@ -25,7 +25,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 | Agent identity | User setup page, standard MCP browser OAuth with PKCE/DCR and rotating renewal, native connector compatibility, private history, revocation and token attribution. |
 | Access | Human-controlled native same-origin sign-in and optional encrypted session reuse. |
 | Models | OpenAI, Anthropic, OpenRouter and Meta AI API-key connections; nullable token/cost accounting. |
-| Interfaces | User workspace, operations console, REST API, 30 MCP/HTTP tools and a Rust stdio bridge. |
+| Interfaces | User workspace, operations console, REST API, 32 MCP/HTTP tools and a Rust stdio bridge. |
 | Exports | JSON snapshot, Markdown report and verified evidence ZIP. |
 
 ## Not implemented yet

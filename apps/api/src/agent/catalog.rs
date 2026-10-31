@@ -98,6 +98,27 @@ pub fn tools() -> Vec<Tool> {
             false,
         ),
         tool(
+            "scout_get_app_map",
+            "Read the app map carried between runs for one app scope (an app origin, screen size and sign-in state): states by depth from the entry page, where each control led, verdicts, and controls no run has tried yet. Pass scope_id, or origin with optional viewport_profile and auth_scope for the most recent matching scope. A state is a page template plus the controls it offers; exact screens stay per-run evidence. No model call.",
+            schema(
+                json!({"scope_id":id_schema(),"origin":{"type":"string","maxLength":2048},"viewport_profile":choice(&["desktop","tablet","mobile"]),"auth_scope":choice(&["public","signed_in"]),"offset":{"type":"integer","minimum":0,"maximum":100000},"limit":{"type":"integer","minimum":1,"maximum":100}}),
+                &[],
+            ),
+            true,
+            false,
+            true,
+            false,
+        ),
+        tool(
+            "scout_compare_run",
+            "Compare a run's map with earlier runs of the same app scope: states and transitions seen for the first time, states the previous run reached but this one did not, controls that now lead somewhere else, and verdict changes such as a former no-issue transition that is now suspect. No model call.",
+            run(),
+            true,
+            false,
+            true,
+            false,
+        ),
+        tool(
             "scout_list_knowledge",
             "List known behavior for an origin: issues triaged as bugs or intended behavior, who decided and why, with duplicates and repeat occurrences rolled up. Read this before triaging new findings. No model call.",
             schema(

@@ -14,7 +14,7 @@ export function launchStatus(){
     :!provider?.configured?['amber',`${esc(providerName(state.settings.provider))} is not configured on this server. Choose another model in ${settings}.`]
     :!state.workers.some(w=>w.available)?['amber','Waiting for the browser worker. Your recorded tests are still available.']
     :state.providers.gateway_ready!==true?['amber','Waiting for the model gateway.']
-    :['green',['Ready',esc(providerName(state.settings.provider)),esc(state.settings.model),...(actions>0?[`up to ${number(actions)} actions`]:[]),...(state.providers.test_mode?['simulated model']:[])].join(' · ')];
+    :['green',['Ready',esc(providerName(state.settings.provider)),esc(state.settings.model),(actions>0?`up to ${number(actions)} actions`:'no action limit'),...(state.providers.test_mode?['simulated model']:[])].join(' · ')];
   return `<p id="launch-status" class="landing-status" role="status"><i class="dot ${tone}"></i><span>${text}</span></p>`;
 }
 export function hero(){

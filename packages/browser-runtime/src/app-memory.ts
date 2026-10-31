@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Store } from './store.js';
-import type { Capture } from './contracts.js';
+import type { BrowserCommand, Capture } from './contracts.js';
+import { pageTemplate, transitionKey, type MapState } from './app-map.js';
 import type { ViewportProfile } from './viewports.js';
 import { blockedReason, type Proposal } from './exploration-policy.js';
 import { actionRisk } from './interaction-contract.js';
@@ -148,6 +149,34 @@ export class AppMemory {
     if (!this.snapshot) return;
     await this.store.query(`UPDATE app_memory_controls SET last_verdict=$4,last_observed_result=$5,last_action_id=$6
       WHERE scope_id=$1 AND url=$2 AND control_id=$3`, [this.snapshot.scope_id, url, controlId, verdict, observed.slice(0, 300), actionId]);
+  }
+
+  // The app map: states and transitions carried between runs. Rows commit with
+  // the evidence they describe, and only runs that use memory write them.
+  async mapState(state: MapState, depth: number, url: string) {
+    const s = this.snapshot;
+    if (!s) return;
+    await this.store.query(`INSERT INTO app_map_states(scope_id,state_key,page_template,example_url,title,controls,controls_truncated,min_depth,first_run_id,last_run_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
+      ON CONFLICT(scope_id,state_key) DO UPDATE SET example_url=EXCLUDED.example_url,title=EXCLUDED.title,controls=EXCLUDED.controls,
+        controls_truncated=EXCLUDED.controls_truncated,observations=app_map_states.observations+1,
+        runs=app_map_states.runs+CASE WHEN app_map_states.last_run_id IS DISTINCT FROM EXCLUDED.last_run_id THEN 1 ELSE 0 END,
+        min_depth=LEAST(app_map_states.min_depth,EXCLUDED.min_depth),last_run_id=EXCLUDED.last_run_id,last_seen_at=now()`,
+      [s.scope_id, state.key, state.page_template, url.slice(0, 2048), state.title, JSON.stringify(state.controls), state.controls_truncated, depth, this.runId]);
+  }
+  async mapTransition(from: string, to: string, command: BrowserCommand, verdict: string, observed: string, actionId: string) {
+    const s = this.snapshot;
+    if (!s) return;
+    const { key, entry } = transitionKey(command);
+    const control = command.type === 'navigate' ? { url: pageTemplate(command.url) }
+      : { role: command.control.role, name: command.control.name.slice(0, 200), href: command.control.href ? pageTemplate(command.control.href) : null };
+    await this.store.query(`INSERT INTO app_map_transitions(scope_id,from_key,control_key,to_key,entry_key,action,control,verdicts,last_verdict,last_observed_result,first_run_id,last_run_id,last_action_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,jsonb_build_object($8::text,1),$8,$9,$10,$10,$11)
+      ON CONFLICT(scope_id,from_key,control_key,to_key) DO UPDATE SET attempts=app_map_transitions.attempts+1,
+        verdicts=app_map_transitions.verdicts||jsonb_build_object($8::text,COALESCE((app_map_transitions.verdicts->>$8)::int,0)+1),
+        last_verdict=EXCLUDED.last_verdict,last_observed_result=EXCLUDED.last_observed_result,last_run_id=EXCLUDED.last_run_id,
+        last_action_id=EXCLUDED.last_action_id,last_seen_at=now()`,
+      [s.scope_id, from, key, to, entry, command.type, JSON.stringify(control), verdict, observed.slice(0, 300), this.runId, actionId]);
   }
 
   // A bounded, labelled hint for the planning model. Absent when nothing is

@@ -1,7 +1,7 @@
 ---
 {
   "title": "MCP and HTTP tool reference",
-  "description": "Browse the thirty ScoutQA tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
+  "description": "Browse the thirty-two ScoutQA tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
   "reviewed": "2026-10-31",
   "sidebar": {
     "order": 5
@@ -39,6 +39,8 @@ See [testing focus](../../guides/testing-focus/) for boundaries, retries and his
 ## Decide and recheck
 
 - [scout_list_knowledge](../reference/scout_list_knowledge/) — Known bugs and intended behavior for a site.
+- [scout_get_app_map](../reference/scout_get_app_map/) — States, transitions and untried controls carried between runs.
+- [scout_compare_run](../reference/scout_compare_run/) — What a run found that earlier runs did not, and what changed.
 - [scout_triage_issue](../reference/scout_triage_issue/) — Decide whether an issue is a bug, intended behavior or a duplicate.
 - [scout_recheck_deployment](../reference/scout_recheck_deployment/) — Verify a deployment against every open issue.
 - [scout_get_recheck](../reference/scout_get_recheck/) — Per-issue outcomes of a recheck.

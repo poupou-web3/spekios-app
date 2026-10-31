@@ -2,7 +2,7 @@
 {
   "title": "Explore deeper across runs",
   "description": "How ScoutQA remembers which pages and controls earlier runs explored, skips repeats, reopens unfinished pages and lets you forget an app's memory.",
-  "reviewed": "2026-10-30",
+  "reviewed": "2026-10-31",
   "sidebar": {"order": 6}
 }
 ---
@@ -30,6 +30,18 @@ Scout reopens a remembered page only within the app's own origin. It never reope
 
 Reproductions, automatic rechecks and fix verification follow their recorded path exactly. They never use or change memory.
 
+## The app map
+
+Memory also keeps a map of the app, carried between runs: every screen state an exploration reached, and where each action led from it. A state is a page template plus the controls it offers. Identifiers in addresses become placeholders, so **/orders/123** and **/orders/456** are one page, **/orders/:n**. Repeated items such as product cards count as one entry, so a list stays the same state when its data changes. Exact screenshots stay with each run as evidence.
+
+The map is updated after every action. For each state it records how deep it is from the entry page, how many runs reached it, each transition with its verdicts, and the controls no run has tried there yet.
+
+- **Settings → App memory** shows each app's map size and depth.
+- **GET /v1/app-memory/{scope_id}/map** and **scout_get_app_map** return the states by depth with their transitions and untried controls.
+- **GET /v1/runs/{run_id}/map-diff** and **scout_compare_run** compare a run with the earlier runs of the same app. You get the states and transitions seen for the first time, and the states the previous run reached but this one did not. It also lists controls that now lead somewhere else, and verdicts that changed on the same transition: a **regression** is a transition that had no issue before and is suspect now.
+
+A state the run did not reach again was not visited; that is not proof it was removed.
+
 ## Turn it on or off
 
 Memory is on by default for explorations with a live model. Turn off **Remember explored pages and controls across runs** in **Settings → Exploration defaults** to explore without it. A run with memory off neither reads nor records it. Runs with simulated test models use memory only when the job explicitly asks for it, so repeated test runs stay independent.
@@ -46,4 +58,4 @@ A memory that a running test is still using can't be forgotten until the run end
 
 ## Limits
 
-Memory guides choices; it does not prove coverage. Pages are identified by their exact address, so pages with changing query values are remembered separately. The scoring weights are engineering defaults, not fitted to real apps. See [how exploration chooses a path](../../product/exploration/) for budgets and stopping rules.
+Memory guides choices; it does not prove coverage. Pages show the controls observed on them, at most 120, so very large pages can be keyed by the part that was observed. Planning hints use exact page addresses, so pages with changing query values are hinted separately; the map groups them by template. The scoring weights are engineering defaults, not fitted to real apps. See [how exploration chooses a path](../../product/exploration/) for budgets and stopping rules.

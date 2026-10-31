@@ -25,7 +25,7 @@ export type Continuation =
   | { kind: 'requeue' }
   | { kind: 'finish'; status: 'cancelled' | 'interrupted'; error: string };
 
-export function continuation(job: { kind?: string; resumes: number; runId: string | null; cancelId: string | null; maxActions?: number },
+export function continuation(job: { kind?: string; resumes: number; runId: string | null; cancelId: string | null; maxActions?: number | null },
   dispatchedThisRun: number, dispatchedEarlier: number): Continuation {
   if (job.cancelId) return { kind: 'finish', status: 'cancelled', error: CANCELLED };
   // Nothing was dispatched, so starting again does not repeat a browser action.
@@ -33,8 +33,9 @@ export function continuation(job: { kind?: string; resumes: number; runId: strin
   if (!job.runId || (dispatchedThisRun === 0 && job.resumes < MAX_JOB_RESUMES)) return { kind: 'requeue' };
   if (job.kind !== 'explore') return { kind: 'finish', status: 'interrupted', error: INTERRUPTED };
   if (job.resumes >= MAX_JOB_RESUMES) return { kind: 'finish', status: 'interrupted', error: CONTINUATION_LIMIT };
+  // No action limit (null) always leaves room to continue.
   const budget = job.maxActions;
-  if (budget === undefined || !Number.isInteger(budget) || budget < 1 || dispatchedThisRun + dispatchedEarlier >= budget)
+  if (budget !== null && (budget === undefined || !Number.isInteger(budget) || budget < 1 || dispatchedThisRun + dispatchedEarlier >= budget))
     return { kind: 'finish', status: 'interrupted', error: BUDGET_USED };
   return { kind: 'resume' };
 }

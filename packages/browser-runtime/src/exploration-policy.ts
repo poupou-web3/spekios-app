@@ -275,8 +275,14 @@ export function stateFingerprint(capture: Capture) {
   return hash(jsonBytes(canonical(projectState(capture))));
 }
 
+// Where a control sits is not what it is: revealing a lower control changes
+// in_viewport and page_y, and the revealed control must still match.
+function controlIdentity(control: ObservedControl) {
+  const { in_viewport: _inViewport, page_y: _pageY, ...identity } = projectControl(control, url => url) as Record<string, unknown>;
+  return identity;
+}
 export function findObservedControl(recorded: ObservedControl, controls: readonly ObservedControl[]): ObservedControl | undefined {
-  const same = (control: ObservedControl) => isDeepStrictEqual(projectControl(control, url => url), projectControl(recorded, url => url));
+  const same = (control: ObservedControl) => isDeepStrictEqual(controlIdentity(control), controlIdentity(recorded));
   const exact = controls.find(control => control.control_id === recorded.control_id);
   if (exact) return same(exact) ? exact : undefined;
   const matches = controls.filter(same);
