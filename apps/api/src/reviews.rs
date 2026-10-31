@@ -13,12 +13,11 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use tokio::sync::Mutex;
-use tokio_postgres::{Client, Transaction};
+use tokio_postgres::Transaction;
 use uuid::Uuid;
 
 pub struct Reviews {
-    db: Mutex<Client>,
+    db: Arc<crate::db::Postgres>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -515,8 +514,8 @@ async fn verify_evidence(
 }
 
 impl Reviews {
-    pub fn new(db: Client) -> Arc<Self> {
-        Arc::new(Self { db: Mutex::new(db) })
+    pub fn new(db: Arc<crate::db::Postgres>) -> Arc<Self> {
+        Arc::new(Self { db })
     }
 
     async fn save(
@@ -526,7 +525,7 @@ impl Reviews {
         input: Submission,
         gateway: Option<&Arc<crate::gateway::Gateway>>,
     ) -> Result<Value, &'static str> {
-        let mut db = self.db.lock().await;
+        let mut db = self.db.write().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // A global review UUID cannot be reused against another action. The run
         // row lock then serializes revisions and event sequence allocation.

@@ -10,10 +10,10 @@ use axum::{
 };
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
-use tokio_postgres::Client;
 use uuid::Uuid;
 pub mod access;
 pub mod agent;
+pub mod db;
 pub mod gateway;
 pub mod history;
 pub mod identity;
@@ -35,7 +35,7 @@ pub const WORKSPACE_ID: Uuid = Uuid::from_u128(0x0000000000004000800000000000000
 
 #[derive(Clone)]
 pub struct AppState {
-    pub database: Option<Arc<Client>>,
+    pub database: Option<Arc<db::Postgres>>,
     pub identities: Option<Arc<identity::Identities>>,
     pub principal: Principal,
     pub gateway: Option<Arc<gateway::Gateway>>,
@@ -47,7 +47,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(database: Option<Arc<Client>>, token: &str) -> Result<Self, &'static str> {
+    pub fn new(database: Option<Arc<db::Postgres>>, token: &str) -> Result<Self, &'static str> {
         if token.len() < 32
             || !token
                 .bytes()
@@ -588,7 +588,11 @@ async fn query(
         .database
         .as_ref()
         .ok_or_else(|| error(StatusCode::SERVICE_UNAVAILABLE, "database_unavailable"))?;
-    match tokio::time::timeout(Duration::from_secs(5), database.query_opt(sql, params)).await {
+    let read = async {
+        let connection = database.read().await.map_err(|_| ())?;
+        connection.query_opt(sql, params).await.map_err(|_| ())
+    };
+    match tokio::time::timeout(Duration::from_secs(5), read).await {
         Ok(Ok(row)) => Ok(row.map(|row| row.get::<_, Value>(0))),
         _ => Err(error(
             StatusCode::SERVICE_UNAVAILABLE,

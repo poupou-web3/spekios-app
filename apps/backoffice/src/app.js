@@ -43,7 +43,7 @@ export async function refresh(){
     const [runs,jobs,providers,operations,usage]=await Promise.all(['/v1/runs','/v1/browser-jobs','/v1/model-providers','/v1/operations','/v1/usage'].map(get));
     if(token!==state.token||developmentAccess!==state.developmentAccess)return;
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;state.settings=jobs.settings||{};state.providers=providers;state.operations=operations;state.usage=usage;
-    if(state.runId){const id=state.runId;const report=await get('/v1/runs/'+id);if(token!==state.token||developmentAccess!==state.developmentAccess)return;if(id===state.runId)state.report=report;}
+    if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if(token!==state.token||developmentAccess!==state.developmentAccess)return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}state.report=report;}}
     state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();render();
   }catch(error){if(token===state.token&&developmentAccess===state.developmentAccess){state.error=error.message;render();}}finally{refreshing=false;}
 }
@@ -51,7 +51,7 @@ export async function route(){
   const [tab,id]=location.hash.replace(/^#\/?/,'').split('/');
   state.opsTab=TABS.includes(tab)?tab:'overview';
   const runId=/^[\da-f-]{36}$/.test(id||'')?id:null;
-  if(runId!==state.runId){state.runId=runId;state.report=null;state.expanded.clear();}
+  if(runId!==state.runId){state.runId=runId;state.report=null;state.reportEtag='';state.expanded.clear();}
   state.drawer=null;render();await refresh();
 }
 // Tabs update the address without a reload so a refresh or shared link keeps the view.

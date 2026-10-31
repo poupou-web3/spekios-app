@@ -69,6 +69,25 @@ test('late response bodies cannot reconnect a disconnected workspace',async()=>{
   assert.equal(ui.state.token,'');
   assert.equal(ui.state.runs.length,0);
 });
+test('an unchanged open run keeps the loaded report',async()=>{
+  const calls=[];
+  const report={run:{run_id:'run',lifecycle:'completed',config:{}},actions:[{action_id:'kept'}],captures:[],reproductions:[]};
+  const ui=view({AbortSignal,fetch:async(path,options)=>{
+    calls.push([path,options?.headers?.['If-None-Match']||'']);
+    if(path==='/v1/runs/run'&&options?.headers?.['If-None-Match'])return {ok:false,status:304,headers:{get(){return null;}},json:async()=>({})};
+    const body=path==='/v1/runs/run'?report:path==='/v1/runs'?{runs:[]}:path==='/v1/browser-jobs'?{jobs:[],workers:[],settings:{}}:path==='/v1/model-providers'?{providers:[]}:{requests:[],sessions:[]};
+    return {ok:true,status:200,headers:{get(name){return name==='etag'&&path==='/v1/runs/run'?'"abc"':null;}},json:async()=>body};
+  }});
+  ui.state.token='private-workspace-token';ui.state.connected=true;ui.state.runId='run';
+  await ui.refresh();
+  assert.equal(ui.state.report.actions[0].action_id,'kept');
+  assert.equal(ui.state.reportEtag,'"abc"');
+  assert.equal(ui.state.report._etag,undefined);
+  ui.state.report.actions[0].action_id='local';
+  await ui.refresh();
+  assert.equal(ui.state.report.actions[0].action_id,'local');
+  assert.ok(calls.some(([path,etag])=>path==='/v1/runs/run'&&etag==='"abc"'));
+});
 test('login prompts escape target data and saved sessions are scoped to the selected origin and mode',()=>{
   const ui=view(),future=new Date(Date.now()+3600000).toISOString();
   ui.state.url='https://app.test/path';ui.state.access={requests:[{access_id:'id',origin:'<script>bad()</script>',reason:'login_available',status:'waiting'}],sessions:[

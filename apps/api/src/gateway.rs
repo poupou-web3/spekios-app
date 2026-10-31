@@ -1,5 +1,7 @@
-//! A single local worker owns the PostgreSQL advisory lock. Admission, dispatch,
-//! usage settlement and outbox creation commit before their external effects.
+//! One API replica owns the PostgreSQL advisory lock on a dedicated connection.
+//! The others stay ready and admit work. Admission, dispatch, usage settlement
+//! and outbox creation commit before their external effects. A dropped database
+//! connection releases leadership and is retried; it does not exit the process.
 use crate::identity::ScopedState;
 use crate::{
     error,
@@ -25,12 +27,12 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, Notify};
-use tokio_postgres::{Client, Transaction};
+use tokio_postgres::Transaction;
 use uuid::Uuid;
 
 pub const USER_ID: Uuid = Uuid::from_u128(0x00000000000040008000000000000002);
@@ -42,8 +44,17 @@ pub fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum Role {
+    Starting = 0,
+    Leader = 1,
+    Standby = 2,
+    Halted = 3,
+}
+
 pub struct Gateway {
-    db: Mutex<Client>,
+    db: Arc<crate::db::Postgres>,
     http: reqwest::Client,
     store: Arc<dyn ObjectStore>,
     keys: Vec<(Provider, String)>,
@@ -53,11 +64,12 @@ pub struct Gateway {
     clickhouse_password: String,
     spool: PathBuf,
     notify: Notify,
-    ready: AtomicBool,
+    leader: Mutex<Option<crate::db::Dedicated>>,
+    role: AtomicU8,
 }
 
 impl Gateway {
-    pub fn from_env(db: Client) -> GResult<Arc<Self>> {
+    pub fn from_env(db: Arc<crate::db::Postgres>) -> GResult<Arc<Self>> {
         let fixture_url = if env::var("SCOUT_MODEL_TEST_MODE").as_deref() == Ok("1") {
             let value = env::var("SCOUT_MODEL_FIXTURE_URL").map_err(|_| "missing_fixture_url")?;
             let url = reqwest::Url::parse(&value).map_err(|_| "invalid_fixture_url")?;
@@ -138,7 +150,7 @@ impl Gateway {
             .build()
             .map_err(|_| "http_configuration_failed")?;
         Ok(Arc::new(Self {
-            db: Mutex::new(db),
+            db,
             http,
             store: Arc::new(store),
             keys,
@@ -152,12 +164,36 @@ impl Gateway {
                 .unwrap_or_else(|_| "/data/gateway".into())
                 .into(),
             notify: Notify::new(),
-            ready: AtomicBool::new(false),
+            leader: Mutex::new(None),
+            role: AtomicU8::new(Role::Starting as u8),
         }))
     }
 
+    fn role(&self) -> Role {
+        match self.role.load(Ordering::SeqCst) {
+            1 => Role::Leader,
+            2 => Role::Standby,
+            3 => Role::Halted,
+            _ => Role::Starting,
+        }
+    }
+
+    fn set_role(&self, role: Role) {
+        self.role.store(role as u8, Ordering::SeqCst);
+    }
+
+    /// True when this process or another replica is dispatching model calls.
+    /// Followers stay ready so a Service can send them ordinary API traffic.
     pub fn is_ready(&self) -> bool {
-        self.ready.load(Ordering::SeqCst)
+        matches!(self.role(), Role::Leader | Role::Standby)
+    }
+
+    fn is_leader(&self) -> bool {
+        self.role() == Role::Leader
+    }
+
+    async fn conn(&self) -> GResult<crate::db::Conn> {
+        self.db.write().await
     }
     pub async fn evidence_bytes(&self, key: &str, sha: &str, length: u64) -> GResult<bytes::Bytes> {
         if length == 0 || length > 32 * 1024 * 1024 {
@@ -254,31 +290,63 @@ impl Gateway {
         let worker = self.clone();
         tokio::spawn(async move {
             loop {
-                match worker.initialize().await {
-                    Ok(()) => break,
-                    Err(code) => eprintln!("model_gateway_initializing: {code}"),
-                }
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-            worker.ready.store(true, Ordering::SeqCst);
-            loop {
-                match worker.process_next().await {
-                    Ok(true) => continue,
-                    Ok(false) => {}
+                match worker.try_lead().await {
+                    Ok(true) => {
+                        if let Err(code) = worker.recover().await {
+                            worker.release_leader().await;
+                            worker.set_role(Role::Starting);
+                            eprintln!("model_gateway_initializing: {code}");
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            continue;
+                        }
+                        worker.set_role(Role::Leader);
+                        loop {
+                            if !worker.leader_alive().await {
+                                worker.release_leader().await;
+                                worker.set_role(Role::Starting);
+                                eprintln!("model_gateway_leader_connection_lost");
+                                break;
+                            }
+                            match worker.process_next().await {
+                                Ok(true) => continue,
+                                Ok(false) => {}
+                                Err("database_unavailable") => {
+                                    eprintln!("model_gateway_database_unavailable");
+                                    if !worker.leader_alive().await {
+                                        worker.release_leader().await;
+                                        worker.set_role(Role::Starting);
+                                        break;
+                                    }
+                                }
+                                Err(code) => {
+                                    // A failed local journal/settlement must stop new spending.
+                                    // Keep the lock so another replica does not dispatch it.
+                                    worker.set_role(Role::Halted);
+                                    eprintln!(
+                                        "model_gateway_halted: {code}; restart after restoring storage"
+                                    );
+                                    return;
+                                }
+                            }
+                            tokio::select! { _=worker.notify.notified()=>{}, _=tokio::time::sleep(Duration::from_secs(1))=>{} }
+                        }
+                    }
+                    Ok(false) => {
+                        worker.set_role(Role::Standby);
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
                     Err(code) => {
-                        // A failed local journal/settlement must stop new spending.
-                        worker.ready.store(false, Ordering::SeqCst);
-                        eprintln!("model_gateway_halted: {code}; restart after restoring storage");
-                        break;
+                        worker.set_role(Role::Starting);
+                        eprintln!("model_gateway_initializing: {code}");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
                     }
                 }
-                tokio::select! { _=worker.notify.notified()=>{}, _=tokio::time::sleep(Duration::from_secs(1))=>{} }
             }
         });
         let exporter = self.clone();
         tokio::spawn(async move {
             loop {
-                if exporter.is_ready() {
+                if exporter.is_leader() {
                     match exporter.export_once().await {
                         Ok(true) => {
                             // Keep draining bounded batches while work exists;
@@ -296,31 +364,41 @@ impl Gateway {
         });
     }
 
-    async fn initialize(&self) -> GResult<()> {
-        // A per-process dedicated database connection holds the singleton lock.
-        // Re-entrant lock calls are avoided: after a recoverable initialization
-        // failure explicitly unlock before trying again.
-        let locked: bool = self
-            .db
-            .lock()
-            .await
+    /// Takes the session advisory lock on a connection that stays checked out
+    /// for as long as this process is the dispatcher.
+    async fn try_lead(&self) -> GResult<bool> {
+        let connection = self.db.dedicated().await?;
+        let locked: bool = connection
             .query_one("SELECT pg_try_advisory_lock($1)", &[&LOCK_ID])
             .await
             .map_err(|_| "database_unavailable")?
             .get(0);
         if !locked {
-            return Err("another_gateway_worker_is_active");
+            return Ok(false);
         }
-        let result = self.recover().await;
-        if result.is_err() {
-            let _ = self
-                .db
-                .lock()
-                .await
+        *self.leader.lock().await = Some(connection);
+        Ok(true)
+    }
+
+    async fn leader_alive(&self) -> bool {
+        let mut leader = self.leader.lock().await;
+        let Some(connection) = leader.as_mut() else {
+            return false;
+        };
+        if connection.is_closed() {
+            return false;
+        }
+        connection.query_one("SELECT 1", &[]).await.is_ok()
+    }
+
+    async fn release_leader(&self) {
+        if let Some(connection) = self.leader.lock().await.take()
+            && !connection.is_closed()
+        {
+            let _ = connection
                 .query_one("SELECT pg_advisory_unlock($1)", &[&LOCK_ID])
                 .await;
         }
-        result
     }
 
     async fn recover(&self) -> GResult<()> {
@@ -348,7 +426,7 @@ impl Gateway {
                 self.remove_journal(result.call_id).await?;
             }
         }
-        let calls = self.db.lock().await.query("SELECT c.call_id FROM model_calls c JOIN model_requests r USING(request_id) WHERE c.state='dispatched'",&[]).await.map_err(|_| "database_unavailable")?;
+        let calls = self.conn().await?.query("SELECT c.call_id FROM model_calls c JOIN model_requests r USING(request_id) WHERE c.state='dispatched'",&[]).await.map_err(|_| "database_unavailable")?;
         for row in calls {
             // The provider might have billed this attempt. Never replay it.
             self.settle(&CallResult::unknown(
@@ -357,9 +435,8 @@ impl Gateway {
             ))
             .await?;
         }
-        self.db
-            .lock()
-            .await
+        self.conn()
+            .await?
             .execute(
                 "UPDATE model_requests SET state='queued' WHERE state='preparing'",
                 &[],
@@ -384,7 +461,7 @@ impl Gateway {
             return Err("credential_in_prompt");
         }
         let sha = hash(&bytes);
-        let mut db = self.db.lock().await;
+        let mut db = self.conn().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // Only the trusted operator/worker may submit raw model requests. Derive
         // ownership from its admitted run, never a client-supplied workspace ID.
@@ -459,7 +536,7 @@ impl Gateway {
     }
 
     async fn process_next(&self) -> GResult<bool> {
-        let row = self.db.lock().await.query_opt("UPDATE model_requests SET state='preparing' WHERE request_id=(SELECT request_id FROM model_requests WHERE execution_mode=$1 AND state='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1) RETURNING spec",&[&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
+        let row = self.conn().await?.query_opt("UPDATE model_requests SET state='preparing' WHERE request_id=(SELECT request_id FROM model_requests WHERE execution_mode=$1 AND state='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1) RETURNING spec",&[&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
         let Some(row) = row else { return Ok(false) };
         let spec: ModelRequest =
             serde_json::from_value(row.get(0)).map_err(|_| "stored_request_invalid")?;
@@ -482,7 +559,7 @@ impl Gateway {
             serde_json::to_vec(&wire_request(&spec, &images)).map_err(|_| "invalid_request")?;
         let call_id = Uuid::new_v4();
         {
-            let mut db = self.db.lock().await;
+            let mut db = self.conn().await?;
             let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
             // Admission can precede cancellation while images are loading or
             // another provider call is running. Fence the actual dispatch too.
@@ -528,7 +605,7 @@ impl Gateway {
     }
 
     async fn image(&self, id: Uuid, run_id: Option<Uuid>) -> GResult<Vec<u8>> {
-        let row = self.db.lock().await.query_opt("SELECT c.object_key,c.sha256,c.byte_length FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE capture_id=$1 AND c.run_id=$2 AND c.status='available'",&[&id,&run_id]).await.map_err(|_| "database_unavailable")?.ok_or("capture_unavailable")?;
+        let row = self.conn().await?.query_opt("SELECT c.object_key,c.sha256,c.byte_length FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE capture_id=$1 AND c.run_id=$2 AND c.status='available'",&[&id,&run_id]).await.map_err(|_| "database_unavailable")?.ok_or("capture_unavailable")?;
         let key: String = row.get(0);
         let sha: String = row.get(1);
         let length: i64 = row.get(2);
@@ -551,7 +628,7 @@ impl Gateway {
     }
 
     async fn fail_before_dispatch(&self, id: Uuid, code: &str) -> GResult<()> {
-        let mut db = self.db.lock().await;
+        let mut db = self.conn().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         tx.execute("UPDATE model_requests SET state='failed',finished_at=now(),error=$2 WHERE request_id=$1",&[&id,&code]).await.map_err(|_| "database_unavailable")?;
         event(
@@ -660,7 +737,7 @@ impl Gateway {
     }
 
     async fn settle(&self, result: &CallResult) -> GResult<()> {
-        let mut db = self.db.lock().await;
+        let mut db = self.conn().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         let row = tx.query_opt("SELECT c.state,c.request_id,c.attempt,r.spec FROM model_calls c JOIN model_requests r USING(request_id) WHERE c.call_id=$1 FOR UPDATE OF c,r",&[&result.call_id]).await.map_err(|_| "database_unavailable")?.ok_or("journal_call_not_found")?;
         if row.get::<_, String>(0) != "dispatched" {
@@ -753,7 +830,7 @@ impl Gateway {
     }
 
     async fn export_once(&self) -> GResult<bool> {
-        let rows=self.db.lock().await.query("SELECT payload_id,object_key,body,sha256 FROM model_payloads WHERE uploaded_at IS NULL ORDER BY payload_id LIMIT 10",&[]).await.map_err(|_| "database_unavailable")?;
+        let rows=self.conn().await?.query("SELECT payload_id,object_key,body,sha256 FROM model_payloads WHERE uploaded_at IS NULL ORDER BY payload_id LIMIT 10",&[]).await.map_err(|_| "database_unavailable")?;
         let mut progressed = !rows.is_empty();
         for row in rows {
             let id: Uuid = row.get(0);
@@ -792,9 +869,8 @@ impl Gateway {
             if hash(&stored) != sha {
                 return Err("bucket_hash_mismatch");
             }
-            self.db
-                .lock()
-                .await
+            self.conn()
+                .await?
                 .execute(
                     "UPDATE model_payloads SET uploaded_at=now() WHERE payload_id=$1",
                     &[&id],
@@ -802,7 +878,7 @@ impl Gateway {
                 .await
                 .map_err(|_| "database_unavailable")?;
         }
-        let rows=self.db.lock().await.query("SELECT e.event_id,jsonb_build_object('event_id',e.event_id,'workspace_id',r.workspace_id,'user_id',r.user_id,'agent_id',r.agent_id,'request_id',r.request_id,'call_id',e.call_id,'event_type',e.event_type,'occurred_at',to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),'provider',r.provider,'requested_model',r.model,'execution_mode',r.execution_mode,'run_id',r.run_id,'action_id',r.action_id,'payload',e.payload::text) FROM model_events e JOIN model_requests r USING(request_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at LIMIT 100",&[]).await.map_err(|_|"database_unavailable")?;
+        let rows=self.conn().await?.query("SELECT e.event_id,jsonb_build_object('event_id',e.event_id,'workspace_id',r.workspace_id,'user_id',r.user_id,'agent_id',r.agent_id,'request_id',r.request_id,'call_id',e.call_id,'event_type',e.event_type,'occurred_at',to_char(e.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),'provider',r.provider,'requested_model',r.model,'execution_mode',r.execution_mode,'run_id',r.run_id,'action_id',r.action_id,'payload',e.payload::text) FROM model_events e JOIN model_requests r USING(request_id) WHERE e.exported_at IS NULL ORDER BY e.occurred_at LIMIT 100",&[]).await.map_err(|_|"database_unavailable")?;
         if !rows.is_empty() {
             progressed = true;
             let ids: Vec<Uuid> = rows.iter().map(|r| r.get(0)).collect();
@@ -837,9 +913,8 @@ impl Gateway {
             if !body.is_empty() {
                 return Err("clickhouse_unexpected_response");
             }
-            self.db
-                .lock()
-                .await
+            self.conn()
+                .await?
                 .execute(
                     "UPDATE model_events SET exported_at=now() WHERE event_id=ANY($1)",
                     &[&ids],
