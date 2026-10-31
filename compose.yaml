@@ -42,7 +42,8 @@ services:
     volumes:
       - gateway-spool:/data/gateway
     ports:
-      - '127.0.0.1:18080:8080'
+      # Loopback unless a deploy sets SCOUT_PUBLISH. The operator console stays on loopback.
+      - '${SCOUT_PUBLISH:-127.0.0.1}:${SCOUT_WORKSPACE_PORT:-18080}:8080'
     depends_on:
       postgres: { condition: service_healthy }
     healthcheck:
@@ -65,7 +66,7 @@ services:
       context: .
       dockerfile: infra/backoffice/Dockerfile
     ports:
-      - '127.0.0.1:18083:8080'
+      - '127.0.0.1:${SCOUT_BACKOFFICE_PORT:-18083}:8080'
     depends_on:
       api: { condition: service_healthy }
     healthcheck:

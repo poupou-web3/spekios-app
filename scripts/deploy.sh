@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Start the workspace, operator console, API, browser workers and databases.
+# Usage: scripts/deploy.sh [edge]
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+edge=0
+case "${1:-}" in
+  "") ;;
+  edge | --edge) edge=1 ;;
+  *)
+    echo "Usage: scripts/deploy.sh [edge]" >&2
+    exit 2
+    ;;
+esac
+
+if command -v node >/dev/null 2>&1; then
+  node scripts/setup-local.mjs
+elif [[ ! -f .env ]]; then
+  umask 077
+  token() { openssl rand -hex 32; }
+  cat >.env <<EOF
+# Created by scripts/deploy.sh. Keep private.
+POSTGRES_PASSWORD=$(token)
+S3_ACCESS_KEY_ID=$(token)
+S3_SECRET_ACCESS_KEY=$(token)
+CLICKHOUSE_PASSWORD=$(token)
+SCOUT_API_TOKEN=$(token)
+EOF
+  chmod 600 .env
+  echo "Created .env with independent random credentials and permissions 0600."
+else
+  chmod 600 .env
+fi
+
+read_env() {
+  local key="$1" line
+  line=$(grep -E "^${key}=" .env | tail -n 1 || true)
+  line=${line%$'\r'}
+  printf '%s' "${line#"${key}"=}"
+}
+
+export COMPOSE_FILE="compose.yaml:compose.deploy.yaml"
+export SCOUT_PUBLISH="${SCOUT_PUBLISH:-127.0.0.1}"
+
+bypass=$(read_env SCOUT_DEV_AUTH_BYPASS)
+if [[ "$edge" == 1 ]]; then
+  host=$(read_env SCOUT_PUBLIC_HOST)
+  origin=$(read_env SCOUT_PUBLIC_ORIGIN)
+  if [[ -z "$host" || -z "$origin" ]]; then
+    echo "Set SCOUT_PUBLIC_HOST and SCOUT_PUBLIC_ORIGIN in .env before deploying the HTTPS edge." >&2
+    exit 1
+  fi
+  if [[ "$origin" != https://* ]]; then
+    echo "SCOUT_PUBLIC_ORIGIN must be an https origin." >&2
+    exit 1
+  fi
+  if [[ "$bypass" == "true" ]]; then
+    echo "Refusing the HTTPS edge while SCOUT_DEV_AUTH_BYPASS=true." >&2
+    exit 1
+  fi
+  export SCOUT_PUBLIC_HOST="$host"
+  export SCOUT_PUBLIC_ORIGIN="$origin"
+  export SCOUT_EDGE_PUBLISH="${SCOUT_EDGE_PUBLISH:-0.0.0.0}"
+fi
+if [[ "$bypass" == "true" && "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
+  echo "Refusing to publish the workspace while SCOUT_DEV_AUTH_BYPASS=true." >&2
+  exit 1
+fi
+
+echo "Starting PostgreSQL, ClickHouse and evidence storage."
+docker compose up -d --build --wait postgres evidence clickhouse
+
+bash scripts/apply-schemas.sh
+
+echo "Starting the workspace, operator console, API and browser workers."
+echo "The first build compiles the API and the browser image."
+if [[ "$edge" == 1 ]]; then
+  docker compose --profile edge up -d --build --wait \
+    api backoffice browser-worker browser-sandbox edge
+else
+  docker compose up -d --build --wait \
+    api backoffice browser-worker browser-sandbox
+fi
+
+workspace_port="${SCOUT_WORKSPACE_PORT:-18080}"
+backoffice_port="${SCOUT_BACKOFFICE_PORT:-18083}"
+if [[ "$SCOUT_PUBLISH" == "127.0.0.1" ]]; then
+  echo "Workspace: http://127.0.0.1:${workspace_port}"
+else
+  echo "Workspace listens on port ${workspace_port} (${SCOUT_PUBLISH})."
+fi
+echo "Operator console (this machine only): http://127.0.0.1:${backoffice_port}"
+if [[ "$edge" == 1 ]]; then
+  echo "Public workspace: ${origin}"
+elif [[ "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
+  echo "This publish address has no TLS. Run scripts/deploy.sh edge after setting SCOUT_PUBLIC_HOST and SCOUT_PUBLIC_ORIGIN."
+fi
+echo "PostgreSQL, ClickHouse and the evidence bucket stay on the Compose network. Their host ports are loopback-only."

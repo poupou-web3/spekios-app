@@ -36,9 +36,25 @@ just stop            # Stop services while keeping named volumes
 
 `just demo` and `just runtime-test` assume `just dev` has prepared the data services. Recovery and pending-export commands are also listed by `just --list`. Native Rust checks use Cargo; the normal container build runs the Rust tests and produces a release binary. Node.js 22+ remains required for the local utility scripts. The API does not run Node.
 
-All published service ports bind to host loopback. The API is at `http://127.0.0.1:18080`, S3 at `http://127.0.0.1:18333`, and ClickHouse at `http://127.0.0.1:18123`. PostgreSQL is reachable only inside Compose. The API token is generated once in the private `.env`; `just runs` uses it without echoing it. No model key is required for fixture testing.
+Published service ports bind to host loopback unless a deploy sets `SCOUT_PUBLISH`. The API is at `http://127.0.0.1:18080`, S3 at `http://127.0.0.1:18333`, and ClickHouse at `http://127.0.0.1:18123`. PostgreSQL is reachable only inside Compose. The API token is generated once in the private `.env`; `just runs` uses it without echoing it. No model key is required for fixture testing.
 
 The API has a persistent `gateway-spool` volume for response journals. Provider API keys are optional private `.env` entries; they go only to the Rust service. The browser worker receives a local API token, not provider credentials. Chromium runs in the separate `browser-sandbox` service, which receives no credentials or volumes and is attached only to the browser network; see [URL exploration](../exploration/overview.md). The explicit model test overlay adds a local fake-provider server on loopback port 18081 and ignores real keys. Its cleanup removes that test container and restores normal gateway configuration. Explorer tests additionally leave a controlled target on loopback port 18082. See [model gateway](./model-gateway.md) and [URL exploration](../exploration/overview.md).
+
+## Deploy on one machine
+
+`just deploy` starts the customer workspace and its API, the operator console, the browser worker and sandboxes, PostgreSQL, ClickHouse, and the private evidence bucket. It does not start the one-shot recorder or the exploration fixture. Database host ports stay on loopback. The operator console stays on loopback. The workspace bind address defaults to loopback too.
+
+```sh
+just deploy
+```
+
+The command preserves or creates private credentials in `.env`, builds the images, waits until PostgreSQL, ClickHouse and the evidence service are healthy, then applies every `infra/postgres/*.sql` and `infra/clickhouse/*.sql` file in name order. Those statements are idempotent. A later deploy updates an existing volume; a fresh volume also runs the same files from the database images. Node is used for credential setup when it is installed. Without Node, OpenSSL creates the same private `.env`.
+
+Open the workspace at `http://127.0.0.1:18080` and the operator console at `http://127.0.0.1:18083`. `just deploy-stop` stops the containers, including the HTTPS proxy if it was started, and keeps the volumes.
+
+`SCOUT_PUBLISH=0.0.0.0` publishes the workspace on every interface as plain HTTP. Deploy refuses that bind while `SCOUT_DEV_AUTH_BYPASS=true`. `SCOUT_WORKSPACE_PORT` and `SCOUT_BACKOFFICE_PORT` change the host ports (defaults 18080 and 18083).
+
+For a public HTTPS name, set `SCOUT_PUBLIC_HOST` to the hostname and `SCOUT_PUBLIC_ORIGIN` to the `https://` origin, point DNS at this machine, and run `just deploy edge`. Caddy listens on ports 80 and 443 and proxies to the API. The workspace port and the operator console stay on loopback; deploy refuses the edge while `SCOUT_DEV_AUTH_BYPASS=true`. A public origin disables the development auth bypass. Bundled Postgres still uses `PGSSLMODE=disable` on the Compose network, and the API logs a warning; use `verify-full` when Postgres is a managed server on a network you do not trust. Bundled ClickHouse is one server. This command does not apply the schema to an external database.
 
 ## Why Compose first
 

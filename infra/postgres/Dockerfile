@@ -1,23 +1,4 @@
 FROM postgres:17.11-alpine3.23@sha256:9ea644da56f1a82283b173fa38a316636fe7c538991a8ae41998cd3765434991
-COPY 001-evidence.sql /docker-entrypoint-initdb.d/001-evidence.sql
-COPY 002-runtime.sql /docker-entrypoint-initdb.d/002-runtime.sql
-COPY 003-model-gateway.sql /docker-entrypoint-initdb.d/003-model-gateway.sql
-COPY 004-exploration.sql /docker-entrypoint-initdb.d/004-exploration.sql
-COPY 005-reproduction.sql /docker-entrypoint-initdb.d/005-reproduction.sql
-COPY 006-browser-jobs.sql /docker-entrypoint-initdb.d/006-browser-jobs.sql
-COPY 007-frontier-planning.sql /docker-entrypoint-initdb.d/007-frontier-planning.sql
-COPY 008-browser-access.sql /docker-entrypoint-initdb.d/008-browser-access.sql
-COPY 009-action-outcomes.sql /docker-entrypoint-initdb.d/009-action-outcomes.sql
-COPY 010-cancellation.sql /docker-entrypoint-initdb.d/010-cancellation.sql
-COPY 011-finding-reviews.sql /docker-entrypoint-initdb.d/011-finding-reviews.sql
-COPY 012-automatic-reproduction.sql /docker-entrypoint-initdb.d/012-automatic-reproduction.sql
-COPY 013-exploration-settings.sql /docker-entrypoint-initdb.d/013-exploration-settings.sql
-COPY 014-agent-identity.sql /docker-entrypoint-initdb.d/014-agent-identity.sql
-COPY 015-agent-oauth.sql /docker-entrypoint-initdb.d/015-agent-oauth.sql
-COPY 016-issue-verification.sql /docker-entrypoint-initdb.d/016-issue-verification.sql
-COPY 017-run-steering.sql /docker-entrypoint-initdb.d/017-run-steering.sql
-COPY 018-meta-provider.sql /docker-entrypoint-initdb.d/018-meta-provider.sql
-COPY 019-app-memory.sql /docker-entrypoint-initdb.d/019-app-memory.sql
-COPY 020-worker-slots.sql /docker-entrypoint-initdb.d/020-worker-slots.sql
-COPY 021-issue-triage.sql /docker-entrypoint-initdb.d/021-issue-triage.sql
-COPY 022-app-map.sql /docker-entrypoint-initdb.d/022-app-map.sql
+# Every numbered file in this directory, in name order. A fresh volume runs them
+# once; scripts/apply-schemas.sh runs them again on later deploys.
+COPY *.sql /docker-entrypoint-initdb.d/
