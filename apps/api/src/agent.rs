@@ -386,7 +386,9 @@ async fn dispatch_inner(
         | "scout_reproduce_candidate"
         | "scout_verify_fix"
         | "scout_cancel_work"
-        | "scout_steer_run" => "runs:write",
+        | "scout_steer_run"
+        | "scout_triage_issue"
+        | "scout_recheck_deployment" => "runs:write",
         "scout_usage" => "usage:read",
         _ => "runs:read",
     };
@@ -486,6 +488,54 @@ async fn dispatch_inner(
         "scout_list_issues" => {
             let filters: issues::Filters = args(input)?;
             decode(issues::list(ScopedState(state.clone()), Query(filters)).await).await
+        }
+        "scout_triage_issue" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                issue_id: Uuid,
+                decision: String,
+                rationale: String,
+                duplicate_of: Option<Uuid>,
+                expected_revision: Option<i32>,
+            }
+            let a: A = args(input)?;
+            decode(
+                issues::record_triage(
+                    state,
+                    checked(a.issue_id)?,
+                    issues::TriageInput {
+                        decision: a.decision,
+                        rationale: a.rationale,
+                        duplicate_of: a.duplicate_of,
+                        expected_revision: a.expected_revision,
+                    },
+                    true,
+                )
+                .await,
+            )
+            .await
+        }
+        "scout_list_knowledge" => {
+            let filters: issues::KnowledgeFilters = args(input)?;
+            decode(issues::knowledge(ScopedState(state.clone()), Query(filters)).await).await
+        }
+        "scout_recheck_deployment" => {
+            let recheck: issues::RecheckInput = args(input)?;
+            decode(issues::start_recheck(state, recheck).await).await
+        }
+        "scout_get_recheck" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                recheck_id: Uuid,
+            }
+            let a: A = args(input)?;
+            decode(
+                issues::recheck_status(ScopedState(state.clone()), Path(checked(a.recheck_id)?))
+                    .await,
+            )
+            .await
         }
         "scout_get_verification" => {
             #[derive(Deserialize)]
@@ -970,7 +1020,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let value = body(response).await;
         let catalog = list(&value["result"]["tools"]);
-        assert_eq!(catalog.len(), 26);
+        assert_eq!(catalog.len(), 30);
         assert!(
             catalog
                 .iter()

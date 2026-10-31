@@ -1,17 +1,32 @@
 # Building the Scout QA agent
 
-28 October implementation update: [automatic reproduction](../exploration/automatic-reproduction.md) now schedules bounded fresh checks after an opted-in queued exploration completes. Durable reservations, manual/automatic deduplication, provider and evidence deferral, child lineage and independent batch cancellation are implemented. Automatic results preserve the source judgments and still require human review for confirmation. Dataset export, live-model quality evaluation, spend quotas, resume and multiple workers remain future work.
-
-Implementation update: [human finding review](../exploration/finding-reviews.md) adds append-only confirmation, dismissal and reopening, tied to independently reproduced and hash-verified evidence. The original model judgments and fixture training exclusions remain preserved.
-
-26 October implementation update: [durable run cancellation](../exploration/cancellation.md) now stops queued jobs, active exploration and reproduction, including private login. Screenshots and model usage remain available; dispatch checks and restart recovery prevent new actions after cancellation. Resume, multiple workers, live-model quality evaluation and reviewed bug confirmation remain pending.
-
-25 October implementation update: [action completion and safe form journeys](../exploration/action-outcomes.md) now add bounded stability checks, retained screenshot samples, request/console diagnostics, native validation and permitted submission to exploration and reproduction. Live-model evaluation remains unverified.
-
-
-24 October implementation update: [private app login and encrypted session reuse](../exploration/private-login.md) now support the local queued worker, including optional sign-in, authentication-context resets, authenticated replay and access interruption recovery. Google/external identity providers, parallel public exploration during a handoff and hosted secret management remain pending. Earlier milestone descriptions below are historical/planned scope.
-
 Research date: 14 October 2026; revised to the user's requirements on 15 October and checked for consistency on 21 October 2026. This document defines the application design. The first local storage/observability infrastructure is tracked separately in [Local infrastructure](../platform/infrastructure.md); it must not be confused with a completed browser-testing application.
+
+## Where this stands (31 October 2026)
+
+This section is the current state. Everything below it is the design; dated implementation notes are in the [change log](#change-log) at the end.
+
+**The goal holds.** From a URL, Scout's agent decides what is wrong, records everything with evidence, makes it available to people and reports back to the agent or CI job that asked. Every part of the spec is judged against that loop.
+
+Built:
+
+- **Explore:** URL-only exploration with a scored [frontier planner](../exploration/planner.md), memory across runs, document-wide controls, viewport profiles, [private sign-in](../exploration/private-login.md) and [testing focus](../../apps/docs/src/content/docs/guides/testing-focus.md).
+- **Decide:** a prediction before every action and an assessment after it; [fresh-browser reproduction](../exploration/reproduction.md) and [automatic rechecks](../exploration/automatic-reproduction.md); [triage](../exploration/triage.md) of every issue as bug, intended behavior, duplicate or needs review, by people, agents or Scout itself.
+- **Record:** append-only actions, captures, assessments, issues, triage, verifications and [human reviews](../exploration/finding-reviews.md), with evidence in the bucket and events in ClickHouse.
+- **Make available:** the workspace, the issues page, the back office, [run reports and exports](../runtime/reports.md).
+- **Report back:** 30 MCP/HTTP tools, coding-agent reports that separate new findings from known behavior, [fix verification](../../apps/docs/src/content/docs/guides/fix-verification.md) and [deployment rechecks](../exploration/triage.md#recheck-after-a-deploy) with a CI script.
+- **Run safely:** target sites in an [isolated browser sandbox](../../apps/docs/src/content/docs/operators/security.md), several jobs at once, interrupted explorations resumed.
+
+Spec decisions:
+
+| Spec item | Decision |
+| --- | --- |
+| Sessions and conversation | Runs, jobs and issue history are the session record. A chat-style conversation surface is deferred. |
+| Test cases and verdicts | A permanent issue with its frozen path is the regression case. Each fix verification or recheck item is a verdict: resolved, still reproducible, blocked or inconclusive. Hand-written test cases are deferred. |
+| Knowledge base | Implemented as triage: intended behavior and known bugs, matched in later runs by page, control, viewport and sign-in state. Free-text product notes are deferred. |
+| Triage | `bug`, `intended_behavior`, `duplicate`, `needs_review`. Agents decide, but never replace a person's decision. Known behavior is labelled, never dropped. |
+| Budgets | Per-run action, time and model-request limits exist. Workspace spend budgets are deferred. |
+| Schedules and CI | Deployment rechecks through the API, MCP and `scripts/scout-recheck.mjs`. A built-in scheduler is deferred: run the script from CI or cron. |
 
 ## Recommended direction
 
@@ -20,10 +35,6 @@ Build a web-first exploratory QA product that starts from **only a URL**. The ag
 The first product should make two promises well: **every executed action has a durable evidence trail**, and **a confirmed functional bug has evidence from independent reproduction**. Store captures in a bucket with unique IDs linked to actions, assessments, agents, and workers. Preserve data for later training, with versioned dataset manifests and reviewed labels. Agent counts and test counts measure activity, not quality.
 
 Start with Chromium and responsive desktop/tablet/mobile web layouts. Keep native mobile, broad cross-browser support, repository-aware regression selection, and automatic test maintenance for later. A small reliable engine is the foundation for those features.
-
-Implementation status on 23 October: the data foundation, [browser recorder](../../packages/browser-runtime/README.md), Rust/Axum model gateway, [bounded URL explorer](../exploration/overview.md), [fresh-browser suspect replay](../exploration/reproduction.md), and the [user workspace/operations console](../platform/workspace.md) are implemented. The [frontier planner](../exploration/planner.md) now ranks known paths using model intent, changed clickable controls, novelty and return cost; it returns to branches, replans stale screens and supports three responsive viewport profiles. The explorer links model predictions/assessments, screenshot IDs, exact masks, a state/flow graph and per-user usage. Replay preserves the original expectation, records fresh evidence and separate assessments, and reports reproduced/not reproduced/inconclusive without automatically confirming bugs. TypeScript is retained for Playwright. Tests use real browser/storage services and simulated OpenAI/Claude/OpenRouter responses; live-model QA quality and score calibration, arbitrary-site isolation, reviewed confirmation, credential handoff, cancellation and parallel execution remain unfinished. GUI API/worker integration is verified; visual browser inspection remains unverified after a computer-use restriction.
-
-The 23 October browser-interaction increment also adds native text/search entry, dropdown selection, checkbox/radio changes and document scrolling, with typed argument validation, bounded model context and exact replay parameters. See [browser interactions](../exploration/interactions.md). Form submission, credential handoff and custom widgets are still pending.
 
 Companion specifications:
 
@@ -246,3 +257,21 @@ The full engine needs browser-capable compute. A static hosted website can demon
 Build one complete, observable path: **submit only a controlled test URL; infer one likely user action and expected result; capture before/after; save the images and mask under unique IDs; assess the result; reproduce a suspected failure in a fresh attempt; inspect the full trajectory and token usage.**
 
 The controlled fixture may have a human-authored expected result for evaluation, but that answer is not supplied as a required brief to the exploring agent. This tests the URL-only product promise.
+
+## Change log
+
+Dated implementation notes, newest first. The status section above supersedes them.
+
+28 October implementation update: [automatic reproduction](../exploration/automatic-reproduction.md) now schedules bounded fresh checks after an opted-in queued exploration completes. Durable reservations, manual/automatic deduplication, provider and evidence deferral, child lineage and independent batch cancellation are implemented. Automatic results preserve the source judgments and still require human review for confirmation. Dataset export, live-model quality evaluation, spend quotas, resume and multiple workers remain future work.
+
+Implementation update: [human finding review](../exploration/finding-reviews.md) adds append-only confirmation, dismissal and reopening, tied to independently reproduced and hash-verified evidence. The original model judgments and fixture training exclusions remain preserved.
+
+26 October implementation update: [durable run cancellation](../exploration/cancellation.md) now stops queued jobs, active exploration and reproduction, including private login. Screenshots and model usage remain available; dispatch checks and restart recovery prevent new actions after cancellation. Resume, multiple workers, live-model quality evaluation and reviewed bug confirmation remain pending.
+
+25 October implementation update: [action completion and safe form journeys](../exploration/action-outcomes.md) now add bounded stability checks, retained screenshot samples, request/console diagnostics, native validation and permitted submission to exploration and reproduction. Live-model evaluation remains unverified.
+
+24 October implementation update: [private app login and encrypted session reuse](../exploration/private-login.md) now support the local queued worker, including optional sign-in, authentication-context resets, authenticated replay and access interruption recovery. Google/external identity providers, parallel public exploration during a handoff and hosted secret management remain pending. Earlier milestone descriptions below are historical/planned scope.
+
+Implementation status on 23 October: the data foundation, [browser recorder](../../packages/browser-runtime/README.md), Rust/Axum model gateway, [bounded URL explorer](../exploration/overview.md), [fresh-browser suspect replay](../exploration/reproduction.md), and the [user workspace/operations console](../platform/workspace.md) are implemented. The [frontier planner](../exploration/planner.md) now ranks known paths using model intent, changed clickable controls, novelty and return cost; it returns to branches, replans stale screens and supports three responsive viewport profiles. The explorer links model predictions/assessments, screenshot IDs, exact masks, a state/flow graph and per-user usage. Replay preserves the original expectation, records fresh evidence and separate assessments, and reports reproduced/not reproduced/inconclusive without automatically confirming bugs. TypeScript is retained for Playwright. Tests use real browser/storage services and simulated OpenAI/Claude/OpenRouter responses; live-model QA quality and score calibration, arbitrary-site isolation, reviewed confirmation, credential handoff, cancellation and parallel execution remain unfinished. GUI API/worker integration is verified; visual browser inspection remains unverified after a computer-use restriction.
+
+The 23 October browser-interaction increment also adds native text/search entry, dropdown selection, checkbox/radio changes and document scrolling, with typed argument validation, bounded model context and exact replay parameters. See [browser interactions](../exploration/interactions.md). Form submission, credential handoff and custom widgets are still pending.

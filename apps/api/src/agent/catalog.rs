@@ -63,9 +63,9 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_list_issues",
-            "List persistent workspace issues and candidate verification status. Search title/URL; follow next_offset. Original suspicions and human review remain separate.",
+            "List persistent workspace issues with their triage and candidate verification status. triage=open returns untriaged, needs-review and bug issues; known intended behavior and duplicates are listed only when asked for. Search title/URL; follow next_offset.",
             schema(
-                json!({"query":{"type":"string","maxLength":200},"outcome":choice(&["unverified","running","resolved","still_reproducible","blocked","inconclusive"]),"offset":{"type":"integer","minimum":0,"maximum":100000},"limit":{"type":"integer","minimum":1,"maximum":50}}),
+                json!({"query":{"type":"string","maxLength":200},"outcome":choice(&["unverified","running","resolved","still_reproducible","blocked","inconclusive"]),"triage":choice(&["open","untriaged","needs_review","bug","intended_behavior","duplicate"]),"offset":{"type":"integer","minimum":0,"maximum":100000},"limit":{"type":"integer","minimum":1,"maximum":50}}),
                 &[],
             ),
             true,
@@ -84,6 +84,51 @@ pub fn tools() -> Vec<Tool> {
             true,
             true,
             true,
+        ),
+        tool(
+            "scout_triage_issue",
+            "Decide what an issue is: bug (keep checking it), intended_behavior (later runs record the same page and control as known behavior), duplicate (duplicate_of names the issue it repeats) or needs_review. Give a rationale grounded in the evidence or product requirements. Decisions are append-only and shown to the user as made by an agent; an agent cannot replace a person's decision. Pass expected_revision from the issue's triage to avoid overwriting a newer decision.",
+            schema(
+                json!({"issue_id":id_schema(),"decision":choice(&["bug","intended_behavior","duplicate","needs_review"]),"rationale":{"type":"string","minLength":1,"maxLength":2000},"duplicate_of":id_schema(),"expected_revision":{"type":"integer","minimum":0}}),
+                &["issue_id", "decision", "rationale"],
+            ),
+            false,
+            false,
+            true,
+            false,
+        ),
+        tool(
+            "scout_list_knowledge",
+            "List known behavior for an origin: issues triaged as bugs or intended behavior, who decided and why, with duplicates and repeat occurrences rolled up. Read this before triaging new findings. No model call.",
+            schema(
+                json!({"origin":{"type":"string","maxLength":2048},"offset":{"type":"integer","minimum":0,"maximum":100000},"limit":{"type":"integer","minimum":1,"maximum":50}}),
+                &[],
+            ),
+            true,
+            false,
+            true,
+            false,
+        ),
+        tool(
+            "scout_recheck_deployment",
+            "After a deploy, verify the deployment at candidate_url against every open issue (untriaged, needs review or bug) found on source_origin (default: the candidate's origin), up to 25. Each issue gets its own fresh-browser verification; intended behavior and duplicates are skipped. Can change data on the candidate site and consume model usage. Reuse the same recheck_id when retrying.",
+            schema(
+                json!({"recheck_id":id_schema(),"candidate_url":{"type":"string","maxLength":2048},"source_origin":{"type":"string","maxLength":2048},"deployment_ref":{"type":"string","minLength":1,"maxLength":200},"project_id":id_schema(),"task_id":id_schema()}),
+                &["recheck_id", "candidate_url"],
+            ),
+            false,
+            true,
+            true,
+            true,
+        ),
+        tool(
+            "scout_get_recheck",
+            "Read a deployment recheck: each issue's verification status and outcome, skipped issues with reasons, and counts of resolved, still_reproducible, blocked, inconclusive and pending checks. complete=true when every check has finished. No model call.",
+            schema(json!({"recheck_id":id_schema()}), &["recheck_id"]),
+            true,
+            false,
+            true,
+            false,
         ),
         tool(
             "scout_get_verification",

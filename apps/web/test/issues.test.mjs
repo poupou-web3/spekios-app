@@ -18,7 +18,7 @@ function setup({value=fixture(),pending=null,failFirst=false,hash='#'+issue,inte
     else body=structuredClone(value);
     return await intercept?.(path,options,body)??{ok:true,status:200,json:async()=>body,blob:async()=>new Blob(['fake-png'])};
   }};
-  vm.createContext(context);const source=appSource('issues.js').replace('await start();','');vm.runInContext(source+'\nglobalThis.testing={ready,usage,submit,more,refresh,loadDetail,copyHandoff,outcome};',context);
+  vm.createContext(context);const source=appSource('issues.js').replace('await start();','');vm.runInContext(source+'\nglobalThis.testing={ready,usage,submit,more,refresh,loadDetail,copyHandoff,outcome,submitTriage,submitRecheck,renderRecheck};',context);
   return {get,requests,copied,storage,events,ui:context.testing,location:context.location};
 }
 const text=node=>[node.textContent,...node.children.map(c=>typeof c==='string'?c:text(c))].join(' ');
@@ -104,4 +104,33 @@ test('an uncertain check keeps its retry ID when another issue submits a candida
   u.location.hash='#'+verification;await u.events.hashchange();u.get('#candidate-url').value='https://preview.example/second';await u.ui.submit({preventDefault(){}});
   u.location.hash='#'+issue;await u.events.hashchange();assert.equal(u.get('#candidate-url').value,'https://preview.example/uncertain');assert.equal(u.get('#candidate-url').disabled,true);
   await u.ui.submit({preventDefault(){}});const attempts=u.requests.filter(r=>r.options.method==='POST'&&r.path===`/v1/issues/${issue}/verifications`);assert.equal(attempts[1].options.body,original);
+});
+
+test('a person triages with the revision they saw, and a duplicate needs the full issue ID',async()=>{
+  const u=setup();await u.ui.ready();assert.match(text(u.get('#triage-current')),/Not triaged yet/);
+  u.get('#triage-decision').value='duplicate';u.get('#triage-rationale').value='Same failure as the cart issue.';u.get('#triage-duplicate').value='2222';
+  await u.ui.submitTriage({preventDefault(){}});assert.match(u.get('#triage-error').textContent,/full ID/);assert.equal(u.requests.some(r=>r.path.endsWith('/triage')),false);
+  u.get('#triage-decision').value='intended_behavior';u.get('#triage-rationale').value='  The editor autosaves; no banner is shown by design.  ';
+  await u.ui.submitTriage({preventDefault(){}});const write=u.requests.find(r=>r.path===`/v1/issues/${issue}/triage`);assert.ok(write);
+  assert.deepEqual(JSON.parse(write.options.body),{decision:'intended_behavior',rationale:'The editor autosaves; no banner is shown by design.',expected_revision:0});
+});
+test('known behavior is labelled with who decided it, and the list defaults to open issues',async()=>{
+  const value=fixture();value.issue.triage={decision:'intended_behavior',actor:'agent',rationale:'Matches the spec.',revision:2,created_at:'2026-10-31T10:00:00Z'};value.issue.triage_status='intended_behavior';
+  const u=setup({value});u.get('#issue-triage').value='open';await u.ui.ready();assert.match(text(u.get('#triage-current')),/Intended behavior · decided by an agent/);
+  assert.ok(u.requests.some(r=>r.path.startsWith('/v1/issues?')&&r.path.includes('triage=open')));assert.match(text(u.get('#issue-list')),/Intended behavior/);
+  assert.equal(u.get('#triage-decision').value,'intended_behavior');
+});
+test('a person cannot be overruled silently: conflicts explain the current decision',async()=>{
+  const u=setup({intercept:(path,options)=>path.endsWith('/triage')?{ok:false,status:409,json:async()=>({error:'human_decision_present'})}:undefined});await u.ui.ready();
+  u.get('#triage-decision').value='bug';u.get('#triage-rationale').value='Reproduced twice.';await u.ui.submitTriage({preventDefault(){}});assert.equal(u.get('#triage-error').textContent,'A person already decided this issue.');
+});
+test('a deployment recheck keeps its ID until the receipt arrives, then shows each issue outcome',async()=>{
+  let attempts=0;const receipt={recheck_id:'44444444-4444-4444-8444-444444444444',candidate_origin:'https://preview.example',deployment_ref:'Release 2',complete:false,omitted_issues:0,
+    counts:{selected:1,admitted:1,skipped:0,pending:1,resolved:0,still_reproducible:0,blocked:0,inconclusive:0},items:[{issue_id:issue,title:'Save fails',status:'queued',outcome:null}]};
+  const u=setup({intercept:(path,options)=>path==='/v1/rechecks'?(++attempts===1?(()=>{throw new Error('Connection lost');})():{ok:true,status:202,json:async()=>receipt}):undefined});await u.ui.ready();
+  u.get('#recheck-url').value='https://preview.example/';u.get('#recheck-ref').value='Release 2';await u.ui.submitRecheck({preventDefault(){}});
+  assert.ok(u.storage.has('scout.pending-recheck'));assert.match(u.get('#recheck-error').textContent,/retry the same recheck/);
+  u.get('#recheck-url').value='https://other.example/';await u.ui.submitRecheck({preventDefault(){}});
+  const writes=u.requests.filter(r=>r.path==='/v1/rechecks');assert.equal(writes.length,2);assert.equal(writes[0].options.body,writes[1].options.body);
+  assert.equal(u.storage.has('scout.pending-recheck'),false);assert.match(text(u.get('#recheck-result')),/1 open issue\(s\) · 0 resolved/);assert.match(text(u.get('#recheck-result')),/Save fails/);
 });

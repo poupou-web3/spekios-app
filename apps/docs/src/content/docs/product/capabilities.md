@@ -20,10 +20,12 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 | Planning | Likely-action ranking, recorded graph/frontier, duplicate avoidance, branch returns, stale-state replanning, controls further down the page, versioned active-run testing focus and [memory across runs](../../guides/app-memory/) with reopening of unfinished pages. Runs allow up to 50 actions and stop after 30 minutes by default. |
 | Checks | Pre-action expectations, per-action assessments, exact image differences, sampled completion frames and redacted diagnostics. |
 | Findings | Original suspicions, fresh-browser replay, optional bounded automatic replay and append-only human review. |
+| Triage | Bug, intended behavior, duplicate or needs review, decided by people, agents or Scout; later runs recognize known behavior by page, control, viewport and sign-in state. See [triage and rechecks](../../guides/triage/). |
+| Rechecks | Verify a deployment against every open issue of a site (up to 25), from the workspace, an agent or CI with exit codes. |
 | Agent identity | User setup page, standard MCP browser OAuth with PKCE/DCR and rotating renewal, native connector compatibility, private history, revocation and token attribution. |
 | Access | Human-controlled native same-origin sign-in and optional encrypted session reuse. |
 | Models | OpenAI, Anthropic, OpenRouter and Meta AI API-key connections; nullable token/cost accounting. |
-| Interfaces | User workspace, operations console, REST API, 26 MCP/HTTP tools and a Rust stdio bridge. |
+| Interfaces | User workspace, operations console, REST API, 30 MCP/HTTP tools and a Rust stdio bridge. |
 | Exports | JSON snapshot, Markdown report and verified evidence ZIP. |
 
 ## Not implemented yet
@@ -38,6 +40,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 - Human account signup/invitations, hosted identity providers, subscription billing and public community sharing.
 - Kubernetes manifests. Several browser slots share the queue, and an interrupted exploration continues in a new run up to three times. A dispatched action is not repeated. Private sign-in is still one login at a time.
 - Full tool input/output payload auditing, approved training export or continuous video capture. Route/tool metadata audit is implemented.
+- A built-in recheck scheduler, workspace spend budgets, hand-written test cases or a chat-style session view. Run [scripts/scout-recheck.mjs](../../guides/triage/#recheck-after-a-deploy) from CI or cron for scheduled rechecks.
 
 ## Permanent issue and candidate history
 

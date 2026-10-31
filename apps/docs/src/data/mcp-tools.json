@@ -89,7 +89,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "List persistent workspace issues and candidate verification status. Search title/URL; follow next_offset. Original suspicions and human review remain separate.",
+      "description": "List persistent workspace issues with their triage and candidate verification status. triage=open returns untriaged, needs-review and bug issues; known intended behavior and duplicates are listed only when asked for. Search title/URL; follow next_offset.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -116,6 +116,17 @@
           },
           "query": {
             "maxLength": 200,
+            "type": "string"
+          },
+          "triage": {
+            "enum": [
+              "open",
+              "untriaged",
+              "needs_review",
+              "bug",
+              "intended_behavior",
+              "duplicate"
+            ],
             "type": "string"
           }
         },
@@ -188,6 +199,170 @@
         "type": "object"
       },
       "name": "scout_verify_fix",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Decide what an issue is: bug (keep checking it), intended_behavior (later runs record the same page and control as known behavior), duplicate (duplicate_of names the issue it repeats) or needs_review. Give a rationale grounded in the evidence or product requirements. Decisions are append-only and shown to the user as made by an agent; an agent cannot replace a person's decision. Pass expected_revision from the issue's triage to avoid overwriting a newer decision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "bug",
+              "intended_behavior",
+              "duplicate",
+              "needs_review"
+            ],
+            "type": "string"
+          },
+          "duplicate_of": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "issue_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_id",
+          "decision",
+          "rationale"
+        ],
+        "type": "object"
+      },
+      "name": "scout_triage_issue",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List known behavior for an origin: issues triaged as bugs or intended behavior, who decided and why, with duplicates and repeat occurrences rolled up. Read this before triaging new findings. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "origin": {
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_list_knowledge",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "After a deploy, verify the deployment at candidate_url against every open issue (untriaged, needs review or bug) found on source_origin (default: the candidate's origin), up to 25. Each issue gets its own fresh-browser verification; intended behavior and duplicates are skipped. Can change data on the candidate site and consume model usage. Reuse the same recheck_id when retrying.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_url": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "deployment_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "project_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "recheck_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "source_origin": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "task_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recheck_id",
+          "candidate_url"
+        ],
+        "type": "object"
+      },
+      "name": "scout_recheck_deployment",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read a deployment recheck: each issue's verification status and outcome, skipped issues with reasons, and counts of resolved, still_reproducible, blocked, inconclusive and pending checks. complete=true when every check has finished. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "recheck_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recheck_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_recheck",
       "outputSchema": {
         "type": "object"
       }

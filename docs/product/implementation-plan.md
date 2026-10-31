@@ -1,27 +1,10 @@
 # Product requirements and implementation plan
 
-28 October report increment: a selected run can now be exported as escaped Markdown, its existing JSON snapshot, or a portable ZIP with original PNGs and recorded JSON artifacts. A file manifest records size/hash verification and explicit evidence gaps. The export pins source data, keeps human decisions separate from model suspicion, references related runs without silently collecting their evidence, and does not approve data for training. See [portable reports](../runtime/reports.md). Versioned training datasets, sampling/splits and export approval remain future work.
-
-28 October implementation update: [automatic reproduction](../exploration/automatic-reproduction.md) now schedules bounded fresh checks after an opted-in queued exploration completes. Durable reservations, manual/automatic deduplication, provider and evidence deferral, child lineage and independent batch cancellation are implemented. Automatic results preserve the source judgments and still require human review for confirmation. Dataset export, live-model quality evaluation, spend quotas, resume and multiple workers remain future work.
-
-Implementation update: [human finding review](../exploration/finding-reviews.md) adds append-only confirmation, dismissal and reopening, tied to independently reproduced and hash-verified evidence. The original model judgments and fixture training exclusions remain preserved.
-
-26 October implementation update: [durable run cancellation](../exploration/cancellation.md) now stops queued jobs, active exploration and reproduction, including private login. Screenshots and model usage remain available; dispatch checks and restart recovery prevent new actions after cancellation. Resume, multiple workers, live-model quality evaluation and reviewed bug confirmation remain pending.
-
-25 October implementation update: [action completion and safe form journeys](../exploration/action-outcomes.md) now add bounded stability checks, retained screenshot samples, request/console diagnostics, native validation and permitted submission to exploration and reproduction. Live-model evaluation remains unverified.
-
-
-24 October implementation update: [private app login and encrypted session reuse](../exploration/private-login.md) now support the local queued worker, including optional sign-in, authentication-context resets, authenticated replay and access interruption recovery. Google/external identity providers, parallel public exploration during a handoff and hosted secret management remain pending. Earlier milestone descriptions below are historical/planned scope.
-
 Prepared 14 October 2026; consistency review 21 October 2026. This is the product design for Scout QA, informed by the seven supplied screenshots. It specifies this application's behavior, schema, and interfaces.
 
-Implementation update, 23 October: the local workspace, operations console, durable jobs, model gateway, exact evidence recorder and bounded explorer are working. The [exploration planner](../exploration/planner.md) now implements scored frontier selection, branch return, stale-plan recovery, a recorded discovery tree and three responsive viewport profiles. Fresh reproduction preserves return paths and source geometry. Broader requirements below remain a product specification; model scores have not been calibrated and test validation uses simulated providers.
+## Where this stands
 
-The [browser interaction contract](../exploration/interactions.md) now also supports native text/search entry, single-select dropdowns, checkbox/radio changes and document scrolling. Typed values and scroll targets are recorded and preserved in reproduction. Permitted form submission and private native login have since been added; keyboard shortcuts and custom widgets remain pending.
-
-The first useful release starts from a URL alone. It infers likely user goals from the visible product, explores a graph of flows, predicts an expected result before every action, and judges the observed result using paired screenshots plus DOM and network evidence. Inferred intent remains a hypothesis. Functional bug confirmation requires independent reproduction and a justified expectation. The result is a reviewable report that preserves uncertainty, missing coverage, and cost.
-
-Develop this loop on one machine with Docker Compose and just, a Rust/Axum API/control plane, and TypeScript/Playwright browser workers. Use PostgreSQL for transactional truth, ClickHouse for every model/tool attempt and searchable redacted inputs/outputs, and S3-compatible storage for canonical payloads, screenshots and difference masks. OpenRouter joins OpenAI and Claude as a provider, including explicit free-only routing. The V1 evidence viewer replays a screenshot timeline; continuous video is not enabled by default. This document specifies application behavior; [local infrastructure](../platform/infrastructure.md) records the concrete infrastructure slice and its measured status.
+The current state and the decisions on each spec item (sessions, test cases and verdicts, knowledge base, triage, budgets, schedules and CI) are in [Building the Scout QA agent](./architecture.md#where-this-stands-31-october-2026). This document remains the design; dated implementation notes are in the [change log](#change-log) at the end.
 
 ## 1. What the references establish
 
@@ -338,3 +321,23 @@ Track false positives by cause: misunderstood intent, unstable data, wrong eleme
 ## 9. Decisions before implementation
 
 Build the first local milestone with the documented defaults and record what is actually running in [local infrastructure](../platform/infrastructure.md). Validate provider account eligibility and tool/image compatibility through the paths in [model connections](../platform/models.md). Before shared hosting, settle deployment region, retention policy, target-network access, test-data isolation, and data-processing permissions. Record these decisions in versioned configuration, based on measured reliability and operating cost.
+
+## Change log
+
+Dated implementation notes, newest first. The status section above supersedes them.
+
+28 October report increment: a selected run can now be exported as escaped Markdown, its existing JSON snapshot, or a portable ZIP with original PNGs and recorded JSON artifacts. A file manifest records size/hash verification and explicit evidence gaps. The export pins source data, keeps human decisions separate from model suspicion, references related runs without silently collecting their evidence, and does not approve data for training. See [portable reports](../runtime/reports.md). Versioned training datasets, sampling/splits and export approval remain future work.
+
+28 October implementation update: [automatic reproduction](../exploration/automatic-reproduction.md) now schedules bounded fresh checks after an opted-in queued exploration completes. Durable reservations, manual/automatic deduplication, provider and evidence deferral, child lineage and independent batch cancellation are implemented. Automatic results preserve the source judgments and still require human review for confirmation. Dataset export, live-model quality evaluation, spend quotas, resume and multiple workers remain future work.
+
+Implementation update: [human finding review](../exploration/finding-reviews.md) adds append-only confirmation, dismissal and reopening, tied to independently reproduced and hash-verified evidence. The original model judgments and fixture training exclusions remain preserved.
+
+26 October implementation update: [durable run cancellation](../exploration/cancellation.md) now stops queued jobs, active exploration and reproduction, including private login. Screenshots and model usage remain available; dispatch checks and restart recovery prevent new actions after cancellation. Resume, multiple workers, live-model quality evaluation and reviewed bug confirmation remain pending.
+
+25 October implementation update: [action completion and safe form journeys](../exploration/action-outcomes.md) now add bounded stability checks, retained screenshot samples, request/console diagnostics, native validation and permitted submission to exploration and reproduction. Live-model evaluation remains unverified.
+
+24 October implementation update: [private app login and encrypted session reuse](../exploration/private-login.md) now support the local queued worker, including optional sign-in, authentication-context resets, authenticated replay and access interruption recovery. Google/external identity providers, parallel public exploration during a handoff and hosted secret management remain pending. Earlier milestone descriptions below are historical/planned scope.
+
+Implementation update, 23 October: the local workspace, operations console, durable jobs, model gateway, exact evidence recorder and bounded explorer are working. The [exploration planner](../exploration/planner.md) now implements scored frontier selection, branch return, stale-plan recovery, a recorded discovery tree and three responsive viewport profiles. Fresh reproduction preserves return paths and source geometry. Broader requirements below remain a product specification; model scores have not been calibrated and test validation uses simulated providers.
+
+The [browser interaction contract](../exploration/interactions.md) now also supports native text/search entry, single-select dropdowns, checkbox/radio changes and document scrolling. Typed values and scroll targets are recorded and preserved in reproduction. Permitted form submission and private native login have since been added; keyboard shortcuts and custom widgets remain pending.

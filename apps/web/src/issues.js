@@ -13,6 +13,9 @@ const message=text=>{$('#issue-status').textContent=text;};
 const labels={resolved:'Resolved on candidate',still_reproducible:'Still reproducible',blocked:'Blocked',inconclusive:'Inconclusive',queued:'Queued',running:'Running',unverified:'Not checked yet'};
 function outcome(check){return check?.outcome||check?.status||'unverified';}
 function badge(check){const key=outcome(check);return make('span',labels[key]||key,`pill ${key==='resolved'?'green':key==='still_reproducible'?'red':''}`);}
+const triageLabels={untriaged:'New',needs_review:'Needs review',bug:'Bug',intended_behavior:'Intended behavior',duplicate:'Duplicate'};
+const deciders={human:'a person',agent:'an agent',system:'Scout, matching a known issue'};
+function triageBadge(issue){const key=issue.triage_status||'untriaged';return make('span',triageLabels[key]||key,`pill ${key==='bug'?'red':key==='intended_behavior'||key==='duplicate'?'green':''}`);}
 function link(text,path,className='button quiet'){const n=make('a',text,className);n.href=path;return n;}
 function stamp(value){return value?new Date(value).toLocaleString():'Not recorded';}
 async function api(path,body){
@@ -54,12 +57,12 @@ async function copyHandoff(){
 }
 async function list(){
   const version=++listVersion;
-  const params=new URLSearchParams({offset:String(offset),limit:'20'});const query=$('#issue-query').value.trim(),filter=$('#issue-outcome').value;if(query)params.set('query',query);if(filter)params.set('outcome',filter);
+  const params=new URLSearchParams({offset:String(offset),limit:'20'});const query=$('#issue-query').value.trim(),filter=$('#issue-outcome').value,triage=$('#issue-triage').value;if(query)params.set('query',query);if(filter)params.set('outcome',filter);if(triage)params.set('triage',triage);
   const page=await api('/v1/issues?'+params);if(version!==listVersion)return;nextOffset=page.next_offset;$('#issue-total').textContent=String(page.total);$('#issue-prev').disabled=offset===0;$('#issue-next').disabled=nextOffset===null;
   const snapshot=JSON.stringify({page,issueId});if(snapshot===listSnapshot)return;listSnapshot=snapshot;
   const root=$('#issue-list');root.replaceChildren();
   if(!page.issues.length)root.append(make('p',page.total?'No issues on this page.':'No issues match this view. Start an exploration to discover behavior worth checking.','issue-empty small muted'));
-  for(const issue of page.issues){const a=link('',`/issues#${issue.issue_id}`,'issue-index-item');if(issue.issue_id===issueId)a.setAttribute('aria-current','true');a.append(badge(issue.latest_verification),make('h3',issue.title),make('p',issue.source_target_url,'small muted'),make('code',issue.issue_id.slice(0,8),'small'));root.append(a);}
+  for(const issue of page.issues){const a=link('',`/issues#${issue.issue_id}`,'issue-index-item');if(issue.issue_id===issueId)a.setAttribute('aria-current','true');a.append(badge(issue.latest_verification),triageBadge(issue),make('h3',issue.title),make('p',issue.source_target_url,'small muted'),make('code',issue.issue_id.slice(0,8),'small'));root.append(a);}
 }
 function renderOriginal(){
   const {issue,original,handoff}=detail,root=$('#issue-original');root.replaceChildren();
@@ -97,6 +100,50 @@ function renderCandidate(){
   evidence(root,check.result.candidate_capture_ids,'Candidate evidence');
   if(check.result.evidence_verified===false)root.append(make('p','The full evidence set could not be verified. This result cannot establish a fix.','small muted'));
 }
+// Triage edits survive background refreshes; a new issue starts from its current decision.
+function renderTriage(reset){
+  const t=detail.issue.triage,current=$('#triage-current');current.replaceChildren();
+  if(!t)current.append(make('strong','Not triaged yet. '),make('span','Decide whether this is a bug, intended behavior or a duplicate. Agents can decide too; a person can always change it.'));
+  else{current.append(make('strong',`${triageLabels[t.decision]||t.decision} · decided by ${deciders[t.actor]||t.actor} · ${stamp(t.created_at)}`),make('span',' — '+t.rationale));
+    if(t.duplicate_of)current.append(make('span',' Duplicate of '),link(t.duplicate_of.slice(0,8),`/issues#${t.duplicate_of}`,'')); 
+    if(t.matched_issue_id)current.append(make('span',' Matched '),link(t.matched_issue_id.slice(0,8),`/issues#${t.matched_issue_id}`,''));}
+  if(reset){$('#triage-decision').value=t?.decision||'bug';$('#triage-duplicate').value=t?.duplicate_of||'';$('#triage-rationale').value='';$('#triage-error').textContent='';}
+  showDuplicate();
+}
+function showDuplicate(){const duplicate=$('#triage-decision').value==='duplicate';$('#triage-duplicate').hidden=!duplicate;$('#triage-duplicate-label').hidden=!duplicate;$('#triage-duplicate').required=duplicate;}
+async function submitTriage(event){
+  event.preventDefault();if(busy||!detail||issueId!==location.hash.slice(1))return;$('#triage-error').textContent='';
+  const id=issueId,decision=$('#triage-decision').value,rationale=$('#triage-rationale').value.trim(),duplicate=$('#triage-duplicate').value.trim();
+  if(!rationale){$('#triage-error').textContent='Say why, so later readers and agents can rely on the decision.';return;}
+  if(decision==='duplicate'&&(!uuid(duplicate)||duplicate===id)){$('#triage-error').textContent='Enter the full ID of the issue this one repeats.';return;}
+  const body={decision,rationale,expected_revision:detail.issue.triage?.revision??0};if(decision==='duplicate')body.duplicate_of=duplicate;
+  busy=true;$('#triage-submit').disabled=true;
+  try{await api(`/v1/issues/${id}/triage`,body);if(issueId!==id)return;message('Decision saved. Later runs that reach the same page and control are labelled with it.');busy=false;await loadDetail(true);await list();}
+  catch(e){if(issueId===id)$('#triage-error').textContent=e.code==='human_decision_present'?'A person already decided this issue.':e.code==='triage_revision_conflict'?'Someone changed this decision meanwhile. Review the current decision and try again.':'The decision was not saved: '+e.message+'.';}
+  finally{busy=false;$('#triage-submit').disabled=false;}
+}
+// One recheck ID per submitted deployment; a retry after an uncertain response reuses it.
+const recheckKey='scout.pending-recheck';let recheck=null;
+function renderRecheck(value){
+  const root=$('#recheck-result');root.replaceChildren();if(!value)return;const c=value.counts;
+  root.append(make('p',`${value.complete?'Recheck finished':'Recheck running'} · ${value.candidate_origin}${value.deployment_ref?' · '+value.deployment_ref:''}`,'small'),
+    make('p',`${c.selected} open issue(s) · ${c.resolved} resolved · ${c.still_reproducible} still reproducible · ${c.blocked} blocked · ${c.inconclusive} inconclusive · ${c.pending} pending${c.skipped?` · ${c.skipped} not checkable`:''}${value.omitted_issues?` · ${value.omitted_issues} more not included`:''}`,'small muted'));
+  const ul=make('ul','', 'small');for(const item of value.items){const li=make('li');li.append(link(item.title||item.issue_id.slice(0,8),`/issues#${item.issue_id}`,''),make('span',' · '+(item.outcome?labels[item.outcome]||item.outcome:item.skipped_reason?'Not checkable: '+item.skipped_reason:item.status||'queued')));ul.append(li);}root.append(ul);
+}
+async function submitRecheck(event){
+  event.preventDefault();$('#recheck-error').textContent='';
+  let pending=null;try{pending=JSON.parse(sessionStorage.getItem(recheckKey)||'null');}catch{}
+  if(!pending){
+    const body={recheck_id:crypto.randomUUID(),candidate_url:$('#recheck-url').value.trim()};const source=$('#recheck-source').value.trim(),label=$('#recheck-ref').value.trim();
+    try{const u=new URL(body.candidate_url);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw new Error();}catch{$('#recheck-error').textContent='Enter an HTTP or HTTPS deployment URL without sign-in details.';return;}
+    if(source)body.source_origin=source;if(label)body.deployment_ref=label;pending=body;sessionStorage.setItem(recheckKey,JSON.stringify(pending));
+  }
+  $('#recheck-submit').disabled=true;
+  try{recheck=await api('/v1/rechecks',pending);sessionStorage.removeItem(recheckKey);renderRecheck(recheck);message(recheck.counts.selected?'Recheck queued. Each open issue gets its own fresh-browser check.':'No open issues were found for that site.');}
+  catch(e){$('#recheck-error').textContent=e.status>=500||e.message==='Connection lost'?'The recheck may not have started. Submit again to retry the same recheck.':'The recheck was not accepted: '+e.message+'.';if(e.status&&e.status<500)sessionStorage.removeItem(recheckKey);}
+  finally{$('#recheck-submit').disabled=false;}
+}
+async function refreshRecheck(){if(!recheck||recheck.complete)return;recheck=await api(`/v1/rechecks/${recheck.recheck_id}`);renderRecheck(recheck);}
 async function sessions(){
   const id=issueId,selected=draft?.issue_id===issueId?draft.session_id||'':$('#candidate-session').value,root=$('#candidate-session');root.replaceChildren();const first=make('option','Public access / matching saved source session');first.value='';root.append(first);
   try{const access=await api('/v1/browser-access');if(id!==issueId)return;for(const s of access.sessions||[]){if(s.revoked_at||new Date(s.expires_at)<=new Date())continue;const option=make('option',`${s.origin} · expires ${stamp(s.expires_at)}${s.execution_mode==='protocol_fixture'?' · test':''}`);option.value=s.session_id;option.dataset.origin=s.origin;root.append(option);}root.value=selected;}catch{/* Reading issues does not require private sign-in administration. */}
@@ -139,7 +186,7 @@ async function loadDetail(reset=true){
   let value;try{value=await api(`/v1/issues/${id}?limit=${pageLimit}`);}catch(e){if(!current())return;if(e.status!==413||pageLimit===1)throw e;pageLimit=1;value=await api(`/v1/issues/${id}?limit=1`);}if(!current())return;
   // A fresh snapshot replaces all history together. Never combine revisions.
   if(!reset&&detail&&detail.issue.revision===value.issue.revision){detail.usage=value.usage;const sourceUsage=$('#source-run-usage');if(sourceUsage)sourceUsage.textContent='Original exploration usage · '+usage(value.usage.source_run);let changed=false;for(const check of detail.verifications.items){const fresh=value.verifications.items.find(v=>v.verification_id===check.verification_id);if(fresh&&JSON.stringify(check)!==JSON.stringify(fresh)){Object.assign(check,fresh);changed=true;}}if(changed)renderHistory();return;}
-  detail=value;releaseImages();$('#issue-empty').hidden=true;$('#issue-detail').hidden=false;if(!detail.verifications.items.some(v=>v.verification_id===selectedVerification))selectedVerification=detail.verifications.items.find(v=>v.result)?.verification_id||'';renderOriginal();renderHistory();renderCandidate();if(changed)await sessions();
+  detail=value;releaseImages();$('#issue-empty').hidden=true;$('#issue-detail').hidden=false;if(!detail.verifications.items.some(v=>v.verification_id===selectedVerification))selectedVerification=detail.verifications.items.find(v=>v.result)?.verification_id||'';renderOriginal();renderTriage(changed);renderHistory();renderCandidate();if(changed)await sessions();
 }
 async function more(){
   if(!detail)return;
@@ -149,13 +196,14 @@ async function more(){
     for(const key of ['verifications','history','occurrences']){const idKey=key==='verifications'?'verification_id':key==='history'?'event_id':'action_id';const items=new Map(detail[key].items.map(item=>[item[idKey],item]));for(const item of page[key].items)items.set(item[idKey],item);detail[key]={...page[key],items:[...items.values()]};}renderHistory();
   }catch(e){if(issueId!==id||version!==detailVersion)return;if(e.status===409){message('Issue history changed. Loaded a fresh snapshot; load more again for earlier entries.');await loadDetail();}else message(e.message);}
 }
-async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
+async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();await refreshRecheck();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
 async function ready(){try{identity=await api('/v1/identity');$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message('Workspace issues · original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
 $('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('#issue-token').value;$('#issue-token').value='';sessionStorage.setItem('scout.workspace-token',token);await ready();});
 $('#issue-filter').addEventListener('submit',async e=>{e.preventDefault();offset=0;previousOffsets=[];try{await list();}catch(e){message(e.message);}});
 $('#issue-prev').addEventListener('click',async()=>{offset=previousOffsets.pop()??0;await list().catch(e=>message(e.message));});
 $('#issue-next').addEventListener('click',async()=>{if(nextOffset===null)return;previousOffsets.push(offset);offset=nextOffset;await list().catch(e=>message(e.message));});
 $('#verify-form').addEventListener('submit',submit);
+$('#triage-form').addEventListener('submit',submitTriage);$('#triage-decision').addEventListener('change',showDuplicate);$('#recheck-form').addEventListener('submit',submitRecheck);
 $('#verify-new').addEventListener('click',()=>{if(busy)return;draft=null;sessionStorage.removeItem(pendingKey(issueId));freezeDraft(false);$('#verify-error').textContent='';});
 $('#refresh-sessions').addEventListener('click',sessions);$('#issue-refresh').addEventListener('click',refresh);$('#history-more').addEventListener('click',more);
 window.addEventListener('hashchange',async()=>{await loadDetail().then(list).catch(e=>message(e.message));});window.addEventListener('pagehide',releaseImages);

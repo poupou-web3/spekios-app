@@ -175,7 +175,7 @@ export class Store {
       FROM automatic_reproduction_tasks t LEFT JOIN browser_jobs j ON j.job_id=t.child_job_id
       LEFT JOIN runtime_reproductions v ON v.source_action_id=t.source_action_id
       WHERE t.source_run_id=$1 OR j.run_id=$1 ORDER BY t.created_at,t.task_id`,[runId])).rows.map(row=>row.item);
-    const persistentIssues=(await this.query('SELECT to_jsonb(o)||jsonb_build_object(\'title\',i.snapshot->>\'title\') AS item FROM issue_occurrences o JOIN issues i USING(issue_id,workspace_id) WHERE o.run_id=$1',[runId])).rows.map(r=>r.item);
+    const persistentIssues=(await this.query('SELECT to_jsonb(o)||jsonb_build_object(\'title\',i.snapshot->>\'title\',\'triage\',scout_issue_triage(i.issue_id)) AS item FROM issue_occurrences o JOIN issues i USING(issue_id,workspace_id) WHERE o.run_id=$1',[runId])).rows.map(r=>r.item);
     const fixVerification=(await this.query('SELECT scout_verification_summary(v) AS item FROM issue_verifications v WHERE run_id=$1 AND workspace_id=$2',[runId,this.workspaceId])).rows[0]?.item??null;
     const steering=(await this.query('SELECT scout_steering_snapshot($1,0,32) AS item',[runId])).rows[0].item;
     return { schema_version: 1, steering, persistent_issues:persistentIssues,fix_verification:fixVerification, run, actions, captures, artifacts, events, graph, reproductions,automatic_reproductions:automaticReproductions,

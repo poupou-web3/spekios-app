@@ -118,6 +118,13 @@ pub fn router(state: AppState) -> Router {
             "/v1/issue-verifications/{verification_id}",
             get(issues::verification),
         )
+        .route(
+            "/v1/issues/{issue_id}/triage",
+            axum::routing::post(issues::triage),
+        )
+        .route("/v1/knowledge", get(issues::knowledge))
+        .route("/v1/rechecks", axum::routing::post(issues::recheck))
+        .route("/v1/rechecks/{recheck_id}", get(issues::recheck_status))
         .route("/v1/history/sessions", get(history::list))
         .route("/v1/history/domain", get(history::summary))
         .route("/v1/identity", get(identity::whoami))
@@ -640,6 +647,9 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
             "action_completion":{"version":"action-completion-v1","timeout_ms":5000,"sampled_frames":true,"network_and_console_evidence":true}},
         "active_run_steering":{"enabled":state.jobs.is_some(),"version":"focus-v1","application_boundary":"next_planning_decision","max_messages":32,"max_focus_characters":2000,"replay_steering":false},
         "persistent_issues":{"enabled":true,"stable_ids":true,"candidate_verification":true,"outcomes":["resolved","still_reproducible","blocked","inconclusive"],"global_fix_claim":false},
+        "issue_triage":{"enabled":true,"decisions":issues::TRIAGE_DECISIONS,"actors":["human","agent","system"],"agent_overrides_human":false,"append_only":true,
+            "known_behavior_matching":"page_control_viewport_sign_in","suppression":"recorded_and_labelled_never_dropped"},
+        "deployment_recheck":{"enabled":state.jobs.is_some(),"max_issues":issues::MAX_RECHECK_ISSUES,"includes":["untriaged","needs_review","bug"],"ci_script":"scripts/scout-recheck.mjs","schedules":false},
         "suspect_reproduction":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"fresh_browser":true,"attempts_per_source_action":1,"automatic_confirmation":false},
         "automatic_reproduction":{"enabled":state.jobs.is_some(),"opt_in":true,"recursive":false,"automatic_confirmation":false,"max_cases":effective_settings["maxAutoReproductions"],"max_replay_actions":effective_settings["maxAutoReplayActions"],"durable_cancellation":true},
         "exploration_settings":{"editable":state.jobs.is_some(),"revision":effective_settings["settingsRevision"],"origins_editable":false,"credentials_editable":false},

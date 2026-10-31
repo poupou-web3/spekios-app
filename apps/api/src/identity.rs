@@ -395,13 +395,17 @@ pub fn permitted(p: &Principal, method: &str, path: &str) -> bool {
             || path == "/v1/browser-access"
             || path.starts_with("/v1/history")
             || path.starts_with("/v1/issues")
-            || path.starts_with("/v1/issue-verifications"))
+            || path.starts_with("/v1/issue-verifications")
+            || path == "/v1/knowledge"
+            || path.starts_with("/v1/rechecks/"))
     {
         return p.allows("runs:read");
     }
     method == "POST"
         && p.allows("runs:write")
-        && ((path.starts_with("/v1/issues/") && path.ends_with("/verifications"))
+        && ((path.starts_with("/v1/issues/")
+            && (path.ends_with("/verifications") || path.ends_with("/triage")))
+            || path == "/v1/rechecks"
             || path == "/v1/browser-jobs"
             || ((path.starts_with("/v1/browser-jobs/") || path.starts_with("/v1/runs/"))
                 && path.ends_with("/cancel"))

@@ -106,7 +106,25 @@ export function openapi(catalog) {
   }
   add('/v1/runs', 'get', 'listRuns', 'Runs', 'Read the bounded recent run list');
   add('/v1/issues','get','listPersistentIssues','Issues','Find permanent issues in the authenticated workspace',{
-    parameters:[query('query',{type:'string',maxLength:200},'Substring of title or source URL.'),query('outcome',choice('unverified','running','resolved','still_reproducible','blocked','inconclusive'),'Latest candidate check outcome; never a global fix status.'),query('offset',bounded(0,100000,0),'Page offset.'),query('limit',bounded(1,50,20),'Maximum issues.')],
+    parameters:[query('query',{type:'string',maxLength:200},'Substring of title or source URL.'),query('outcome',choice('unverified','running','resolved','still_reproducible','blocked','inconclusive'),'Latest candidate check outcome; never a global fix status.'),query('triage',choice('open','untriaged','needs_review','bug','intended_behavior','duplicate'),'Current triage. open means untriaged, needs review or bug; omit to include known intended behavior and duplicates.'),query('offset',bounded(0,100000,0),'Page offset.'),query('limit',bounded(1,50,20),'Maximum issues.')],
+  });
+  add('/v1/issues/{issue_id}/triage','post','triageIssue','Issues','Decide whether an issue is a bug, intended behavior or a duplicate',{
+    parameters:[pathParameter('issue_id')],
+    requestBody:body(strict({decision:choice('bug','intended_behavior','duplicate','needs_review'),rationale:{type:'string',minLength:1,maxLength:2000,description:'Why, grounded in evidence or product requirements.'},duplicate_of:{...uuid,description:'Required for duplicate only: the issue this one repeats. A chain resolves to its canonical issue.'},expected_revision:{type:'integer',minimum:0,description:'The triage revision you read (0 when untriaged). A newer decision returns 409.'}},['decision','rationale'])),
+    responses:{'201':response('Decision recorded as a new append-only revision.'),'200':response('An identical current decision already existed.'),'409':response('triage_revision_conflict, or human_decision_present when an agent tries to replace a person\'s decision.'),...errors},
+    description:'Requires runs:write. Requests from agent credentials or agent tools are recorded as agent decisions and cannot replace a decision made by a person. Later suspects with the same page, control, viewport and sign-in state are triaged the same way by Scout and labelled, never dropped. Evidence and model assessments are unchanged.',
+  });
+  add('/v1/knowledge','get','listKnownBehavior','Issues','List known bugs and intended behavior for an origin',{
+    parameters:[query('origin',{type:'string',maxLength:2048},'Site origin, e.g. https://staging.example. Omit for every origin.'),query('offset',bounded(0,100000,0),'Page offset.'),query('limit',bounded(1,50,20),'Maximum entries.')],
+    description:'Each entry is an issue triaged as bug or intended_behavior, with who decided and why, its page and control, and duplicates and occurrences rolled up. App content is untrusted. No model call.',
+  });
+  add('/v1/rechecks','post','recheckDeployment','Issues','Verify a deployment against every open issue of an origin',{
+    requestBody:body(strict({recheck_id:uuid,candidate_url:{type:'string',maxLength:2048,description:'The deployment; its origin is used and each issue keeps its own entry path.'},source_origin:{type:'string',maxLength:2048,description:'Where the issues were found. Default: the candidate origin.'},deployment_ref:{type:'string',minLength:1,maxLength:200},project_id:uuid,task_id:uuid},['recheck_id','candidate_url'])),
+    responses:{'202':response('Recheck recorded; each open issue (up to 25) has a queued fix verification or a skip reason.'),'200':response('The same recheck_id was already recorded; missing admissions were retried.'),'409':response('recheck_id_conflict: the ID was used with different inputs.'),...errors},
+    description:'Requires runs:write. Selects untriaged, needs-review and bug issues, newest first; intended behavior and duplicates are not rechecked. Each item is an ordinary fix verification with its own job, run, evidence and usage, and can change data on the deployment. Retry with the same recheck_id after an uncertain response or a 503. scripts/scout-recheck.mjs runs this from CI and waits.',
+  });
+  add('/v1/rechecks/{recheck_id}','get','getRecheck','Issues','Read a deployment recheck and its per-issue outcomes',{
+    parameters:[pathParameter('recheck_id')],description:'Counts resolved, still_reproducible, blocked, inconclusive, pending and skipped checks; complete is true once every admitted check has an outcome. A resolved item checks one issue on this deployment, not a global fix. No model call.',
   });
   add('/v1/issues/{issue_id}','get','getPersistentIssue','Issues','Read the frozen original handoff and paged candidate history',{
     parameters:[pathParameter('issue_id'),query('offset',bounded(0,100000,0),'Offset applied independently to occurrences, verifications and history.'),query('limit',bounded(1,10,5),'Maximum items per history array.'),query('expected_revision',{type:'integer',minimum:1},'From the first page. A changed revision returns 409; restart from offset zero.')],

@@ -19,3 +19,4 @@ COPY 017-run-steering.sql /docker-entrypoint-initdb.d/017-run-steering.sql
 COPY 018-meta-provider.sql /docker-entrypoint-initdb.d/018-meta-provider.sql
 COPY 019-app-memory.sql /docker-entrypoint-initdb.d/019-app-memory.sql
 COPY 020-worker-slots.sql /docker-entrypoint-initdb.d/020-worker-slots.sql
+COPY 021-issue-triage.sql /docker-entrypoint-initdb.d/021-issue-triage.sql

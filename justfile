@@ -177,6 +177,10 @@ reproduce action_id: build-recorder
 explorer-test:
     bash scripts/test-explorer.sh
 
+# Recheck every open issue against a deployment and wait; exits non-zero on regressions (CI-friendly).
+recheck candidate_url:
+    node scripts/scout-recheck.mjs --candidate "$1"
+
 # Browser sandbox: no Scout credentials or storage network, Chromium sandbox on, one run per container.
 isolation-test:
     bash scripts/test-browser-isolation.sh

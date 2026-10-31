@@ -583,6 +583,28 @@ fn step(action: &Value) -> Value {
         "ai_verdict":action["assessment"]["verdict"],
         "full_action":tool_call("scout_get_action",json!({"run_id":action["run_id"],"action_id":action["action_id"]}))})
 }
+/// The persistent issue an action was registered as, with its current triage.
+fn persistent_issue<'a>(report: &'a Value, action: &Value) -> Option<&'a Value> {
+    list(&report["persistent_issues"])
+        .iter()
+        .find(|item| item["action_id"] == action["action_id"])
+}
+/// Known behavior is recorded like any finding but is not new work: intended
+/// behavior, or a duplicate of an issue that is already tracked.
+fn known_behavior(triage: &Value) -> bool {
+    matches!(
+        triage["decision"].as_str(),
+        Some("intended_behavior" | "duplicate")
+    )
+}
+fn triage_view(triage: &Value) -> Value {
+    if triage.is_null() {
+        return json!({"status":"untriaged","known_behavior":false,"decide_tool":"scout_triage_issue"});
+    }
+    json!({"status":triage["decision"],"known_behavior":known_behavior(triage),"decided_by":triage["actor"],"agent_id":triage["agent_id"],
+        "rationale":text(&triage["rationale"],600),"duplicate_of":triage["duplicate_of"],"matched_issue_id":triage["matched_issue_id"],
+        "revision":triage["revision"],"decided_at":triage["created_at"],"decide_tool":"scout_triage_issue"})
+}
 pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
     let run = &report["run"];
     let prediction = &action["spec"]["prediction"];
@@ -690,8 +712,13 @@ pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
         .filter(|r| r["source_action_id"] == source_id)
         .map(reproduction_summary)
         .collect();
+    let triage = persistent_issue(report, action)
+        .map(|item| item["triage"].clone())
+        .unwrap_or(Value::Null);
+    let known = known_behavior(&triage);
     let repair = if kind == "suspected_bug"
         && review.is_none_or(|r| r["disposition"] != "dismissed")
+        && triage["decision"] != "intended_behavior"
     {
         json!({"target_behavior":expected,"basis":prediction["source"],
             "requires_product_validation":review.is_none_or(|r|r["disposition"]!="confirmed"),
@@ -699,9 +726,7 @@ pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
     } else {
         Value::Null
     };
-    let persistent = list(&report["persistent_issues"])
-        .iter()
-        .find(|item| item["action_id"] == action["action_id"])
+    let persistent = persistent_issue(report, action)
         .map(|item| item["issue_id"].clone())
         .or_else(|| {
             (run["config"]["replay_of"]["source_action_id"]
@@ -738,8 +763,9 @@ pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
           "completion":artifact_ref(report,&action["outcome"]["completion_artifact"]),
           "diagnostics":artifact_ref(report,&action["outcome"]["diagnostics_artifact"]),"gaps":gaps},
         "human_review":review.map(|r|fields(r,&["review_id","action_id","revision","disposition","severity","rationale","expectation_basis","created_at"])),
+        "triage":triage_view(&triage),
         "finding_source":{"run_id":if is_replay{run["config"]["replay_of"]["source_run_id"].clone()}else{run["run_id"].clone()},
-          "action_id":source_id,"is_replay_observation":is_replay,"creates_new_finding":!is_replay&&kind=="suspected_bug"},
+          "action_id":source_id,"is_replay_observation":is_replay,"creates_new_finding":!is_replay&&kind=="suspected_bug"&&!known},
         "verification":{"start_tool":if persistent.is_some(){"scout_verify_fix"}else{"scout_start_exploration"},"issue_id":persistent,"target_url":run["target_url"],"viewport_profile":run["config"]["viewport_profile"],
           "issue_history":persistent.as_ref().map(|id|tool_call("scout_get_issue",json!({"issue_id":id}))),
           "candidate_url_required":persistent.is_some(),"verification_id_required":persistent.is_some(),"scope":"recorded_behavior_on_one_candidate_deployment",
@@ -748,6 +774,23 @@ pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
         "training_approval":false,"untrusted_app_content":true})
 }
 
+/// Suspected bugs split by what is already known about them.
+fn triage_totals(report: &Value, actions: &[&Value]) -> Value {
+    let mut totals = json!({"new":0,"needs_review":0,"bug":0,"intended_behavior":0,"duplicate":0});
+    for action in actions
+        .iter()
+        .filter(|a| category(a) == Some("suspected_bug"))
+    {
+        let key = match persistent_issue(report, action).map(|item| &item["triage"]["decision"]) {
+            Some(Value::String(decision)) => decision.as_str(),
+            _ => "new",
+        };
+        if let Some(count) = totals.get_mut(key) {
+            *count = json!(count.as_u64().unwrap_or(0) + 1);
+        }
+    }
+    totals
+}
 fn build_report(report: &Value, progress: Option<Value>, options: &ReportQuery) -> Value {
     // Focus history is already included at the report root. Repeating an eight
     // message Unicode page inside progress can exceed the MCP response budget.
@@ -800,6 +843,7 @@ fn build_report(report: &Value, progress: Option<Value>, options: &ReportQuery) 
       "summary":{"actions_recorded":actions.len(),"assessed_actions":actions.iter().filter(|a|!a["assessment"].is_null()).count(),
         "no_issue_observed_actions":actions.iter().filter(|a|a["assessment"]["verdict"]=="no_issue_observed").count(),
         "categories":totals,"stop_reason":run["config"]["stop_reason"],"total_items":categorized.len(),
+        "triage":triage_totals(report,&actions),
         "execution_issue_count":execution_issues.len()},
       "execution_issues":execution_issues,
       "progress":progress,"steering":steering_summary(&report["steering"]),"usage":report["model_usage"],"fix_verification":report["fix_verification"],
@@ -962,6 +1006,16 @@ fn markdown(report: &Value) -> String {
             "\nHuman disposition: {}",
             literal(&issue["human_review"]["disposition"], 40)
         ));
+        lines.push(format!(
+            "Triage: {} (decided by {}){}",
+            literal(&issue["triage"]["status"], 40),
+            literal(&issue["triage"]["decided_by"], 20),
+            if issue["triage"]["known_behavior"] == true {
+                " · known behavior, not a new finding"
+            } else {
+                ""
+            }
+        ));
         for check in list(&issue["reproduction"]["fresh_checks"]) {
             lines.push(format!(
                 "Fresh reproduction: {} · Replay run: {}",
@@ -979,7 +1033,11 @@ fn markdown(report: &Value) -> String {
             "\nCode search clues: {}",
             literal(&issue["investigation"]["search_terms"], 1200)
         ));
-        lines.push("Deploy the candidate fix and start a new run to regression-test it; a historical reproduction does not validate a later change.".into());
+        if issue["triage"]["known_behavior"] == true {
+            lines.push("Known behavior: no fix is requested. Change the triage with scout_triage_issue if this is wrong.".into());
+        } else {
+            lines.push("Deploy the candidate fix and start a new run to regression-test it; a historical reproduction does not validate a later change.".into());
+        }
     }
     lines.push(format!(
         "\nReturned {} of {} matching observations. Follow pagination.next_offset when present.",

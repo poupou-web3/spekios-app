@@ -186,6 +186,38 @@ pub struct Submission {
     issue_id: Option<Uuid>,
     #[serde(default)]
     deployment_ref: Option<String>,
+    /// Never deserialized: only a recheck admits more than the ordinary queue.
+    #[serde(skip)]
+    queue_limit: Option<i64>,
+}
+impl Submission {
+    /// One issue of a deployment recheck, admitted like any fix verification.
+    pub(crate) fn recheck_item(
+        job_id: Uuid,
+        issue_id: Uuid,
+        target_url: String,
+        deployment_ref: Option<String>,
+        project_id: Option<Uuid>,
+        task_id: Option<Uuid>,
+        queue_limit: i64,
+    ) -> Self {
+        Self {
+            job_id,
+            project_id,
+            task_id,
+            kind: "verify_fix".into(),
+            target_url: Some(target_url),
+            source_action_id: None,
+            viewport_profile: None,
+            auth_mode: None,
+            session_id: None,
+            auto_reproduce: None,
+            app_memory: None,
+            issue_id: Some(issue_id),
+            deployment_ref,
+            queue_limit: Some(queue_limit),
+        }
+    }
 }
 
 fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
@@ -245,7 +277,7 @@ fn public_https_origin(url: &reqwest::Url) -> bool {
     })
 }
 
-fn target(value: &str, allowed: &[String]) -> Result<String, &'static str> {
+pub(crate) fn target(value: &str, allowed: &[String]) -> Result<String, &'static str> {
     let url = reqwest::Url::parse(value).map_err(|_| "invalid_target_url")?;
     if value.len() > 2048
         || !matches!(url.scheme(), "http" | "https")
@@ -398,6 +430,24 @@ impl Queue {
     }
     /// Delete one remembered app scope. Run evidence is untouched. A scope
     /// that an active run is still writing cannot be forgotten until it ends.
+    /// One statement returning JSON, run on the queue's writable connection.
+    /// The shared read connection is read-only.
+    pub(crate) async fn write_json(
+        &self,
+        sql: &str,
+        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+    ) -> Result<Option<Value>, &'static str> {
+        let db = self.db.lock().await;
+        let row = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            db.query_opt(sql, params),
+        )
+        .await
+        .map_err(|_| "database_unavailable")?
+        .map_err(|_| "database_unavailable")?;
+        Ok(row.map(|row| row.get::<_, Value>(0)))
+    }
+
     pub async fn forget_memory(&self, scope_id: Uuid) -> Result<Value, &'static str> {
         let mut db = self.db.lock().await;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
@@ -646,7 +696,11 @@ impl Queue {
         })
     }
 
-    async fn admit(&self, input: Submission, providers: Value) -> Result<Value, &'static str> {
+    pub(crate) async fn admit(
+        &self,
+        input: Submission,
+        providers: Value,
+    ) -> Result<Value, &'static str> {
         let mut db = self.db.lock().await;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // Serialize admission across API instances, including the queue limit.
@@ -732,7 +786,7 @@ impl Queue {
         if let Some(id) = input.source_action_id
             && tx.query_opt("SELECT 1 FROM runtime_actions a JOIN runtime_runs r USING(run_id) WHERE a.action_id=$1 AND r.workspace_id=$2 AND r.user_id=$3 AND r.lifecycle<>'active' AND a.state='completed' AND a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND COALESCE(r.config->>'replay_of','')=''", &[&id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.is_none() { return Err("source_is_not_an_eligible_suspect"); }
         let count: i64 = tx.query_one("SELECT count(*) FROM browser_jobs WHERE workspace_id=$1 AND status IN ('queued','running')", &[&self.principal.workspace_id]).await.map_err(|_|"database_unavailable")?.get(0);
-        if count >= 10 {
+        if count >= input.queue_limit.unwrap_or(10) {
             return Err("browser_queue_full");
         }
         let mode = if providers["test_mode"] == true {
