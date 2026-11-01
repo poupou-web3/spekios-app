@@ -46,8 +46,51 @@ export function controlAction(control: ObservedControl, value?: unknown): Contro
   throw new Error('Interaction type does not match the observed control.');
 }
 
+const TYPE_MISMATCH = 'Interaction type does not match the observed control.';
+const TYPE_REQUIRED = 'A typed interaction is required for this control.';
+
+// One safe action for this control when a proposal names the wrong type.
+// Submit is only returned when this control already permits that exact submit.
+export function fallbackAction(control: ObservedControl): ControlAction | null {
+  const attempt = (value: unknown) => { try { return controlAction(control, value); } catch { return null; } };
+  switch (control.role) {
+    case 'button': return attempt({type:'submit'}) ?? attempt({type:'click'});
+    case 'link': return attempt({type:'click'});
+    case 'checkbox': return attempt({type:'set_checked', checked: control.checked !== true});
+    case 'radio': return attempt({type:'set_checked', checked: true});
+    case 'scroll': return attempt({type:'scroll'});
+    case 'combobox': {
+      const option = control.options?.find(item => !item.disabled && !actionRisk(item.label + ' ' + item.value));
+      return option ? attempt({type:'select', value: option.value}) : null;
+    }
+    case 'textbox':
+    case 'searchbox': return attempt({type:'fill', value:'sample'.slice(0, Math.min(500, control.max_length ?? 500))});
+    default: return null;
+  }
+}
+
+// Keep a proposal that names the wrong type by substituting that fallback.
+// Ill-formed proposals and actions the control does not permit stay rejected.
+export function resolveAction(control: ObservedControl, proposed?: unknown): ControlAction | null {
+  try { return controlAction(control, proposed); }
+  catch (error) {
+    const reason = error instanceof Error ? error.message : '';
+    if (reason === 'Interaction has unsupported fields.') throw error;
+    if (reason !== TYPE_MISMATCH && reason !== TYPE_REQUIRED) return null;
+    return fallbackAction(control);
+  }
+}
+
 export function commandFor(control: ObservedControl, action?: unknown): BrowserCommand {
   return {...controlAction(control,action),control};
+}
+
+// A selected action that no longer fits the live control becomes its fallback,
+// or nothing when no safe action remains. Callers skip that control and continue.
+export function plannedCommand(control: ObservedControl | undefined, action?: unknown): BrowserCommand | null {
+  if (!control) return null;
+  const resolved = resolveAction(control, action);
+  return resolved ? commandFor(control, resolved) : null;
 }
 export function commandAction(command: Exclude<BrowserCommand,{type:'navigate'}>): ControlAction {
   const {control:_control,...action}=command;

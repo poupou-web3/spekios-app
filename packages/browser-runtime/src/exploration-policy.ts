@@ -3,7 +3,7 @@ import type { Page } from 'playwright';
 import { getDomain } from 'tldts';
 import { hash, jsonBytes } from './store.js';
 import type { Capture, ControlAction, ObservedControl } from './contracts.js';
-import { actionRisk, controlAction } from './interaction-contract.js';
+import { actionRisk, resolveAction } from './interaction-contract.js';
 import { authorizeForm, testFormRules, type TestFormRule } from './form-policy.js';
 
 function publicHostname(hostname: string): boolean {
@@ -359,17 +359,20 @@ export function parsePlan(value: unknown, allowed: ObservedControl[]): Plan {
   const o = object(value, ['candidates', 'stop_reason']);
   if (!Array.isArray(o.candidates) || o.candidates.length > 8) throw new Error('Expected at most eight ranked candidates.');
   const seen = new Set<string>();
-  const candidates = o.candidates.map(value => {
+  const candidates = o.candidates.flatMap(value => {
     const hasAction=!!value && typeof value==='object' && Object.hasOwn(value,'action');
     const candidate = object(value, ['control_id', 'goal', 'expected_result', 'likelihood',...(hasAction?['action']:[])]);
     const controlId = text(candidate.control_id, 24);
     if (!allowed.some(control => control.control_id === controlId) || seen.has(controlId)) throw new Error('Model selected an unobserved, blocked, or already attempted control.');
     seen.add(controlId);
     if (typeof candidate.likelihood !== 'number' || !Number.isFinite(candidate.likelihood) || candidate.likelihood < 0 || candidate.likelihood > 1) throw new Error('Invalid likelihood.');
-    const action=controlAction(allowed.find(control=>control.control_id===controlId)!,candidate.action);
-    return { control_id: controlId, goal: text(candidate.goal, 300), expected_result: text(candidate.expected_result), likelihood: candidate.likelihood, action };
+    // A wrong action type uses a safe action for this control. An action the
+    // control does not permit is dropped so the rest of the plan can proceed.
+    const action=resolveAction(allowed.find(control=>control.control_id===controlId)!,candidate.action);
+    return action ? [{ control_id: controlId, goal: text(candidate.goal, 300), expected_result: text(candidate.expected_result), likelihood: candidate.likelihood, action }] : [];
   }).sort((a, b) => b.likelihood - a.likelihood);
   if (candidates.length && o.stop_reason !== null) throw new Error('An actionable plan cannot also stop.');
+  if (!candidates.length && o.stop_reason === null && o.candidates.length) return { candidates, stop_reason: 'No proposed action matched an observed control.' };
   return { candidates, stop_reason: candidates.length ? null : text(o.stop_reason) };
 }
 export function parsePrediction(value: unknown) {

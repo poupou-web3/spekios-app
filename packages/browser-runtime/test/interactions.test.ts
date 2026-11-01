@@ -5,7 +5,7 @@ import { explore, reproduce } from '../src/explorer.js';
 import { ModelClient } from '../src/model-client.js';
 import { explorationFixture } from '../src/exploration-fixture.js';
 import { parsePlan, stateFingerprint } from '../src/exploration-policy.js';
-import { controlAction, commandKey } from '../src/interaction-contract.js';
+import { controlAction, commandKey, plannedCommand, resolveAction } from '../src/interaction-contract.js';
 import type { Capture, ObservedControl } from '../src/contracts.js';
 import { controlContext } from '../src/model-context.js';
 
@@ -24,6 +24,23 @@ test('interaction proposals enforce exact types, bounded text and observed optio
   const candidate={control_id:field.control_id,goal:'Filter results',expected_result:'Query changes',likelihood:.8,action:{type:'fill',value:'notebook'}};
   assert.equal(parsePlan({candidates:[candidate],stop_reason:null},[field]).candidates[0].action?.type,'fill');
   assert.throws(()=>parsePlan({candidates:[{...candidate,action:{type:'fill',value:'abc',execute_shell:'bad'}}],stop_reason:null},[field]));
+  const button={...field,role:'button' as const,control_id:'b'.repeat(24),name:'Save'};
+  const box={...field,role:'checkbox' as const,control_id:'c'.repeat(24),name:'In stock',checked:false};
+  const menu={...field,role:'combobox' as const,control_id:'d'.repeat(24),name:'Category',options:[{value:'books',label:'Books',disabled:false}]};
+  const mismatched=parsePlan({candidates:[
+    {control_id:field.control_id,goal:'Search',expected_result:'Results',likelihood:.4,action:{type:'click'}},
+    {control_id:box.control_id,goal:'Filter',expected_result:'Checked',likelihood:.5,action:{type:'click'}},
+    {control_id:button.control_id,goal:'Save',expected_result:'Saved',likelihood:.9,action:{type:'click'}},
+    {control_id:menu.control_id,goal:'Category',expected_result:'Books',likelihood:.99,action:{type:'select',value:'invented'}},
+  ],stop_reason:null},[field,box,button,menu]);
+  assert.deepEqual(mismatched.candidates.map(item=>item.action),[
+    {type:'click'},{type:'set_checked',checked:true},{type:'fill',value:'sample'}]);
+  assert.equal(mismatched.stop_reason,null);
+  assert.deepEqual(resolveAction({...field,max_length:4},{type:'click'}),{type:'fill',value:'samp'});
+  assert.equal(plannedCommand(menu,{type:'select',value:'invented'}),null);
+  const submit={...button,name:'Search',submits_form:true,form:{action:'https://app.test/search',method:'get',target:'',search:true,unsafe:false,authorization:'search' as const,signature:'s'}};
+  assert.deepEqual(parsePlan({candidates:[{control_id:submit.control_id,goal:'Search',expected_result:'Results',likelihood:.9,action:{type:'click'}}],stop_reason:null},[submit]),
+    {candidates:[],stop_reason:'No proposed action matched an observed control.'});
   assert.notEqual(commandKey({type:'fill',control:field,value:'one'}),commandKey({type:'fill',control:field,value:'two'}));
 });
 
