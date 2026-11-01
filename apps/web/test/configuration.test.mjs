@@ -138,12 +138,12 @@ test('app memory is a saved default that can be turned off, and remembered scope
   assert.match(ui.memoryPanel(),/Loading app memory/);
   ui.state.memory={scopes:[]};assert.match(ui.memoryPanel(),/No app memory yet/);
   ui.state.memory={scopes:[{scope_id:'00000000-0000-4000-8000-000000000009',origin:'https://app.test/<x>',viewport_profile:'mobile',auth_scope:'signed_in',execution_mode:'live',runs:2,pages:3,tried_controls:4,untried_controls:5,updated_at:'2026-10-30T10:00:00Z',in_use:false},
-    {scope_id:'00000000-0000-4000-8000-000000000010',origin:'https://busy.test',viewport_profile:'desktop',auth_scope:'public',execution_mode:'protocol_fixture',runs:1,pages:1,tried_controls:0,untried_controls:1,updated_at:'2026-10-30T10:00:00Z',in_use:true}]};
+    {scope_id:'00000000-0000-4000-8000-000000000010',origin:'https://busy.test',viewport_profile:'desktop',viewport:{width:1920,height:1080},auth_scope:'public',execution_mode:'protocol_fixture',runs:1,pages:1,tried_controls:0,untried_controls:1,updated_at:'2026-10-30T10:00:00Z',in_use:true}]};
   const html=ui.memoryPanel();
   assert.match(html,/https:\/\/app.test\/&lt;x&gt;/);assert.doesNotMatch(html,/<x>/);
   assert.match(html,/mobile · signed in · 2 runs · 3 pages · 4 tried \/ 5 untried controls/);
   assert.match(html,/data-action="forget-memory"[^>]*data-id="00000000-0000-4000-8000-000000000009"/);
-  assert.match(html,/Test data · desktop · public · 1 run ·/);
+  assert.match(html,/Test data · desktop 1920 × 1080 · public · 1 run ·/);
   assert.match(html,/In use by a running test/);assert.equal((html.match(/forget-memory/g)||[]).length,1,'A scope in use cannot be forgotten.');
   assert.match(html,/recorded runs and evidence stay/);
 });

@@ -86,7 +86,7 @@ Exact states include the scroll position, which controls are in the viewport, an
 
 ## Memory across runs
 
-With memory on (the default for live queued jobs and live `just explore` runs; simulated-model jobs use it only when they explicitly set `app_memory: true`, so fixture verification never depends on earlier test runs; library callers opt in with `appMemory: true`), each run reads a snapshot of what earlier runs of the same app learned and records what it observes. A memory **scope** is one workspace user, origin, viewport profile, sign-in state (public or signed in) and execution mode, so desktop, mobile, signed-in and simulated-model runs never share memory.
+With memory on (the default for live queued jobs and live `just explore` runs; simulated-model jobs use it only when they explicitly set `app_memory: true`, so fixture verification never depends on earlier test runs; library callers opt in with `appMemory: true`), each run reads a snapshot of what earlier runs of the same app learned and records what it observes. A memory **scope** is one workspace user, origin, viewport profile and its size in pixels, sign-in state (public or signed in) and execution mode, so desktop, mobile, signed-in and simulated-model runs never share memory. Desktop memory recorded at the earlier 800 × 600 size stays in its own scope, apart from runs at 1920 × 1080.
 
 Memory is keyed by the observed page URL and the stable control identity (URL, role, name and link). Exact screenshot states are never compared across runs, and memory is never treated as evidence. For each page it keeps the title, how many runs saw it, its best discovery path score and whether its control list was truncated; for each control, how often earlier runs tried it, the best model score it received, its last assessment and a short observed result. Screenshots, field values and credentials are not stored. Writes share the transaction that records the corresponding evidence.
 
@@ -114,7 +114,7 @@ Explorations have no default limit. Users set optional limits on dispatched acti
 
 | Profile | Chromium viewport |
 | --- | --- |
-| `desktop` | 800 × 600 |
+| `desktop` (default) | 1920 × 1080 |
 | `tablet` | 768 × 1024 |
 | `mobile` | 390 × 844 |
 

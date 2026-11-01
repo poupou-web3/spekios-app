@@ -275,7 +275,7 @@ test('model-driven browser loop preserves evidence, graph and uncertainty', {
       assert.ok(old.priority<choice.selected.priority);
     });
     await t.test('desktop tablet and mobile each observe their own responsive controls and capture geometry',async()=>{
-      for(const [profile,label,width,height] of [['desktop','Desktop navigation',800,600],['tablet','Tablet navigation',768,1024],['mobile','Mobile navigation',390,844]] as const){
+      for(const [profile,label,width,height] of [['desktop','Desktop navigation',1920,1080],['tablet','Tablet navigation',768,1024],['mobile','Mobile navigation',390,844]] as const){
         const result=await run('/responsive',{viewportProfile:profile});
         assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
         assert.equal(result.report.run.config.viewport_profile,profile);

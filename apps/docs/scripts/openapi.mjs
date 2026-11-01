@@ -198,7 +198,7 @@ export function openapi(catalog) {
   });
   add('/v1/model-requests/{request_id}', 'get', 'getModelRequest', 'Models', 'Read recorded model request and attempts', { parameters: [pathParameter('request_id')] });
   add('/v1/app-memory', 'get', 'listAppMemory', 'Settings', 'List remembered app scopes from earlier explorations', {
-    description: 'One scope per origin, viewport profile, sign-in state and execution mode, newest first (at most 100). Counts pages, tried/untried controls, map states, transitions and depth. Memory is derived from runs; it never contains screenshots or field values.',
+    description: 'One scope per origin, viewport profile and size, sign-in state and execution mode, newest first (at most 100). Counts pages, tried/untried controls, map states, transitions and depth. Memory is derived from runs; it never contains screenshots or field values.',
   });
   add('/v1/app-memory/{scope_id}/map', 'get', 'getAppMap', 'Settings', 'Read the app map carried between runs for one scope', {
     parameters: [pathParameter('scope_id'), query('offset', bounded(0,100000,0), 'States to skip, ordered by depth then page template.'), query('limit', bounded(1,100,20), 'Maximum states.')],

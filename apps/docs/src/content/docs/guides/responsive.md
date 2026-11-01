@@ -12,7 +12,7 @@ Scout records each viewport exploration separately. Select a profile in the URL 
 
 | Profile | Viewport in CSS pixels |
 | --- | --- |
-| Desktop | 800 × 600 |
+| Desktop (default) | 1920 × 1080 |
 | Tablet | 768 × 1024 |
 | Mobile | 390 × 844 |
 

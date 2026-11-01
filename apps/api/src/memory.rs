@@ -17,6 +17,7 @@ const MAX_RESPONSE: usize = 128 * 1024;
 pub async fn list(ScopedState(state): ScopedState) -> Response {
     let sql = "SELECT jsonb_build_object('scopes',COALESCE(jsonb_agg(item ORDER BY updated_at DESC,scope_id),'[]'::jsonb),'limit',100) FROM (
       SELECT s.updated_at,s.scope_id,jsonb_build_object('scope_id',s.scope_id,'origin',s.origin,'viewport_profile',s.viewport_profile,
+        'viewport',jsonb_build_object('width',s.viewport_width,'height',s.viewport_height),
         'auth_scope',s.auth_scope,'execution_mode',s.execution_mode,'runs',s.runs,'last_run_id',s.last_run_id,
         'created_at',s.created_at,'updated_at',s.updated_at,
         'pages',(SELECT count(*) FROM app_memory_pages p WHERE p.scope_id=s.scope_id),

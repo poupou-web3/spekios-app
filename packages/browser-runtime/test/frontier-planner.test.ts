@@ -211,7 +211,7 @@ function memory(pages: { url: string; path?: number; truncated?: boolean }[], co
     last_verdict: null, last_observed_result: null, blocked_reason: null, ...c }) as RememberedControl);
   const byPage = new Map<string, RememberedControl[]>();
   for (const c of remembered) byPage.set(c.url, [...(byPage.get(c.url) ?? []), c]);
-  return { version: MEMORY_VERSION, scope_id: 'scope', scope: { origin: 'http://app', viewport_profile: 'desktop', auth_scope: 'public', execution_mode: 'protocol_fixture' },
+  return { version: MEMORY_VERSION, scope_id: 'scope', scope: { origin: 'http://app', viewport_profile: 'desktop', viewport: { width: 1920, height: 1080 }, auth_scope: 'public', execution_mode: 'protocol_fixture' },
     prior_runs: priorRuns, truncated: false, controls: new Map(remembered.map(c => [c.control_id, c])), by_page: byPage,
     pages: new Map(pages.map(p => [p.url, { url: p.url, title: p.url, visits: 1, best_path_score: p.path ?? null, controls_truncated: p.truncated ?? false, last_run_id: 'earlier-run', last_action_id: 'earlier-action' }])) };
 }

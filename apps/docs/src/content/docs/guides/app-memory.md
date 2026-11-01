@@ -18,7 +18,7 @@ Every action still has a fresh prediction, before and after screenshots and an a
 
 ## What is remembered
 
-Memory is kept separately for each app origin, screen size (desktop, tablet, mobile), sign-in state (public or signed in) and test or live model mode. It records:
+Memory is kept separately for each app origin, screen size (desktop, tablet, mobile, and its size in pixels), sign-in state (public or signed in) and test or live model mode. It records:
 
 - Page addresses and titles.
 - Control names, roles and links.
