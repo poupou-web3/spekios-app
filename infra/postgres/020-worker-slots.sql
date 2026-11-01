@@ -3,8 +3,8 @@
 -- its advisory lock, so a crashed worker's jobs are recoverable immediately.
 ALTER TABLE browser_workers ADD COLUMN IF NOT EXISTS slots integer NOT NULL DEFAULT 1 CHECK (slots BETWEEN 1 AND 8);
 
--- An interrupted exploration is queued again as a continuation run. Earlier
--- runs stay as evidence; the job points at its newest run.
+-- Continuation history for explicitly requested follow-up jobs and legacy
+-- automatic continuations. Earlier runs stay as evidence.
 ALTER TABLE browser_jobs ADD COLUMN IF NOT EXISTS resumes integer NOT NULL DEFAULT 0 CHECK (resumes BETWEEN 0 AND 3);
 ALTER TABLE browser_jobs ADD COLUMN IF NOT EXISTS previous_run_ids uuid[] NOT NULL DEFAULT '{}';
 DO $$ BEGIN

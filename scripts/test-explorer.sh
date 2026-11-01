@@ -20,7 +20,7 @@ if (( $# )); then
   docker compose run --rm --no-deps -e SCOUT_EXPLORER_INTEGRATION=1 -e SCOUT_BROWSER_ENDPOINT= --entrypoint ./node_modules/.bin/tsx recorder --test --test-concurrency=1 "$@"
   exit 0
 fi
-docker compose run --rm --no-deps -e SCOUT_EXPLORER_INTEGRATION=1 -e SCOUT_BROWSER_ENDPOINT= --entrypoint ./node_modules/.bin/tsx recorder --test --test-concurrency=1 test/frontier-planner.test.ts test/exploration-recovery.test.ts test/recovery.test.ts test/explorer.test.ts test/app-memory.test.ts test/reproduction.test.ts test/interactions.test.ts test/access.test.ts test/outcomes.test.ts test/cancellation.test.ts test/automatic-reproduction.test.ts
+docker compose run --rm --no-deps -e SCOUT_EXPLORER_INTEGRATION=1 -e SCOUT_BROWSER_ENDPOINT= --entrypoint ./node_modules/.bin/tsx recorder --test --test-concurrency=1 test/job-queue.test.ts test/frontier-planner.test.ts test/exploration-recovery.test.ts test/recovery.test.ts test/explorer.test.ts test/app-memory.test.ts test/reproduction.test.ts test/interactions.test.ts test/access.test.ts test/outcomes.test.ts test/cancellation.test.ts test/automatic-reproduction.test.ts
 node scripts/verify-explorer.mjs
 node scripts/verify-reproduction.mjs
 node scripts/verify-frontier.mjs

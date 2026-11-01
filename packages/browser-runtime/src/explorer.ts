@@ -59,7 +59,7 @@ export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: numbe
   reuseRankings?: boolean;
   // A cheaper model for navigation actions; anything it does not find clean is reassessed.
   navigationClient?: ModelClient | null;
-  // Worker shutdown closes the browser; the job is then resumed or interrupted.
+  // Worker shutdown closes the browser and leaves the job interrupted.
   shutdown?: AbortSignal;
   // A continuation of an interrupted exploration job, with its remaining budget.
   resume?: { attempt: number; previousRunIds: string[]; jobMaxActions: number | null; carriedActions: number };
