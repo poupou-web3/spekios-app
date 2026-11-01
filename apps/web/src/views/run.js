@@ -50,7 +50,7 @@ export function runErrorNotice(report){
   if(!run?.error)return '';
   const tone=run.lifecycle==='cancelled'?'':'error';
   if(!failure)return `<div class="notice ${tone}">${icon('info')}<span>${esc(run.error)}</span></div>`;
-  const carry=continueRequest(run)?'<p class="small">Continue exploration carries on from the pages already recorded. Run again starts a new test at the same address.</p>':'';
+  const carry=continueRequest(run)?'<p class="small">Continue exploration carries on from the graph explored so far, starting on the page where this run stopped. Run again starts a new test at the same address.</p>':'';
   return `<div class="notice ${tone}" role="alert">${icon('info')}<div><strong>${esc(failure.title)}</strong><p>${esc(failure.detail)}</p>${carry}<p class="small mono">Request ${esc(failure.requestId)}</p></div></div>`;
 }
 export function memoryLabel(run){

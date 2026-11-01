@@ -5,7 +5,7 @@ ALTER TABLE browser_workers ADD COLUMN IF NOT EXISTS slots integer NOT NULL DEFA
 
 -- Continuation history for explicitly requested follow-up jobs and legacy
 -- automatic continuations. Earlier runs stay as evidence.
-ALTER TABLE browser_jobs ADD COLUMN IF NOT EXISTS resumes integer NOT NULL DEFAULT 0 CHECK (resumes BETWEEN 0 AND 3);
+ALTER TABLE browser_jobs ADD COLUMN IF NOT EXISTS resumes integer NOT NULL DEFAULT 0;
 ALTER TABLE browser_jobs ADD COLUMN IF NOT EXISTS previous_run_ids uuid[] NOT NULL DEFAULT '{}';
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='browser_jobs'::regclass AND conname='browser_jobs_resume_history') THEN

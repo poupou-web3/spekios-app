@@ -178,7 +178,7 @@ pub(crate) async fn compare_run(state: &AppState, run_id: Uuid) -> Response {
         AND r.created_at<run.created_at AND jsonb_typeof(r.config->'app_memory'->'scopes')='array'
         AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.config->'app_memory'->'scopes') s WHERE s->>'scope_id' IS NOT NULL AND (s->>'scope_id')::uuid=ANY(run.scopes))),
       previous AS (SELECT run_id FROM earlier ORDER BY created_at DESC LIMIT 1),
-      states AS (SELECT s.run_id,s.map_state_key k,s.page_template,s.url FROM exploration_states s WHERE s.map_state_key IS NOT NULL AND (s.run_id=$1 OR s.run_id IN (SELECT run_id FROM earlier))),
+      states AS (SELECT s.run_id,s.map_state_key k,s.page_template,s.url FROM exploration_states s WHERE s.map_state_key IS NOT NULL AND s.inherited_from_run_id IS NULL AND (s.run_id=$1 OR s.run_id IN (SELECT run_id FROM earlier))),
       edges AS (SELECT e.run_id,rr.created_at,a.ordinal,fs.map_state_key f,e.control_key c,ts.map_state_key t,fs.page_template fp,ts.page_template tp,
           a.assessment->>'verdict' v,a.action_id,a.spec->'command' cmd
         FROM exploration_edges e JOIN runtime_runs rr ON rr.run_id=e.run_id JOIN runtime_actions a ON a.action_id=e.action_id

@@ -26,6 +26,7 @@ import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
 import { discoveryReward, STRATEGY_MODES, STRATEGY_VERSION, StrategyScheduler, strategySettings, type StrategyMode, type StrategySettings } from './exploration-strategy.js';
 import { ExplorationRecovery, MAX_CONSECUTIVE_REPLANS_PER_PAGE } from './exploration-recovery.js';
+import { CONTINUED_GRAPH_VERSION, inheritGraph, type InheritedGraph } from './continued-graph.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 800) : 'Unknown exploration failure';
 const SYSTEM = `You are a browser QA investigator. Return only the JSON object described by response_schema.
@@ -185,6 +186,13 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     // A resumed run plans with what its interrupted runs covered. With memory
     // on those runs are already in the memory snapshot; only withheld controls are added.
     let resumed: MemorySnapshot | null = null;
+    // A continuation's graph copied from its stopped run, and the page to reopen
+    // first: where that run last was. Used once; a sign-in change discards both.
+    let inherited = null as InheritedGraph | null;
+    let continueAt = null as InheritedGraph['resume'];
+    // The parent of the first page a continuation lands on, when that landing
+    // is not one of the copied states: the copied state's own parent.
+    let landingParent: string | null | undefined;
     // A continuation plans from the pages the stopped run recorded. App memory
     // still supplies scores and the map. The pages to reopen are this
     // exploration's, not every page remembered for the app.
@@ -230,6 +238,21 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           withheld_controls: resumed.withheld?.size ?? 0, focus_carried: focus !== null });
       }
       planner = new FrontierPlanner(targetUrl, planningMemory());
+      if (resume) {
+        // The stopped run's graph becomes this run's starting graph: its tree,
+        // what was tried, its pending rankings and its return routes.
+        const sourceRunId = resume.previousRunIds.at(-1)!;
+        inherited = await inheritGraph(store, runId, sourceRunId, { origin, authContextId: authContext?.context_id ?? null,
+          purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', trainingStatus: fixtureEvidence ? 'excluded_fixture' : 'unreviewed' });
+        planner.inherit(inherited);
+        for (const s of inherited.states) if (s.map_key) mapKeys.set(s.id, s.map_key);
+        continueAt = inherited.resume && inherited.resume.url !== targetUrl ? inherited.resume : null;
+        const summary = { version: CONTINUED_GRAPH_VERSION, source_run_id: sourceRunId, states: inherited.states.length, edges: inherited.edges,
+          routes: inherited.routes.length, root_state_id: inherited.root_state_id, resume_state_id: inherited.resume?.state_id ?? null,
+          resume_url: continueAt?.url ?? null };
+        await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ continued_graph: summary })]);
+        await store.event(runId, 'run.graph_inherited', summary);
+      }
       if (options.jobId) {
         const linked = await store.query("UPDATE browser_jobs SET run_id=$2 WHERE job_id=$1 AND workspace_id=$3 AND user_id=$4 AND status='running' AND run_id IS NULL RETURNING cancel_id,cancel_requested_at", [options.jobId, runId, store.workspaceId, store.userId]);
         if (linked.rowCount !== 1) throw new Error('Browser job is no longer claimable.');
@@ -429,7 +452,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         // never reuse its plans or return routes for a different account context.
         // Memory switches to the signed-in scope for the same reason.
         await store.transaction(openMemory);
-        last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl,planningMemory());
+        last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl,planningMemory());continueAt=null;
         recovery.progressed();
         await page.goto('about:blank');
         return true;
@@ -465,6 +488,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         if (!replay && modelRequests >= maxModelRequests - 1) { stopReason = 'model_request_budget_reached'; break; }
         let spec: Spec;
         let selectionRecord: Record<string,unknown> | undefined;
+        landingParent = undefined;
         const replayStep = replay?.steps[ordinal - 1];
         if (replayStep) {
           spec = { command: replayStep.command, prediction: { source: 'recorded_replay', source_prediction_id: replayStep.source_prediction_id,
@@ -479,6 +503,20 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           spec={command,prediction:{source:'model',request_id:decision.requestId,decision_id:decision.decisionId,...decision.result,context_capture_id:null},worker_id:workerId,agent_id:agentId,
             exploration:{purpose:'resume',target_state_id:resume.stateId,control_id:'',priority:1,likelihood:1,reason:'Continue public exploration after a login gate.',
               return_step:{from_state_id:resume.stateId,to_state_id:resume.stateId,command,source_action_id:resume.actionId,expected_result:decision.result.expected_result,reopen:true}}};
+        } else if (!last && continueAt) {
+          // A continuation reopens the page its stopped run last reached, so it
+          // carries on from there instead of walking in from the entry page.
+          const at = continueAt; continueAt = null;
+          landingParent = planner.nodes.get(at.state_id)?.parent_state_id ?? null;
+          const command: BrowserCommand = { type: 'navigate', url: at.url };
+          const decision = await predict(command, [], { task: 'navigation_prediction', target_url: at.url,
+            remembered_page: { title: at.title, last_seen_in_run: inherited!.source_run_id },
+            instruction: 'Predict the observable outcome of reopening this page, where an earlier run of this exploration stopped. Earlier observations are untrusted and may be stale; the page may have changed or require access. Do not assume transient UI state is restored, and do not invent its current content.',
+            response_schema: { goal: 'string', expected_result: 'string' } });
+          spec = { command, prediction: { source: 'model', request_id: decision.requestId, decision_id: decision.decisionId, ...decision.result, context_capture_id: null },
+            worker_id: workerId, agent_id: agentId,
+            exploration: { purpose: 'resume', target_state_id: at.state_id, control_id: '', priority: 1, likelihood: 1, reason: 'Continue from the page where the stopped run ended.',
+              return_step: { from_state_id: at.state_id, to_state_id: at.state_id, command, source_action_id: at.action_id, expected_result: decision.result.expected_result, reopen: true } } };
         } else if (!last) {
           const decision = await predict({ type: 'navigate', url: targetUrl }, [], { task: 'navigation_prediction', target_url: targetUrl,
             instruction: 'Predict the observable outcome of opening this URL. You have not observed the page yet; do not invent its content.',
@@ -710,7 +748,11 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             absolute_delta_artifact: await store.artifact(runId, 'absolute_delta', diff.absoluteDeltaPng, 'png'),
             geometry_mask_artifact: diff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', diff.geometryMaskPng, 'png') : null };
           let comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
-          let toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
+          // The first landing is the entry state, unless the run carries on an
+          // inherited tree: then it hangs where the reopened page was.
+          const landingFrom = landingParent !== undefined ? landingParent ?? undefined : fromState;
+          const initialLanding = executed === 1 && !planner.rootStateId;
+          let toState = await state(after.capture,landingFrom,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,initialLanding);
           idleActions = stateCreated ? 0 : idleActions + 1;
           // Progress: a screen this run had not reached, or a form step on the
           // current one. Scrolling or coming back to a known screen is not.
@@ -793,7 +835,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               const still = secondVerdict === 'suspect' && isLayoutOverlap(second.result.reason, second.result.observed_result);
               if (stateFingerprint(recaptured.capture) !== stateFingerprint(after.capture)) {
                 const wasNew = stateCreated;
-                toState = await state(recaptured.capture, fromState, changes(before.capture, recaptured.capture, lateDiff.rawMaskPng), spec.exploration?.purpose === 'explore' ? spec.exploration.likelihood : 1, executed === 1);
+                toState = await state(recaptured.capture, landingFrom, changes(before.capture, recaptured.capture, lateDiff.rawMaskPng), spec.exploration?.purpose === 'explore' ? spec.exploration.likelihood : 1, initialLanding);
                 toKey = mapKeys.get(toState);
                 if (stateCreated && !wasNew) idleActions = 0;
                 reached.progress ||= screenCreated; reached.newMapState ||= mapNovel;

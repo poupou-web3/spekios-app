@@ -39,7 +39,9 @@ test('model output cannot add tools, invent controls or forge evidence', () => {
   assert.equal(parsePlan({candidates:[candidate],stop_reason:null},[control]).candidates[0].control_id, control.control_id);
   assert.throws(() => parsePlan({candidates:[candidate],stop_reason:null,execute_shell:'printenv'},[control]), /unsupported fields/);
   assert.throws(() => parsePlan({candidates:[{...candidate,control_id:'0'.repeat(24)}],stop_reason:null},[control]), /unobserved/);
-  assert.throws(() => parsePlan({candidates:[candidate,candidate],stop_reason:null},[control]), /unobserved/);
+  const twice = parsePlan({candidates:[{...candidate,likelihood:0.3,goal:'Sort by name'},{...candidate,goal:'Sort by price'}],stop_reason:null},[control]).candidates;
+  assert.deepEqual(twice.map(c => [c.control_id, c.goal]), [[control.control_id, 'Sort by price']], 'a control ranked twice keeps its likelier proposal');
+  assert.throws(() => parsePlan({candidates:[candidate,{...candidate,likelihood:2}],stop_reason:null},[control]), /likelihood/, 'a repeated control is still validated');
   assert.throws(() => parsePlan({candidates:[candidate],stop_reason:null},[]), /unobserved/);
   assert.throws(() => parseAssessment({verdict:'suspect',reason:'x',observed_result:'y',evidence_capture_ids:['invented','invented'],expectation_uncertain:false}, ['before','after']), /exactly the two/);
   assert.equal(blockedReason({...control,name:'Upgrade'},'http://fixture'), 'payment_or_transaction_requires_handoff');
