@@ -44,6 +44,8 @@ A state the run did not reach again was not visited; that is not proof it was re
 
 Later runs re-walk transitions from the map and compare their outcomes; see [breadth, depth and re-walks](../exploration-strategy/). The map's **summary.by_depth** reports, for each depth, how many control entries any run has acted on.
 
+Memory also keeps the rankings the model made for screens, so a later run can [reuse an unchanged screen's ranking](../exploration-cost/) instead of asking again. Forgetting an app removes them too.
+
 ## Turn it on or off
 
 Memory is on by default for explorations with a live model. Turn off **Remember explored pages and controls across runs** in **Settings → Exploration defaults** to explore without it. A run with memory off neither reads nor records it. Runs with simulated test models use memory only when the job explicitly asks for it, so repeated test runs stay independent.

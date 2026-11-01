@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { BrowserCommand, Capture, ObservedControl } from './contracts.js';
-import { stabilizeText } from './exploration-policy.js';
+import type { BrowserCommand, Capture, ControlAction, ObservedControl } from './contracts.js';
+import { stabilizeText, type Proposal } from './exploration-policy.js';
+import { controlAction } from './interaction-contract.js';
 
 // The app map is the exploration tree carried between runs. Exact screens
 // stay per-run evidence; the map keys what is stable across runs and data:
@@ -60,4 +61,46 @@ export function transitionKey(command: BrowserCommand): { key: string; entry: st
   const entry = controlEntry(command.control).key;
   const choice = command.type === 'select' ? command.value : command.type === 'set_checked' ? command.checked : null;
   return { key: key([command.type, entry, choice]), entry };
+}
+
+// Rankings carried between runs. A later run that reaches the same screen can
+// reuse what the model ranked there instead of asking again. The signature is
+// stricter than a map state: title, text (numbers, dates and times
+// normalized) and each control's state count too, so a form with and without
+// a validation message, or before and after it is filled, is ranked anew.
+export const RANKING_VERSION = 'ranking-v1';
+export type StoredProposal = { entry_key: string; action: ControlAction; goal: string; expected_result: string; likelihood: number };
+export function screenSignature(capture: Capture): string | null {
+  const o = capture.observation;
+  if (o.observation_error || o.controls_truncated || !/^https?:/.test(o.url)) return null;
+  const controls = [...new Set((o.controls ?? []).map(c => JSON.stringify([controlEntry(c).key, c.disabled, !!c.occluded, c.in_viewport !== false,
+    c.checked ?? null, !!c.value, !!c.validation_message, c.form?.authorization ?? null, c.options?.map(option => [option.value, option.disabled]) ?? null])))].sort();
+  return key(['ranking', RANKING_VERSION, pageTemplate(o.url), !!o.auth_context_id, stabilizeText(o.title ?? ''),
+    stabilizeText(o.text ?? '').replace(/\d+/g, '#'), !!o.text_truncated, controls]);
+}
+// What can be stored: every proposal keyed by its control entry. Typed text
+// is never kept, so a ranking that fills a field is asked again next time.
+export function rankingEntries(proposals: Proposal[], controls: readonly ObservedControl[]): StoredProposal[] | null {
+  if (!proposals.length) return null;
+  const stored: StoredProposal[] = [];
+  for (const p of proposals) {
+    const control = controls.find(c => c.control_id === p.control_id);
+    if (!control || !p.action || p.action.type === 'fill') return null;
+    stored.push({ entry_key: controlEntry(control).key, action: p.action, goal: p.goal, expected_result: p.expected_result, likelihood: p.likelihood });
+  }
+  return stored;
+}
+// Maps a stored ranking onto this screen's available controls. Proposals
+// whose control is gone, already tried or no longer permits the action drop out.
+export function restoreRanking(stored: readonly StoredProposal[], available: readonly ObservedControl[]): Proposal[] {
+  const used = new Set<string>();
+  return stored.flatMap(p => {
+    const control = available.find(c => !used.has(c.control_id) && controlEntry(c).key === p.entry_key);
+    if (!control) return [];
+    try {
+      const action = controlAction(control, p.action);
+      used.add(control.control_id);
+      return [{ control_id: control.control_id, goal: p.goal, expected_result: p.expected_result, likelihood: p.likelihood, action }];
+    } catch { return []; }
+  }).sort((a, b) => b.likelihood - a.likelihood).slice(0, 8);
 }

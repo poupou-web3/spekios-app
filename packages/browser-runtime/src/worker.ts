@@ -32,6 +32,14 @@ async function mode() {
   return { executionMode: data.test_mode ? 'protocol_fixture' : 'live', configuredProviders: (data.providers ?? []).filter((p: any) => p.configured).map((p: any) => p.provider) } as GatewayStatus;
 }
 
+// The cheaper model for navigation actions, when its provider is configured.
+// Otherwise the main model handles everything, as before.
+function navigationClient(settings: Record<string, any>, gateway: GatewayStatus) {
+  const nav = settings.navigationModel;
+  if (!nav || !gateway.configuredProviders.includes(nav.provider)) return null;
+  return new ModelClient({ provider: nav.provider, model: nav.model, freeOnly: settings.freeOnly === true && nav.provider === 'openrouter' });
+}
+
 async function run(session: Store, job: Record<string, any>, gateway: GatewayStatus) {
   const key = jobLock(job.job_id);
   try {
@@ -67,6 +75,7 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
           maxTokens: limit('maxTokens') ?? null, maxCostUsd: limit('maxCostUsd') ?? null, stopAfterIdleActions: limit('stopAfterIdleActions') ?? null,
           // Jobs admitted before strategies existed use the default split.
           strategy: job.settings.explorationStrategy ?? null,
+          reuseRankings: job.settings.reuseRankings === true, navigationClient: navigationClient(job.settings, gateway),
           shutdown: shutdown.signal, resume };
         const result = await (job.request.kind === 'verify_fix' ? verifyFix(session, job.job_id, options) : job.request.kind === 'reproduce'
           ? reproduce(session, job.request.source_action_id, options)
