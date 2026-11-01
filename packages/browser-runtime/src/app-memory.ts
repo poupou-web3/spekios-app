@@ -71,12 +71,13 @@ export function jumpableUrl(raw: string, origin: string): boolean {
 }
 
 // A resumed exploration continues an interrupted job in a new run. The earlier
-// runs' own records stand in for memory, even when app memory is off.
+// runs' own records stand in for memory, even when app memory is off. States a
+// run copied from the run it continued are counted once, where they were observed.
 export async function resumeSnapshot(store: Store, runIds: string[], scope: MemoryScope): Promise<MemorySnapshot> {
   const pageRows = (await store.query(`SELECT s.url,(array_agg(c.observation->>'title' ORDER BY s.created_at DESC))[1] AS title,count(*)::int AS visits,
       bool_or(COALESCE((c.observation->>'controls_truncated')::boolean,false)) AS controls_truncated,(array_agg(s.run_id ORDER BY s.created_at DESC))[1] AS last_run_id
     FROM exploration_states s JOIN runtime_captures c ON c.capture_id=s.representative_capture_id
-    WHERE s.run_id=ANY($1::uuid[]) GROUP BY s.url ORDER BY max(s.created_at) DESC LIMIT $2`, [runIds, MAX_PAGES + 1])).rows;
+    WHERE s.run_id=ANY($1::uuid[]) AND s.inherited_from_run_id IS NULL GROUP BY s.url ORDER BY max(s.created_at) DESC LIMIT $2`, [runIds, MAX_PAGES + 1])).rows;
   const controlRows = (await store.query(`SELECT s.url,f.control_id,(array_agg(f.control))[1] AS control,count(DISTINCT f.action_id)::int AS attempts,
       (array_agg(a.assessment->>'verdict' ORDER BY a.ordinal DESC) FILTER (WHERE a.state='completed'))[1] AS last_verdict,
       (array_agg(left(a.assessment->>'observed_result',300) ORDER BY a.ordinal DESC) FILTER (WHERE a.state='completed'))[1] AS last_observed_result,
@@ -84,7 +85,7 @@ export async function resumeSnapshot(store: Store, runIds: string[], scope: Memo
       bool_or(a.dispatched_at IS NOT NULL AND a.state IN ('interrupted','evidence_failed','cancelled')) AS unknown_outcome
     FROM exploration_frontier f JOIN exploration_states s ON s.run_id=f.run_id AND s.state_id=f.state_id
     LEFT JOIN runtime_actions a ON a.action_id=f.action_id
-    WHERE f.run_id=ANY($1::uuid[]) AND f.control->>'role'<>'scroll' GROUP BY s.url,f.control_id LIMIT $2`, [runIds, MAX_CONTROLS + 1])).rows;
+    WHERE f.run_id=ANY($1::uuid[]) AND s.inherited_from_run_id IS NULL AND f.control->>'role'<>'scroll' GROUP BY s.url,f.control_id LIMIT $2`, [runIds, MAX_CONTROLS + 1])).rows;
   const pages = new Map<string, RememberedPage>(pageRows.slice(0, MAX_PAGES).map(p => [p.url, { url: p.url, title: p.title, visits: p.visits,
     best_path_score: null, controls_truncated: p.controls_truncated, last_run_id: p.last_run_id, last_action_id: null }]));
   const controls = new Map<string, RememberedControl>(), byPage = new Map<string, RememberedControl[]>(), withheld = new Set<string>();

@@ -9,9 +9,9 @@ import {selectWebsite} from './website-state.js';
 // Runs that ended before finishing. Each can start again as a new job.
 export const STOPPED=['failed','interrupted','blocked','cancelled'];
 // A model failure, interruption or cancellation can carry on from the pages already recorded.
-// A blocked run still needs access, so it only offers a fresh start. Three continuations is the job history limit.
+// A blocked run still needs access, so it only offers a fresh start. There is no limit on how many times
+// an exploration carries on: each continuation starts from the whole graph explored so far.
 const CONTINUABLE=['failed','interrupted','cancelled'];
-const MAX_CONTINUATIONS=3;
 // The request that launched a stopped run or a job that never started.
 // The new job takes the current settings; the earlier run and its evidence stay as they are.
 // Fix verifications start again from their issue page.
@@ -39,12 +39,10 @@ export function restartRequest(kind,item){
   // The same test is already queued or running, for example a job requeued after an interruption.
   return request&&!sameTestQueued(request)?request:null;
 }
-// Continue keeps this exploration's recorded pages and does not repeat a dispatched action.
+// Continue keeps this exploration's explored graph, reopens the page it stopped on and does not repeat a dispatched action.
 // Run again is the fresh start of the same URL.
 export function continueRequest(item){
   if(!CONTINUABLE.includes(item.lifecycle)||item.config?.replay_of)return null;
-  const earlier=item.config?.resume?.previous_run_ids;
-  if(Array.isArray(earlier)&&earlier.length>=MAX_CONTINUATIONS)return null;
   if(state.jobs.some(j=>['queued','running'].includes(j.status)&&j.request?.continue_from_run_id===item.run_id))return null;
   const request=relaunch('run',item);
   return request?.kind==='explore'?{...request,continue_from_run_id:item.run_id}:null;
@@ -54,7 +52,7 @@ export function continueButton(item,compact=false){
   if(!continueRequest(item))return '';
   const disabled=startDisabled();
   return compact?`<button class="button icon" data-action="continue-run" data-id="${esc(item.run_id)}" aria-label="Continue exploration of ${esc(name(item))}" title="Continue exploration" ${disabled}>${icon('play')}</button>`
-    :`<button class="button primary" title="Carry on from the pages this run already recorded" data-action="continue-run" data-id="${esc(item.run_id)}" ${disabled}>${icon('play')}Continue exploration</button>`;
+    :`<button class="button primary" title="Carry on from the graph explored so far, starting on the page where this run stopped" data-action="continue-run" data-id="${esc(item.run_id)}" ${disabled}>${icon('play')}Continue exploration</button>`;
 }
 export function restartButton(kind,item,compact=false,secondary=false){
   if(!restartRequest(kind,item))return '';

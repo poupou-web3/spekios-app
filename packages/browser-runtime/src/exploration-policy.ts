@@ -358,19 +358,24 @@ export type Plan = { candidates: Proposal[]; stop_reason: string | null };
 export function parsePlan(value: unknown, allowed: ObservedControl[]): Plan {
   const o = object(value, ['candidates', 'stop_reason']);
   if (!Array.isArray(o.candidates) || o.candidates.length > 8) throw new Error('Expected at most eight ranked candidates.');
-  const seen = new Set<string>();
-  const candidates = o.candidates.flatMap(value => {
+  const byControl = new Map<string, Proposal>();
+  for (const value of o.candidates) {
     const hasAction=!!value && typeof value==='object' && Object.hasOwn(value,'action');
     const candidate = object(value, ['control_id', 'goal', 'expected_result', 'likelihood',...(hasAction?['action']:[])]);
-    const controlId = text(candidate.control_id, 24);
-    if (!allowed.some(control => control.control_id === controlId) || seen.has(controlId)) throw new Error('Model selected an unobserved, blocked, or already attempted control.');
-    seen.add(controlId);
+    const controlId = text(candidate.control_id, 24), control = allowed.find(control => control.control_id === controlId);
+    if (!control) throw new Error(`Model selected control ${JSON.stringify(controlId)}, which is not among this page's available controls (unobserved, blocked, or already attempted).`);
     if (typeof candidate.likelihood !== 'number' || !Number.isFinite(candidate.likelihood) || candidate.likelihood < 0 || candidate.likelihood > 1) throw new Error('Invalid likelihood.');
     // A wrong action type uses a safe action for this control. An action the
     // control does not permit is dropped so the rest of the plan can proceed.
-    const action=resolveAction(allowed.find(control=>control.control_id===controlId)!,candidate.action);
-    return action ? [{ control_id: controlId, goal: text(candidate.goal, 300), expected_result: text(candidate.expected_result), likelihood: candidate.likelihood, action }] : [];
-  }).sort((a, b) => b.likelihood - a.likelihood);
+    const action=resolveAction(control,candidate.action);
+    if (!action) continue;
+    const proposal = { control_id: controlId, goal: text(candidate.goal, 300), expected_result: text(candidate.expected_result), likelihood: candidate.likelihood, action };
+    // The model may rank two actions on one control, such as two sort orders.
+    // The frontier holds one proposal per control, so the likelier one stays.
+    const kept = byControl.get(controlId);
+    if (!kept || proposal.likelihood > kept.likelihood) byControl.set(controlId, proposal);
+  }
+  const candidates = [...byControl.values()].sort((a, b) => b.likelihood - a.likelihood);
   if (candidates.length && o.stop_reason !== null) throw new Error('An actionable plan cannot also stop.');
   if (!candidates.length && o.stop_reason === null && o.candidates.length) return { candidates, stop_reason: 'No proposed action matched an observed control.' };
   return { candidates, stop_reason: candidates.length ? null : text(o.stop_reason) };

@@ -624,7 +624,7 @@ pub(crate) fn target(value: &str) -> Result<String, &'static str> {
 }
 
 /// Earlier runs of this exploration, oldest first, then the run being continued.
-/// A job stores at most three previous runs.
+/// There is no limit: each continuation carries the whole explored graph forward.
 fn continuation_chain(run_id: Uuid, config: &Value) -> Result<Vec<Uuid>, &'static str> {
     let mut chain = Vec::new();
     if let Some(previous) = config
@@ -641,9 +641,6 @@ fn continuation_chain(run_id: Uuid, config: &Value) -> Result<Vec<Uuid>, &'stati
                 .ok_or("continuation_run_not_stopped")?;
             chain.push(parsed);
         }
-    }
-    if chain.len() >= 3 {
-        return Err("continuation_limit_reached");
     }
     chain.push(run_id);
     Ok(chain)
@@ -1239,8 +1236,7 @@ pub async fn submit(
                 "issue_not_found" | "continuation_run_not_found" => StatusCode::NOT_FOUND,
                 "job_id_conflict"
                 | "provider_not_configured"
-                | "browser_queue_full"
-                | "continuation_limit_reached" => StatusCode::CONFLICT,
+                | "browser_queue_full" => StatusCode::CONFLICT,
                 _ => StatusCode::BAD_REQUEST,
             },
             code,
@@ -1859,7 +1855,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_chain_keeps_at_most_three_runs() {
+    fn continuation_chain_has_no_length_limit() {
         let run = Uuid::new_v4();
         assert_eq!(continuation_chain(run, &json!({})).unwrap(), vec![run]);
         let earlier = [Uuid::new_v4(), Uuid::new_v4()];
@@ -1868,12 +1864,10 @@ mod tests {
             continuation_chain(run, &config).unwrap(),
             vec![earlier[0], earlier[1], run]
         );
-        let full =
-            json!({"resume":{"previous_run_ids":[Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()]}});
-        assert_eq!(
-            continuation_chain(run, &full).unwrap_err(),
-            "continuation_limit_reached"
-        );
+        let long: Vec<Uuid> = (0..12).map(|_| Uuid::new_v4()).collect();
+        let chain = continuation_chain(run, &json!({"resume":{"previous_run_ids":long}})).unwrap();
+        assert_eq!(chain.len(), 13);
+        assert_eq!(chain.last(), Some(&run));
         assert_eq!(
             continuation_chain(run, &json!({"resume":{"previous_run_ids":["nope"]}})).unwrap_err(),
             "continuation_run_not_stopped"

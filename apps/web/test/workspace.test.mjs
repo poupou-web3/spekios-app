@@ -156,7 +156,7 @@ test('a stopped exploration can continue from its recorded pages or start again'
   const html=ui.runView();
   assert.match(html,/data-action="continue-run" data-id="stopped"/);assert.match(html,/Continue exploration/);
   assert.match(html,/data-action="restart-run" data-id="stopped"/);assert.match(html,/Run again/);
-  assert.match(html,/class="button primary" title="Carry on from the pages this run already recorded"/);
+  assert.match(html,/class="button primary" title="Carry on from the graph explored so far, starting on the page where this run stopped"/);
   assert.match(html,/class="button" title="Start a new test at the same address"/);
   await click(ui,'continue-run','stopped');
   assert.equal(posted[0].continue_from_run_id,'stopped');assert.equal(posted[0].kind,'explore');assert.equal(posted[0].target_url,'https://stopped.test');assert.equal(posted[0].viewport_profile,'desktop');
@@ -167,7 +167,7 @@ test('a stopped exploration can continue from its recorded pages or start again'
   assert.equal(ui.restartRequest('run',stopped),null,'a fresh start of the same test is already running');
   assert.equal(ui.continueRequest(stopped).continue_from_run_id,'stopped');
   ui.state.jobs=[];stopped.lifecycle='blocked';assert.equal(ui.continueRequest(stopped),null);assert.equal(ui.restartRequest('run',stopped).kind,'explore');
-  stopped.lifecycle='cancelled';stopped.config.resume={previous_run_ids:['a','b','c']};assert.equal(ui.continueRequest(stopped),null,'three earlier runs already fill the continuation history');
+  stopped.lifecycle='cancelled';stopped.config.resume={previous_run_ids:['a','b','c','d','e']};assert.equal(ui.continueRequest(stopped).continue_from_run_id,'stopped','a long continuation chain can still carry on');
   stopped.config.replay_of={source_action_id:'suspect'};delete stopped.config.resume;assert.equal(ui.continueRequest(stopped),null);
 });
 test('a run page and an unstarted job offer one restart each',async()=>{

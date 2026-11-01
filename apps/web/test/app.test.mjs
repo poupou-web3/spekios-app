@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessNotifications,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,flowView,continuedNotice,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessNotifications,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{
@@ -36,6 +36,22 @@ test('untrusted page titles, expectations and model outputs remain text',()=>{
   assert.match(coverage,/<tr><td>1<\/td><td>1<\/td><td>1 \/ 2<\/td><td>50%<\/td><td>0<\/td><\/tr>/);
   assert.match(coverage,/New territory 1 \(share now 50%\) · Deep journey 0 \(share now 30%\) · Re-walk 1 \(share now 20%\)/);
   assert.match(coverage,/Repeating a recorded transition/);
+});
+test('a continued run shows the graph it carried over from its stopped run',()=>{
+  const ui=view(),s=(id,url,parent,extra={})=>({state_id:id,url,planning:{depth:parent?1:0,parent_state_id:parent},...extra});
+  const run={run_id:'new',config:{continued_graph:{source_run_id:'fbf60942-35bb-4397-b3d0-4d83ae3f94dc',states:2,edges:1,resume_url:'https://app.test/shop?<b>'}},lifecycle:'active'};
+  ui.state.report={run,actions:[{action_id:'own',ordinal:1,state:'completed',spec:{command:{type:'navigate',url:'https://app.test/shop'},exploration:{purpose:'resume'}}}],captures:[],reproductions:[],
+    graph:{states:[s('root','https://app.test/',null,{inherited_from_run_id:'old-run'}),s('shop','https://app.test/shop','root',{inherited_from_run_id:'old-run'}),s('blank','about:blank',null)],
+      edges:[{action_id:'own',from_state_id:'blank',to_state_id:'shop'}],
+      inherited_edges:[{source_action_id:'old',source_run_id:'old-run',from_state_id:'root',to_state_id:'shop',routable:true,command:{type:'click',control:{name:'Shop <now>',role:'link'}}}],
+      frontier:[{state_id:'shop',control_id:'sort',status:'unexplored',control:{role:'select'}}],selections:[{purpose:'resume',selected:{name:'A',reason:'r'},ranked_paths:[]}]}};
+  const html=ui.flowView();
+  assert.match(html,/Continued from run fbf60942: 2 explored states and 1 transitions carried over/);
+  assert.match(html,/started again on <span class="mono">https:\/\/app.test\/shop\?&lt;b&gt;<\/span>/,'the reopened URL stays text');
+  assert.match(html,/<td>Shop &lt;now&gt;<\/td><td><span class="pill">Earlier run<\/span><\/td><td class="small muted">Usable route<\/td>/);
+  const tree=html.slice(html.indexOf('class="discovery-tree"'));
+  assert.match(tree,/<strong>Shop &lt;now&gt;<\/strong>[\s\S]*Earlier run/,'a carried-over screen names the earlier action that reached it');
+  assert.equal(ui.continuedNotice({config:{}},{}),'','an ordinary run has no carried-over graph');
 });
 test('the discovery tree lists each screen once, with the action that reached it',()=>{
   const ui=view(),act=(id,name,type='click')=>({action_id:id,ordinal:1,state:'completed',spec:{command:{type,control:{name,role:type==='scroll'?'scroll':'button'}}}});

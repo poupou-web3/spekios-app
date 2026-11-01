@@ -4,8 +4,9 @@ import { commandAction, commandFor, commandKey } from './interaction-contract.js
 import { jumpableUrl, type MapTransition, type MemorySnapshot } from './app-memory.js';
 import { controlEntry, pageTemplate, transitionKey } from './app-map.js';
 import type { StrategyMode } from './exploration-strategy.js';
+import type { InheritedGraph } from './continued-graph.js';
 
-export const PLANNER_VERSION = 'frontier-v5';
+export const PLANNER_VERSION = 'frontier-v6';
 // A remembered page whose controls were observed but never ranked by a model.
 export const UNRANKED_MEMORY_SCORE = .3;
 // Actions one top-level area may take before new territory starts sharing
@@ -98,6 +99,24 @@ export class FrontierPlanner {
     if (initial) this.root = id;
     return node;
   }
+  // A continuation starts from its stopped run's graph: the states with what
+  // was tried on each and the pending rankings, the entry state, and the
+  // transitions that can be used to travel back. Seeing a copied state again
+  // is ordinary exact-state matching; nothing is assumed restored.
+  inherit(graph: InheritedGraph) {
+    for (const s of graph.states) {
+      const entries = new Map<string, string>();
+      if (s.map_key) for (const control of s.capture.observation.controls ?? []) if (control.role !== 'scroll') entries.set(control.control_id, controlEntry(control).key);
+      this.nodes.set(s.id, { id: s.id, capture: s.capture, parent_state_id: s.parent_state_id, depth: s.depth, reach_estimate: s.reach_estimate,
+        signals: {}, proposals: new Map(s.proposals.map(p => [p.control_id, p])), attempted: new Set(s.attempted), declined: false, focus_stale: false,
+        map_key: s.map_key, entries, screen_state_id: s.screen_state_id });
+      if (s.map_key && !this.screens.has(s.map_key)) this.screens.set(s.map_key, s.screen_state_id ?? s.id);
+    }
+    for (const route of graph.routes) if (this.nodes.has(route.from_state_id) && this.nodes.has(route.to_state_id)
+      && !this.edges.some(e => this.routeKey(e) === this.routeKey(route))) this.edges.push(route);
+    if (graph.root_state_id && this.nodes.has(graph.root_state_id)) { this.root = graph.root_state_id; this.rootAction = graph.root_action_id; }
+  }
+  get rootStateId() { return this.root; }
   // Whether this run or an earlier one already reached an equivalent screen.
   mapKnown(key: string) {
     return this.screens.has(key) || !!this.memory?.map?.states.has(key);
