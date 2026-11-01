@@ -6,7 +6,7 @@ import {state} from '../state.js';
 import {freeModel} from './settings.js';
 import {estimateCost,tokenSplit,tokenSum,usd} from '/assets/ui/usage.js';
 import {selectedWebsite,websiteRuns} from '../website-state.js';
-import {dockerAddress,normalizeTargetUrl,websiteHref,websiteLabel,websitePath} from '../websites.js';
+import {browserTargetUrl,dockerAddress,normalizeTargetUrl,websiteHref,websiteLabel,websitePath} from '../websites.js';
 // A run's tokens with their input/output split and estimated cost, for the runs table.
 export function runUsage(usage){
   if(!usage)return '<span class="small muted">—</span>';
@@ -41,7 +41,7 @@ const SIGN_IN=[['auto','Ask when sign-in is detected','Sign in when asked'],['si
 export function launchStatus(){
   if(state.launchError)return `<p id="launch-status" class="landing-status error" role="alert">${icon('info')}<span>${esc(state.launchError)}</span></p>`;
   const docker=dockerAddress(state.url);
-  if(docker)return `<p id="launch-status" class="landing-status" role="status"><i class="dot amber"></i><span>The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${esc(docker)}.</span></p>`;
+  if(docker)return `<p id="launch-status" class="landing-status" role="status"><i class="dot amber"></i><span>The test browser runs in Docker, where localhost is not this computer. This test will open ${esc(docker)}.</span></p>`;
   const model=launchModel(),provider=state.providers.providers.find(p=>p.provider===model.provider),settings='<a href="#/settings/models">Settings</a>',actions=Number(state.settings.maxActions);
   const [tone,text]=!state.lastUpdatedAt?['',state.error?'Workspace status unavailable.':'Checking your workspace…']
     :!model.provider||!model.model?['amber',`Choose a model in ${settings} to start testing.`]
@@ -72,7 +72,7 @@ export function automaticOptions(){
   return `<div class="automatic-options"><label><input id="auto-reproduce" name="auto_reproduce" form="run-form" type="checkbox" ${enabled?'checked':''} aria-describedby="automatic-help"> Automatically recheck suspected bugs</label><p id="automatic-help" class="small muted">${enabled?`After exploration, use fresh browsers for up to ${cases} suspected bugs and ${actions} additional browser actions in total. Checks use additional model calls. Reproduced findings still need human review.`:'Optional fresh-browser checks use additional model calls. Findings remain subject to human review.'}</p></div>`;
 }
 export function explorationRequest(form){
-  state.url=normalizeTargetUrl(form.get('url'));const session=form.get('session_id');
+  state.url=browserTargetUrl(form.get('url'));const session=form.get('session_id');
   const model=launchModel(),project=launchProjects().some(p=>p.projectId===state.launchProject)?state.launchProject:'';
   // Free-only stays on unless this test deliberately picks a paid OpenRouter model.
   const choice=model.source==='run'?{model:{provider:model.provider,model:model.model,free_only:!(model.provider==='openrouter'&&!freeModel(model.model))}}:{};

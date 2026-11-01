@@ -1,5 +1,5 @@
 // Keep the selected website visible when opening the separately served customer pages.
-import {bindWebsiteFavicons,groupWebsites,launchUrlError,normalizeTargetUrl,rememberWebsiteShortcut,savedWebsite,saveWebsite,updateWebsiteLaunchHint,websiteLabel,websiteOrigin,websiteSidebar} from './websites.js';
+import {bindWebsiteFavicons,browserTargetUrl,groupWebsites,launchUrlError,rememberWebsiteShortcut,savedWebsite,saveWebsite,updateWebsiteLaunchHint,websiteLabel,websiteOrigin,websiteSidebar} from './websites.js';
 
 export async function mountWebsitePage({page,request}){
   const slot=document.querySelector('[data-workspace-sidebar]');
@@ -16,7 +16,7 @@ export async function mountWebsitePage({page,request}){
   slot.addEventListener('input',event=>{if(event.target.id==='website-url'){draft=event.target.value;error='';updateWebsiteLaunchHint(slot,draft);}});
   slot.addEventListener('submit',async event=>{
     if(event.target.id!=='website-launch-form')return;event.preventDefault();if(submitting)return;
-    const target=normalizeTargetUrl(draft);error=launchUrlError(target);if(error){draw(true);slot.querySelector('input')?.focus();return;}
+    const target=browserTargetUrl(draft);error=launchUrlError(target);if(error){draw(true);slot.querySelector('input')?.focus();return;}
     const spec={kind:'explore',target_url:target,auth_mode:'auto'};
     let pending;try{pending=JSON.parse(sessionStorage.getItem('scout.pending-job')||'null');}catch{}
     if(!pending||JSON.stringify(pending.request)!==JSON.stringify(spec))pending={request:spec,job_id:crypto.randomUUID()};

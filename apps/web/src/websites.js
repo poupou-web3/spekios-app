@@ -19,14 +19,24 @@ export function normalizeTargetUrl(value){
   if(!text||/^[a-z][a-z\d+.-]*:\/\//i.test(text))return text;
   return (/^(?:localhost|127\.|0\.0\.0\.0|\[::1\]|host\.docker\.internal(?:[:/?#]|$)|[a-z\d-]+:\d+(?:[/?#]|$))/i.test(text)?'http://':'https://')+text;
 }
+const LOOPBACK=/^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])$/i;
 // The test browser runs in Docker, where localhost is the browser's own container. For a loopback
 // address this returns the origin that reaches the same port on this computer, otherwise ''.
 export function dockerAddress(value){
   try{
     const url=new URL(normalizeTargetUrl(value));
-    if(!/^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])$/i.test(url.hostname))return '';
+    if(!LOOPBACK.test(url.hostname))return '';
     url.hostname='host.docker.internal';return url.origin;
   }catch{return '';}
+}
+// Submit the address the Docker browser can open. Other addresses stay as typed.
+export function browserTargetUrl(value){
+  const text=normalizeTargetUrl(value);
+  try{
+    const url=new URL(text);
+    if(!LOOPBACK.test(url.hostname))return text;
+    url.hostname='host.docker.internal';return url.href;
+  }catch{return text;}
 }
 export function launchUrlError(url){
   if(!url)return 'Paste the address of the app you want to test.';
@@ -36,7 +46,7 @@ export function launchUrlError(url){
 // Every URL entry point shares the Docker guidance and updates it without replacing the input.
 export function websiteLaunchHint(value){
   const docker=dockerAddress(value);
-  return docker?`The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${docker}.`:'Same website? Its tests stay together.';
+  return docker?`The test browser runs in Docker, where localhost is not this computer. This test will open ${docker}.`:'Same website? Its tests stay together.';
 }
 export function updateWebsiteLaunchHint(container,value){
   container.querySelector?.('#website-url')?.removeAttribute('aria-invalid');

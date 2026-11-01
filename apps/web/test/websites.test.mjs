@@ -58,7 +58,7 @@ test('the shared switcher preserves main’s local and Docker URL handling witho
   const ui=websiteUI();
   for(const [value,expected] of [['larchwood:8084/shop','http://larchwood:8084/shop'],['host.docker.internal:4100','http://host.docker.internal:4100'],['localhost:3000','http://localhost:3000'],['acme.dev:8443/x','https://acme.dev:8443/x'],['https://localhost:4100/shop','https://localhost:4100/shop'],['host.docker.internal.acme.dev','https://host.docker.internal.acme.dev']])assert.equal(ui.normalizeTargetUrl(value),expected);
   assert.equal(ui.dockerAddress('[::1]:8080'),'http://host.docker.internal:8080');
-  assert.match(ui.websiteSidebar({newUrl:'localhost:4100/shop'}),/use http:\/\/host.docker.internal:4100/);
+  assert.match(ui.websiteSidebar({newUrl:'localhost:4100/shop'}),/open http:\/\/host.docker.internal:4100/);
   assert.doesNotMatch(ui.websiteLaunchHint('host.docker.internal:4100'),/where localhost/);
   const input={invalid:true,removeAttribute(){this.invalid=false;}},hint={textContent:'Old validation error',className:'small error',role:'alert',removeAttribute(){this.role=null;}},container={querySelector:selector=>selector==='#website-url'?input:hint};
   ui.updateWebsiteLaunchHint(container,'localhost:3000');assert.match(hint.textContent,/host.docker.internal:3000/);assert.equal(input.invalid,false);assert.equal(hint.role,null);
