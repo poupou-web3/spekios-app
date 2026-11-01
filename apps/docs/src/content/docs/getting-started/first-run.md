@@ -44,6 +44,8 @@ You can close the tab and return to the job. To stop work, use the explicit canc
 
 If the app needs access, respond to the [private sign-in handoff](../private-apps/). Payment, external identity providers and unsupported interactions can leave a branch blocked.
 
+If a test fails, is interrupted, blocked or cancelled, choose **Run again** on the run, or the restart icon next to it in **Recent tests**. It starts a new test with the same URL, screen size and sign-in choice, using your current settings. The original run and its evidence stay as they were.
+
 ## Share useful feedback
 
 Use **Export report** for portable files, or let a coding agent retrieve the [structured report](../../agents/workflow/) and inspect evidence by ID.

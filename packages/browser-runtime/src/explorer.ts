@@ -4,7 +4,7 @@ import { comparePng, changedPixelsInRects } from '../../image-diff/index.mjs';
 import { Store, jsonBytes } from './store.js';
 import { CAPTURE_POLICY, capture, installNetworkGate, prepareCaptureContext, type Hooks } from './recorder.js';
 import { MAX_EXPLORATION_ACTIONS, MAX_EXPLORATION_MINUTES, isUuid, type Capture, type ObservedControl } from './contracts.js';
-import { ModelClient, modelSettings } from './model-client.js';
+import { MAX_OUTPUT_TOKENS, ModelClient, modelSettings } from './model-client.js';
 import { blockedReason, documentFingerprint, isLayoutOverlap, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
 import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reproduction.js';
 import {loadVerification,bindVerificationCommand,parseFixAssessment,finishVerification} from './fix-verification.js';
@@ -203,7 +203,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           replay_of: replay ? { ...(replay.fix_verification?{verification_id:replay.fix_verification.verification_id}:{reproduction_id: replay.reproduction_id}), source_run_id: replay.source_run_id, source_action_id: replay.source_action_id } : null,
           fix_verification:replay?.fix_verification?{verification_id:replay.fix_verification.verification_id,issue_id:replay.fix_verification.issue_id,source_entry:replay.fix_verification.source_entry,candidate_url:replay.fix_verification.candidate_url}:null,
           limits: { max_actions: maxActions, max_consecutive_replans_per_page: replay ? 0 : MAX_CONSECUTIVE_REPLANS_PER_PAGE, max_model_requests: maxModelRequests,
-            max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, max_tokens: maxTokens, max_cost_usd: maxCostUsd,
+            max_output_tokens_per_request: MAX_OUTPUT_TOKENS, attempts_per_request: 1, max_duration_ms: maxDurationMs, max_tokens: maxTokens, max_cost_usd: maxCostUsd,
             stop_after_idle_actions: stopAfterIdleActions, context_budgets: CONTEXT_BUDGETS },
           app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] }, app_map_version: MAP_VERSION,
           strategy: replay ? null : { version: STRATEGY_VERSION, settings: strategy.settings },

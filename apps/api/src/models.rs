@@ -126,7 +126,14 @@ pub fn wire_request(spec: &ModelRequest, images: &[Vec<u8>]) -> Value {
         Provider::Openai | Provider::Meta => {
             let mut content = vec![json!({"type":"input_text","text":spec.prompt})];
             content.extend(images.iter().map(|b| json!({"type":"input_image","image_url":format!("data:image/png;base64,{}",STANDARD.encode(b)),"detail":"high"})));
-            json!({"model":spec.model,"instructions":spec.system,"input":[{"role":"user","content":content}],"max_output_tokens":spec.max_output_tokens,"store":false,"stream":false})
+            let mut body = json!({"model":spec.model,"instructions":spec.system,"input":[{"role":"user","content":content}],"max_output_tokens":spec.max_output_tokens,"store":false,"stream":false});
+            // Muse Wonder reasons unless told otherwise, and those tokens share
+            // max_output_tokens with the visible answer. Light effort keeps a
+            // structured plan from being cut off mid-JSON. "none" is rejected.
+            if spec.provider == Provider::Meta {
+                body["reasoning"] = json!({"effort": "low"});
+            }
+            body
         }
         Provider::Anthropic => {
             let mut content = vec![json!({"type":"text","text":spec.prompt})];
@@ -399,7 +406,9 @@ mod tests {
         assert_eq!(wire["instructions"], "Inspect screenshots.");
         assert_eq!(wire["stream"], false);
         assert_eq!(wire["store"], false);
+        assert_eq!(wire["reasoning"]["effort"], "low");
         assert!(wire.get("provider").is_none());
+        assert!(wire_request(&spec(Provider::Openai), &[]).get("reasoning").is_none());
         assert_eq!(wire["input"][0]["role"], "user");
         assert_eq!(wire["input"][0]["content"][0]["type"], "input_text");
         assert_eq!(wire["input"][0]["content"][1]["type"], "input_image");

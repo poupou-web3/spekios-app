@@ -1,6 +1,9 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { PROMPT_LIMIT_BYTES } from './model-context.js';
 
+// Reasoning models spend part of this budget before any visible JSON. 4096 is
+// the gateway maximum, so a light reasoning pass can still finish a plan.
+export const MAX_OUTPUT_TOKENS = 4096;
 export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean };
 export function modelSettings(): ModelSettings {
   const provider = process.env.SCOUT_EXPLORER_PROVIDER ?? 'openrouter';
@@ -36,7 +39,7 @@ export class ModelClient {
     if (Buffer.byteLength(prompt) > PROMPT_LIMIT_BYTES) throw new Error('Model context exceeds the bounded prompt size.');
     const body = { request_id: requestId, run_id: runId, action_id: actionId, capture_ids: captureIds,
       provider: this.settings.provider, model: this.settings.model, free_only: this.settings.freeOnly,
-      prompt, system, max_output_tokens: 2048, max_attempts: 1 };
+      prompt, system, max_output_tokens: MAX_OUTPUT_TOKENS, max_attempts: 1 };
     // Re-submit only the identical logical request. A lost HTTP acknowledgement
     // cannot turn into a second charge or a second model-generated action.
     try { await this.request('/v1/model-requests', body,signal); }
@@ -53,7 +56,10 @@ export class ModelClient {
         // No fence stripping, eval, repair prompt, or arbitrary tool execution.
         return { value: JSON.parse(call.output_text) as unknown, call_id: call.call_id as string };
       }
-      if (['failed', 'interrupted','cancelled'].includes(report.request.state)) throw new Error('Model request did not complete; inspect its request ID.');
+      if (['failed', 'interrupted','cancelled'].includes(report.request.state)) {
+        const detail = typeof report.request.error === 'string' && report.request.error ? report.request.error : report.request.state;
+        throw new Error(`Model request ${requestId} did not complete (${detail}).`);
+      }
       await delay(200);
     }
     throw new Error('Model wait expired. The recorded request may still settle; no dependent action will execute.');
