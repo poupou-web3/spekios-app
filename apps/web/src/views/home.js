@@ -19,7 +19,7 @@ const SIGN_IN=[['auto','Ask when sign-in is detected','Sign in when asked'],['si
 export function launchStatus(){
   if(state.launchError)return `<p id="launch-status" class="landing-status error" role="alert">${icon('info')}<span>${esc(state.launchError)}</span></p>`;
   const docker=dockerAddress(state.url);
-  if(docker)return `<p id="launch-status" class="landing-status" role="status"><i class="dot amber"></i><span>The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${esc(docker)}. Its origin must be listed in SCOUT_ALLOWED_ORIGINS.</span></p>`;
+  if(docker)return `<p id="launch-status" class="landing-status" role="status"><i class="dot amber"></i><span>The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${esc(docker)}.</span></p>`;
   const provider=state.providers.providers.find(p=>p.provider===state.settings.provider),settings='<a href="#/settings/models">Settings</a>',actions=Number(state.settings.maxActions);
   const [tone,text]=!state.lastUpdatedAt?['',state.error?'Workspace status unavailable.':'Checking your workspace…']
     :!state.settings.provider||!state.settings.model?['amber',`Choose a model in ${settings} to start testing.`]

@@ -517,19 +517,7 @@ pub(crate) async fn start_recheck(state: &AppState, input: RecheckInput) -> Resp
         return error(StatusCode::BAD_REQUEST, "invalid_deployment_ref");
     }
     // Refuse a candidate the queue would refuse, before recording the recheck.
-    let allowed = match queue.effective_settings().await {
-        Ok(v) => v["settings"]["allowedOrigins"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
-        Err(code) => return error(StatusCode::SERVICE_UNAVAILABLE, code),
-    };
-    if let Err(code) = jobs::target(&candidate_origin, &allowed) {
+    if let Err(code) = jobs::target(&candidate_origin) {
         return error(StatusCode::BAD_REQUEST, code);
     }
     let sql = "WITH open AS (SELECT i.issue_id,i.last_seen_at FROM issues i WHERE i.workspace_id=$1 AND i.user_id=$2

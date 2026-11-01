@@ -609,62 +609,14 @@ fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
         .unwrap_or(default)
 }
 
-/// Public websites can be tested from a pasted URL. Private, HTTP and internal
-/// hosts still need an exact entry in the operator allowlist.
-fn public_https_origin(url: &reqwest::Url) -> bool {
-    if url.scheme() != "https"
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return false;
-    }
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    let host = host.trim_end_matches('.').to_ascii_lowercase();
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return false;
-    }
-    if host.is_empty()
-        || host.len() > 253
-        || !host.contains('.')
-        || host
-            .split('.')
-            .all(|label| label.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return false;
-    }
-    if host == "localhost"
-        || [
-            ".localhost",
-            ".local",
-            ".internal",
-            ".localdomain",
-            ".home.arpa",
-        ]
-        .iter()
-        .any(|suffix| host.ends_with(suffix))
-    {
-        return false;
-    }
-    host.split('.').all(|label| {
-        (1..=63).contains(&label.len())
-            && label
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-    })
-}
-
-pub(crate) fn target(value: &str, allowed: &[String]) -> Result<String, &'static str> {
+/// Any http or https address can be tested, including local and private apps.
+/// Embedded credentials and other schemes stay rejected.
+pub(crate) fn target(value: &str) -> Result<String, &'static str> {
     let url = reqwest::Url::parse(value).map_err(|_| "invalid_target_url")?;
     if value.len() > 2048
         || !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
-        || !(allowed.contains(&url.origin().ascii_serialization()) || public_https_origin(&url))
     {
         return Err("target_origin_not_allowed");
     }
@@ -712,14 +664,7 @@ fn prepare_submission(
                 && input.issue_id.is_none()
                 && input.deployment_ref.is_none() =>
         {
-            let allowed = defaults["allowedOrigins"]
-                .as_array()
-                .ok_or("target_origin_not_allowed")?
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
-            json!({"kind":"explore","target_url":target(input.target_url.as_deref().ok_or("missing_target_url")?, &allowed)?})
+            json!({"kind":"explore","target_url":target(input.target_url.as_deref().ok_or("missing_target_url")?)?})
         }
         "reproduce"
             if input.target_url.is_none()
@@ -745,13 +690,6 @@ fn prepare_submission(
                 .issue_id
                 .filter(|id| !id.is_nil())
                 .ok_or("missing_issue_id")?;
-            let allowed = defaults["allowedOrigins"]
-                .as_array()
-                .ok_or("target_origin_not_allowed")?
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
             let deployment = input.deployment_ref.as_deref().map(str::trim);
             if deployment
                 .is_some_and(|v| v.is_empty() || v.len() > 200 || v.chars().any(char::is_control))
@@ -761,7 +699,7 @@ fn prepare_submission(
             if input.auth_mode.as_deref() == Some("sign_in") {
                 return Err("verification_requires_saved_session_or_public_access");
             }
-            json!({"kind":"verify_fix","issue_id":issue_id,"target_url":target(input.target_url.as_deref().ok_or("missing_target_url")?,&allowed)?,"deployment_ref":deployment})
+            json!({"kind":"verify_fix","issue_id":issue_id,"target_url":target(input.target_url.as_deref().ok_or("missing_target_url")?)?,"deployment_ref":deployment})
         }
         _ => return Err("invalid_job_kind_or_fields"),
     };
@@ -1976,36 +1914,34 @@ mod tests {
     }
 
     #[test]
-    fn target_requires_exact_origin_without_credentials() {
-        let allowed = vec!["http://app:8082".to_owned()];
-        assert_eq!(
-            target("http://app:8082/path", &allowed).unwrap(),
-            "http://app:8082/path"
-        );
+    fn target_accepts_any_http_address_without_credentials() {
+        for (value, expected) in [
+            ("http://app:8082/path", "http://app:8082/path"),
+            ("http://app:8083/", "http://app:8083/"),
+            ("http://other:8082/", "http://other:8082/"),
+            ("http://bubblemaps.io/", "http://bubblemaps.io/"),
+            (
+                "http://host.docker.internal:18083/",
+                "http://host.docker.internal:18083/",
+            ),
+            ("https://127.0.0.1/", "https://127.0.0.1/"),
+            ("https://10.0.0.8/admin", "https://10.0.0.8/admin"),
+            ("https://app.internal/", "https://app.internal/"),
+            ("https://localhost/", "https://localhost/"),
+            ("https://bubblemaps.io:8443/", "https://bubblemaps.io:8443/"),
+            ("https://bubblemaps.io/map", "https://bubblemaps.io/map"),
+            ("https://www.bubblemaps.io/", "https://www.bubblemaps.io/"),
+        ] {
+            assert_eq!(target(value).unwrap(), expected, "{value}");
+        }
         for value in [
-            "http://app:8082.evil/path",
-            "http://app:8083/",
             "file:///tmp/a",
+            "javascript:alert(1)",
             "http://user:pass@app:8082/",
-            "http://other:8082/",
-            "http://bubblemaps.io/",
-            "https://127.0.0.1/",
-            "https://10.0.0.8/admin",
-            "https://app.internal/",
-            "https://localhost/",
-            "https://bubblemaps.io:8443/",
             "https://user:pass@bubblemaps.io/",
         ] {
-            assert!(target(value, &allowed).is_err(), "{value}");
+            assert!(target(value).is_err(), "{value}");
         }
-        assert_eq!(
-            target("https://bubblemaps.io/map", &allowed).unwrap(),
-            "https://bubblemaps.io/map"
-        );
-        assert_eq!(
-            target("https://www.bubblemaps.io/", &allowed).unwrap(),
-            "https://www.bubblemaps.io/"
-        );
     }
 
     #[test]
@@ -2024,7 +1960,7 @@ mod tests {
             ("auth_mode", json!("sign_in")),
             ("issue_id", json!(Uuid::nil())),
             ("deployment_ref", json!("\n")),
-            ("target_url", json!("https://10.0.0.8/preview")),
+            ("target_url", json!("http://user:secret@app:8082/preview")),
         ] {
             let mut invalid = base.clone();
             invalid[key] = value;

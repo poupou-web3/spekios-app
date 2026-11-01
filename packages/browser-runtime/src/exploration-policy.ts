@@ -14,9 +14,8 @@ function publicHostname(hostname: string): boolean {
   return host.split('.').every(label => /^(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/.test(label));
 }
 
-// Public https sites can be pasted and tested. Private, HTTP and internal hosts
-// still need an exact entry in the operator allowlist. Hostname checks are not
-// a resolved-address boundary.
+// A public https site has a normal hostname, no credentials and no explicit
+// port. Hostname checks are not a resolved-address boundary.
 export function publicHttpsOrigin(url: URL): boolean {
   if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
   return publicHostname(url.hostname);
@@ -76,10 +75,11 @@ export function permitBrowserRequest(pageOrigin: string, rawUrl: string, scope: 
   return target !== null && allowedOrigins.includes(target);
 }
 
-export function validateTarget(input: string, origins: string[]): string {
+// Any http or https address can be opened, including local and private apps.
+export function validateTarget(input: string, _origins: string[]): string {
   const url = new URL(input);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || input.length > 2048 ||
-      !(origins.includes(url.origin) || publicHttpsOrigin(url))) throw new Error('Target must be a public https site or an explicitly allowed origin.');
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || input.length > 2048)
+    throw new Error('Target must be an http or https address without a username or password.');
   return url.href;
 }
 

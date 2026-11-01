@@ -25,7 +25,12 @@ assert.ok(!(await html.text()).includes(env.SCOUT_API_TOKEN));
 for(const path of ['/assets/app/main.js','/assets/ui/styles/tokens.css'])assert.equal((await request(path,undefined,false)).status,200);
 for(const path of ['/v1/browser-jobs','/v1/operations','/v1/captures/'+randomUUID()+'/image','/v1/artifacts/'+randomUUID()+'/content'])assert.equal((await request(path,undefined,false)).status,401);
 assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url:'http://exploration-fixture:8082/'},false)).status,401);
-for(const target_url of ['file:///tmp/test','http://example.com/','http://user:secret@exploration-fixture:8082/'])assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url})).status,400);
+for(const target_url of ['file:///tmp/test','http://user:secret@exploration-fixture:8082/'])assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url})).status,400);
+{
+  const local=randomUUID();
+  assert.equal((await request('/v1/browser-jobs',{job_id:local,kind:'explore',target_url:'http://host.docker.internal:18083/'})).status,202);
+  assert.ok([200,202].includes((await request(`/v1/browser-jobs/${local}/cancel`,{})).status));
+}
 assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url:'http://exploration-fixture:8082/',execute_shell:'forbidden'})).status,400);
 assert.equal((await request('/v1/browser-jobs',{job_id:randomUUID(),kind:'explore',target_url:'http://exploration-fixture:8082/',viewport_profile:'unsupported'})).status,400);
 

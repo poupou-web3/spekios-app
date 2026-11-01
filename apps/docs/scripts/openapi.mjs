@@ -84,7 +84,7 @@ export function openapi(catalog) {
   add('/v1/operations', 'get', 'operations', 'Status', 'Read delivery and queue snapshots');
   add('/v1/browser-jobs', 'get', 'listJobs', 'Jobs', 'List recent owned jobs and worker state');
   add('/v1/browser-jobs', 'post', 'submitJob', 'Jobs', 'Admit durable URL exploration or reproduction', {
-    description: 'At most ten active jobs. Exact allowed origin and provider availability are checked. Save job_id before sending. Identical ID/input retries reuse the original settings snapshot; changed input conflicts. Can change target data and consume model usage.',
+    description: 'At most ten active jobs. The address must be http or https without embedded credentials, and the provider must be available. Save job_id before sending. Identical ID/input retries reuse the original settings snapshot; changed input conflicts. Can change target data and consume model usage.',
     requestBody: body(ref('JobSubmission')),
     responses: { '202': response('New job admitted.', ref('JobAdmission')), '200': response('Original admission reused.', ref('JobAdmission')), ...errors },
   });
@@ -222,7 +222,7 @@ export function openapi(catalog) {
 
   const jobExplore = strict({
     project_id:uuid,task_id:uuid,job_id: uuid, kind: { const: 'explore', type: 'string' },
-    target_url: { type: 'string', maxLength: 2048, description: 'At most 2048 UTF-8 bytes. HTTP(S), no embedded credentials, exact operator-allowed origin.' },
+    target_url: { type: 'string', maxLength: 2048, description: 'At most 2048 UTF-8 bytes. HTTP(S), no embedded credentials.' },
     viewport_profile: choice('desktop', 'tablet', 'mobile'),
     auth_mode: choice('auto', 'sign_in', 'public'), session_id: uuid, auto_reproduce: bool,
     app_memory: { type: 'boolean', description: 'Override the saved memory default for this run. False explores without reading or recording cross-run memory.' },

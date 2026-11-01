@@ -105,11 +105,11 @@ test('manual navigation cancels automatic follow intent and late admission does 
   assert.equal(ui.state.trackedJobId,null);assert.equal(ui.location.hash,'#/settings');
   ui.state.trackedJobId='old-job';await ui.route();assert.equal(ui.state.trackedJobId,null);
 });
-test('an origin outside the public web is explained on the launch field',async()=>{
+test('a rejected address is explained on the launch field',async()=>{
   const ui=workspace({fetch:async()=>({ok:false,status:403,json:async()=>({error:'target_origin_not_allowed'})})});connect(ui);
   await ui.submitJob({kind:'explore',target_url:'https://10.0.0.8/'});
-  assert.match(ui.state.launchError,/Public https sites/);assert.equal(ui.state.error,'');
-  assert.match(ui.home(),/Public https sites/);assert.doesNotMatch(ui.shell(ui.home()),/Showing the last available data/);
+  assert.match(ui.state.launchError,/http or https/);assert.equal(ui.state.error,'');
+  assert.match(ui.home(),/http or https/);assert.doesNotMatch(ui.shell(ui.home()),/Showing the last available data/);
 });
 test('failed or cancelled admission without a run remains visible to its user',()=>{
   const ui=workspace();ui.state.trackedJobId='job';ui.state.jobs=[{job_id:'job',status:'failed',run_id:null,error:'<script>target failure</script>'}];

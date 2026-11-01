@@ -45,7 +45,7 @@ for (const shop of shops) {
 }
 if (options.host === '127.0.0.1' || options.host === 'localhost') {
   console.log(`Scout's browser runs in Docker. Give it http://host.docker.internal:${port}` +
-    `${options.pair ? ` (fixed: http://host.docker.internal:${port + 1})` : ''} and add that origin to SCOUT_ALLOWED_ORIGINS.`);
+    `${options.pair ? ` (fixed: http://host.docker.internal:${port + 1})` : ''}.`);
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

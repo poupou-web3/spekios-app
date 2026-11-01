@@ -36,7 +36,7 @@ export function launchUrlError(url){
 // Every URL entry point shares the Docker guidance and updates it without replacing the input.
 export function websiteLaunchHint(value){
   const docker=dockerAddress(value);
-  return docker?`The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${docker}. Its origin must be listed in SCOUT_ALLOWED_ORIGINS.`:'Same website? Its tests stay together.';
+  return docker?`The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${docker}.`:'Same website? Its tests stay together.';
 }
 export function updateWebsiteLaunchHint(container,value){
   container.querySelector?.('#website-url')?.removeAttribute('aria-invalid');
