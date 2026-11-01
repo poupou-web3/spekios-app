@@ -52,12 +52,14 @@ test('model output cannot add tools, invent controls or forge evidence', () => {
   assert.equal(blockedReason({...control,role:'link',href:'https://notbubblemaps.io/'},'https://bubblemaps.io'), 'outside_allowed_origin');
   assert.equal(blockedReason({...control,role:'link',href:'https://bubblemaps.io.evil.com/'},'https://bubblemaps.io'), 'outside_allowed_origin');
   assert.equal(blockedReason({...control,role:'link',href:'https://b.github.io/'},'https://a.github.io'), 'outside_allowed_origin');
-  assert.throws(() => validateTarget('http://name:secret@fixture/', ['http://fixture']), /explicitly allowed origin/);
-  assert.throws(() => validateTarget('http://unconfigured/', ['http://fixture']), /explicitly allowed origin/);
-  assert.equal(validateTarget('https://bubblemaps.io/map', ['http://fixture']), 'https://bubblemaps.io/map');
-  assert.throws(() => validateTarget('http://bubblemaps.io/', ['http://fixture']), /explicitly allowed origin/);
-  assert.throws(() => validateTarget('https://127.0.0.1/', ['http://fixture']), /explicitly allowed origin/);
-  assert.throws(() => validateTarget('https://app.internal/', ['http://fixture']), /explicitly allowed origin/);
+  assert.throws(() => validateTarget('http://name:secret@fixture/', []), /username or password/);
+  assert.throws(() => validateTarget('ftp://files.example/', []), /http or https/);
+  assert.equal(validateTarget('http://unconfigured/', []), 'http://unconfigured/');
+  assert.equal(validateTarget('https://bubblemaps.io/map', []), 'https://bubblemaps.io/map');
+  assert.equal(validateTarget('http://bubblemaps.io/', []), 'http://bubblemaps.io/');
+  assert.equal(validateTarget('https://127.0.0.1/', []), 'https://127.0.0.1/');
+  assert.equal(validateTarget('https://app.internal/', []), 'https://app.internal/');
+  assert.equal(validateTarget('http://host.docker.internal:18083/', []), 'http://host.docker.internal:18083/');
 });
 test('public pages load public subresources and stay on the entry site', () => {
   const page = 'https://v2.bubblemaps.io';

@@ -116,6 +116,6 @@ export async function submitJob(request,{fromSwitcher=false}={}){
       }
     }
     await refresh();
-  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){if(error.code==='target_origin_not_allowed'&&request.kind==='explore')state.launchError='Public https sites can be tested from here. Other addresses have to be added to this server’s allowed origins.';else state.error=error.message;}}
+  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){if(error.code==='target_origin_not_allowed'&&request.kind==='explore')state.launchError='That address can\'t be tested. Use an http or https URL without a username or password.';else state.error=error.message;}}
   finally{state.submitting=false;if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth))render();}
 }

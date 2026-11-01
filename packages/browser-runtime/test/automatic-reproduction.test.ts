@@ -126,9 +126,9 @@ test('automatic scheduler reserves once and defers capacity without confirming f
       await store.query("UPDATE browser_jobs SET status='cancelled',finished_at=now() WHERE job_id=$1",[(await taskFor(ready.actionId)).child_job_id]);
       await sweep();
     });
-    await t.test('scope revocation and source stop flags skip pending work',async()=>{
+    await t.test('an http target stays eligible when the origin list changes, and a stopped source is skipped',async()=>{
       const original=await source();await sweep({...gateway,configuredProviders:[]});process.env.SCOUT_ALLOWED_ORIGINS='http://different.invalid';
-      await sweep();assert.equal((await taskFor(original.actionId)).reason,'scope_unavailable');process.env.SCOUT_ALLOWED_ORIGINS=fixture.url;
+      await sweep();assert.equal((await taskFor(original.actionId)).status,'queued');assert.equal((await taskFor(original.actionId)).reason,'scheduled');process.env.SCOUT_ALLOWED_ORIGINS=fixture.url;
       const stopped=await source();await sweep({...gateway,configuredProviders:[]});await store.query('UPDATE runtime_runs SET auto_reproduction_cancel_id=$2,auto_reproduction_cancelled_at=now() WHERE run_id=$1',[stopped.run_id,randomUUID()]);
       await sweep();assert.equal((await taskFor(stopped.actionId)).status,'skipped');assert.equal((await taskFor(stopped.actionId)).reason,'source_unavailable');
     });

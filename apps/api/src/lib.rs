@@ -707,7 +707,7 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         .is_some_and(|p| p.iter().any(|p| p["configured"] == true));
     Json(json!({
         "mode":"local_qa_workspace", "unbounded_exploration":false,
-        "bounded_url_exploration":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"scope":"public_https_or_allowed_origins","requires_configured_model":true,"coverage_complete":false,
+        "bounded_url_exploration":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"scope":"http_or_https","requires_configured_model":true,"coverage_complete":false,
             "interactions":["navigate","click","fill","select","set_checked","scroll","submit"],"interaction_version":"browser-interactions-v2",
             "form_submission":"same_origin_search_or_operator_configured_test_form",
             "action_completion":{"version":"action-completion-v1","timeout_ms":5000,"sampled_frames":true,"network_and_console_evidence":true,"overlap_recheck":{"attempts":1,"timeout_ms":8000,"waits_for":["quiet_pixels","fonts","images"]}}},
