@@ -13,7 +13,7 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,launchUrlError,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {editOverrides,rebaseConfiguration,saveConfiguration,updateConfiguration} from './views/settings.js';
+import {editOverrides,numericFieldValue,rebaseConfiguration,saveConfiguration,updateConfiguration} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 root.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -29,7 +29,7 @@ root.addEventListener('compositionstart',()=>{state.composing=true;});
 root.addEventListener('compositionend',e=>{state.composing=false;captureInput(e.target);setTimeout(render,0);});
 function captureInput(target){
   if(target.id==='steering-focus')return updateSteeringFocus(target.value);
-  if(target.dataset.configurationField){const field=target.dataset.configurationField,value=target.type==='checkbox'?target.checked:target.type==='number'?(target.value===''?null:Number(target.value)):target.value;return updateConfiguration(field,value);}
+  if(target.dataset.configurationField){if(target.type==='number'&&target.validity?.badInput)return false;const field=target.dataset.configurationField,value=target.type==='checkbox'?target.checked:target.type==='number'?numericFieldValue(target.value):target.value;return updateConfiguration(field,value);}
   if(target.dataset.reviewField)updateReviewDraft(target.dataset.reviewAction,target.dataset.reviewField,target.value);
   if(target.id==='target-url')updateTargetUrl(target.value);
   const field={'run-search':'search'}[target.id];

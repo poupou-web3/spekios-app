@@ -8,6 +8,12 @@ import {state} from '../state.js';
 import {accessBanner} from './home.js';
 // Server bounds. Exploration limits are optional: empty means no limit.
 export const MAX_ACTIONS=10000,MAX_REPLAY_ACTIONS=100;
+// A number input's value is canonical ("0") while a decimal is still being typed ("0.0"). Keep that text.
+export function numericFieldValue(raw){
+  if(raw==='')return null;const n=Number(raw);return Number.isFinite(n)&&String(n)===raw?n:raw;
+}
+const finite=v=>typeof v==='number'?v:typeof v==='string'&&v.trim()!==''&&Number.isFinite(Number(v))?Number(v):NaN;
+const commitNumber=v=>v===null||v===''?null:Number.isFinite(finite(v))?finite(v):v;
 export const LIMITS=[['max_actions','maxActions','Maximum actions',1,MAX_ACTIONS,1],['max_minutes','maxMinutes','Maximum minutes',1,10080,1],
   ['max_tokens','maxTokens','Maximum reported tokens',1000,1000000000,1],['max_cost_usd','maxCostUsd','Maximum reported cost (USD)',0.01,100000,0.01],
   ['stop_after_idle_actions','stopAfterIdleActions','Stop after actions with nothing new',5,1000,1]];
@@ -18,7 +24,7 @@ const MAX_OVERRIDES=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const overrideRow=(o={})=>({project_id:o.projectId||'',provider:o.provider||'',model:o.model||'',...Object.fromEntries(LIMITS.map(([key,camel])=>[key,o.limits?.[camel]??null]))});
 export function overridePayload(row){
   const item={limits:{}};if(row.project_id.trim())item.project_id=row.project_id.trim();if(row.provider)item.provider=row.provider;if(row.model.trim())item.model=row.model.trim();
-  for(const [key] of LIMITS)if(row[key]!==null&&row[key]!=='')item.limits[key]=row[key];
+  for(const [key] of LIMITS){const n=commitNumber(row[key]);if(n!==null)item.limits[key]=n;}
   return item;
 }
 export function configurationValues(settings=state.settings){
@@ -35,8 +41,8 @@ export function configurationDraft(){
 export function configurationError(values){
   if(!MODEL_PROVIDERS.includes(values.provider))return 'Choose a supported provider.';
   if(typeof values.model!=='string'||/[\x00-\x1f\x7f]/.test(values.model)||! /^[A-Za-z0-9/:._-]{1,200}$/.test(values.model.trim()))return 'Enter a model ID using letters, numbers, / : . _ or - (up to 200 characters).';
-  for(const [key,max,label] of [['max_auto_reproductions',3,'Maximum automatic cases'],['max_auto_replay_actions',MAX_REPLAY_ACTIONS,'Total replay actions']])if(!Number.isInteger(values[key])||values[key]<1||values[key]>max)return `${label} must be a whole number from 1 to ${max}.`;
-  const limitError=(row,prefix='')=>{for(const [key,,label,min,max,step] of LIMITS){const v=row[key];if(v===null)continue;if(typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||step===1&&!Number.isInteger(v))return `${prefix}${label} must be empty (no limit) or ${step===1?'a whole number':'a number'} from ${min} to ${max}.`;}return '';};
+  for(const [key,max,label] of [['max_auto_reproductions',3,'Maximum automatic cases'],['max_auto_replay_actions',MAX_REPLAY_ACTIONS,'Total replay actions']]){const n=finite(values[key]);if(!Number.isInteger(n)||n<1||n>max)return `${label} must be a whole number from 1 to ${max}.`;}
+  const limitError=(row,prefix='')=>{for(const [key,,label,min,max,step] of LIMITS){const v=row[key];if(v===null||v==='')continue;const n=finite(v);if(!Number.isFinite(n)||n<min||n>max||step===1&&!Number.isInteger(n))return `${prefix}${label} must be empty (no limit) or ${step===1?'a whole number':'a number'} from ${min} to ${max}.`;}return '';};
   const own=limitError(values);if(own)return own;
   if(values.limit_overrides.length>MAX_OVERRIDES)return `Use at most ${MAX_OVERRIDES} limit overrides.`;
   const seen=new Set();
@@ -50,8 +56,9 @@ export function configurationError(values){
     const match=JSON.stringify([row.project_id.trim(),row.provider,row.model.trim()]);if(seen.has(match))return label+'another override matches the same project and model.';seen.add(match);
   }
   const split=values.exploration_strategy;
-  if(STRATEGY.some(([key])=>!Number.isInteger(split[key])||split[key]<0||split[key]>100))return 'Strategy shares must be whole percentages from 0 to 100.';
-  if(STRATEGY.reduce((sum,[key])=>sum+split[key],0)!==100)return 'Strategy shares must add up to 100%.';
+  const share=key=>finite(split[key]);
+  if(STRATEGY.some(([key])=>!Number.isInteger(share(key))||share(key)<0||share(key)>100))return 'Strategy shares must be whole percentages from 0 to 100.';
+  if(STRATEGY.reduce((sum,[key])=>sum+share(key),0)!==100)return 'Strategy shares must add up to 100%.';
   if(split.breadth+split.depth===0)return 'Give new territory or deep journeys a share.';
   const nav=values.navigation_model;
   if(nav.provider){
@@ -98,7 +105,9 @@ export async function saveConfiguration(){
   if(draft.error){render();return;}
   draft.requestId??=crypto.randomUUID();draft.saving=true;draft.message='';render();
   const token=state.token,developmentAccess=state.developmentAccess,sameSession=()=>token===state.token&&developmentAccess===state.developmentAccess;
-  const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),
+  const numbers=Object.fromEntries([...LIMITS.map(([key])=>[key,commitNumber(draft.values[key])]),['max_auto_reproductions',commitNumber(draft.values.max_auto_reproductions)],['max_auto_replay_actions',commitNumber(draft.values.max_auto_replay_actions)]]);
+  const exploration_strategy={...draft.values.exploration_strategy};for(const [key] of STRATEGY)exploration_strategy[key]=commitNumber(exploration_strategy[key]);
+  const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,...numbers,exploration_strategy,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),
     navigation_model:draft.values.navigation_model.provider?{provider:draft.values.navigation_model.provider,model:draft.values.navigation_model.model.trim()}:null};
   try{
     const saved=await (await api('/v1/exploration-settings',body)).json();if(!sameSession()||state.configurationDraft!==draft)return;

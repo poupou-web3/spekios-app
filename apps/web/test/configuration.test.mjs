@@ -19,6 +19,8 @@ test('defaults validate the same supported models, limits and free-only restrict
   assert.equal(ui.configurationError({...values,max_actions:50,max_auto_replay_actions:100}),'');
   assert.equal(ui.configurationError({...values,max_actions:null,max_minutes:null,max_tokens:null,max_cost_usd:null,stop_after_idle_actions:null}),'','Every limit can be empty: no limit.');
   assert.equal(ui.configurationError({...values,max_actions:10000,max_minutes:10080,max_tokens:1000000000,max_cost_usd:2.5}),'');
+  assert.equal(ui.configurationError({...values,max_cost_usd:'1.50'}),'');
+  assert.match(ui.configurationError({...values,max_cost_usd:'0.0'}),/Maximum reported cost/);
   assert.equal(ui.configurationError({...values,provider:'openai',model:'provider-model',free_only:false}),'');
   assert.equal(ui.configurationError({...values,provider:'meta',model:'muse-wonder-1.0',free_only:false}),'');
   for(const exploration_strategy of [{breadth:50,depth:30,rewalk:30,adaptive:true},{breadth:0,depth:0,rewalk:100,adaptive:true},{breadth:50.5,depth:29.5,rewalk:20,adaptive:true},{breadth:null,depth:80,rewalk:20,adaptive:true},{breadth:-5,depth:85,rewalk:20,adaptive:true}])
@@ -35,6 +37,15 @@ test('changing providers never carries another provider model or free-only billi
   ui.updateConfiguration('provider','meta');assert.equal(d.values.model,'muse-spark-1.3');
   assert.match(ui.configurationView(),/Meta AI/);
   assert.match(ui.configurationView(),/muse-wonder-1\.0/);
+});
+test('typing a decimal keeps the unfinished text and saves a number',async()=>{
+  const calls=[],ui=workspace(async(path,options)=>{calls.push(JSON.parse(options.body));return response({revision:4,settings:{...defaults,maxCostUsd:1.5}});});
+  const input={type:'number',value:'0.0',validity:{badInput:false},dataset:{configurationField:'max_cost_usd'}};
+  ui.handlers.input[0]({target:input});assert.equal(ui.configurationDraft().values.max_cost_usd,'0.0');assert.match(ui.configurationView(),/value="0.0"/);
+  input.validity={badInput:true};input.value='';const html=ui.node.innerHTML;ui.handlers.input[0]({target:input});
+  assert.equal(ui.configurationDraft().values.max_cost_usd,'0.0');assert.equal(ui.node.innerHTML,html);
+  input.validity={badInput:false};input.value='1.50';ui.handlers.input[0]({target:input});assert.equal(ui.configurationError(ui.configurationDraft().values),'');
+  await ui.saveConfiguration();assert.equal(calls[0].max_cost_usd,1.5);
 });
 test('dirty drafts survive polling while clean defaults advance and stale responses cannot roll them back',()=>{
   const ui=workspace();ui.updateConfiguration('max_actions',9);const d=ui.configurationDraft();
