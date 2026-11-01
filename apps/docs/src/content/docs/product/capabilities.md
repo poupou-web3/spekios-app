@@ -38,7 +38,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 - An external observe/act/assess API.
 - Source-repository integration, automatic code fixes or source-location inference.
 - Human account signup/invitations, hosted identity providers, subscription billing and public community sharing.
-- Kubernetes manifests. Several browser slots share the queue, and an interrupted exploration continues in a new run up to three times. A dispatched action is not repeated. Private sign-in is still one login at a time.
+- Kubernetes manifests. Several browser slots share the queue, and interrupted jobs stay interrupted after a server restart. Choose Continue exploration or Run again to start more work. A dispatched action is not repeated during recovery. Private sign-in is still one login at a time.
 - Full tool input/output payload auditing, approved training export or continuous video capture. Route/tool metadata audit is implemented.
 - A built-in recheck scheduler, workspace spend budgets, hand-written test cases or a chat-style session view. Run [scripts/scout-recheck.mjs](../../guides/triage/#recheck-after-a-deploy) from CI or cron for scheduled rechecks.
 

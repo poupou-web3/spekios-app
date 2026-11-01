@@ -15,7 +15,7 @@ Built:
 - **Record:** append-only actions, captures, assessments, issues, triage, verifications and [human reviews](../exploration/finding-reviews.md), with evidence in the bucket and events in ClickHouse.
 - **Make available:** the workspace, the issues page, the back office, [run reports and exports](../runtime/reports.md).
 - **Report back:** 32 MCP/HTTP tools, coding-agent reports that separate new findings from known behavior, [fix verification](../../apps/docs/src/content/docs/guides/fix-verification.md) and [deployment rechecks](../exploration/triage.md#recheck-after-a-deploy) with a CI script.
-- **Run safely:** target sites in an [isolated browser sandbox](../../apps/docs/src/content/docs/operators/security.md), several jobs at once, interrupted explorations resumed.
+- **Run safely:** target sites in an [isolated browser sandbox](../../apps/docs/src/content/docs/operators/security.md), several jobs at once, interrupted explorations continued on request.
 
 Spec decisions:
 

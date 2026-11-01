@@ -1,11 +1,7 @@
 import type { Store } from './store.js';
 
-// Matches browser_jobs.resumes. The interrupted run is kept; a continuation is a new run.
-export const MAX_JOB_RESUMES = 3;
 export const INTERRUPTED = 'Worker stopped during execution. No browser action was repeated.';
 export const CANCELLED = 'Cancelled. No browser action was repeated.';
-export const BUDGET_USED = 'Exploration stopped after its action budget was used. In-flight actions were not repeated.';
-export const CONTINUATION_LIMIT = 'Exploration stopped after 3 continuations. In-flight actions were not repeated.';
 
 export const jobLock = (jobId: string) => 'job:' + jobId;
 
@@ -20,12 +16,7 @@ export const CLAIM_CANDIDATE = `SELECT job_id FROM browser_jobs
 export const CLAIM_JOB = `UPDATE browser_jobs SET status='running', worker_id=$2, started_at=now()
   WHERE job_id=$1 AND status='queued' RETURNING *`;
 
-export type Continuation =
-  | { kind: 'resume' }
-  | { kind: 'requeue' }
-  | { kind: 'finish'; status: 'cancelled' | 'interrupted'; error: string };
-
-// A crash continuation keeps spending the original action budget.
+// Legacy automatic continuations keep spending the original action budget.
 // A person asking to continue spends the new job's own limit from the frontier.
 export function resumeBudget(job: { continueFrom?: boolean; maxActions?: number | null }, carried: number):
   { maxActions: number | null; carriedActions: number } | { stop: true } {
@@ -34,21 +25,6 @@ export function resumeBudget(job: { continueFrom?: boolean; maxActions?: number 
   const remaining = fresh || budget == null ? (budget == null ? Infinity : budget) : budget - carried;
   if (!(remaining >= 1)) return { stop: true };
   return { maxActions: remaining === Infinity ? null : remaining, carriedActions: fresh ? 0 : carried };
-}
-
-export function continuation(job: { kind?: string; resumes: number; runId: string | null; cancelId: string | null; maxActions?: number | null },
-  dispatchedThisRun: number, dispatchedEarlier: number): Continuation {
-  if (job.cancelId) return { kind: 'finish', status: 'cancelled', error: CANCELLED };
-  // Nothing was dispatched, so starting again does not repeat a browser action.
-  // A run that already used its three continuations is finished even if this attempt dispatched nothing.
-  if (!job.runId || (dispatchedThisRun === 0 && job.resumes < MAX_JOB_RESUMES)) return { kind: 'requeue' };
-  if (job.kind !== 'explore') return { kind: 'finish', status: 'interrupted', error: INTERRUPTED };
-  if (job.resumes >= MAX_JOB_RESUMES) return { kind: 'finish', status: 'interrupted', error: CONTINUATION_LIMIT };
-  // No action limit (null) always leaves room to continue.
-  const budget = job.maxActions;
-  if (budget !== null && (budget === undefined || !Number.isInteger(budget) || budget < 1 || dispatchedThisRun + dispatchedEarlier >= budget))
-    return { kind: 'finish', status: 'interrupted', error: BUDGET_USED };
-  return { kind: 'resume' };
 }
 
 export function runIdList(value: unknown): string[] {
@@ -93,7 +69,7 @@ export async function memberScopes(store: Store) {
   ) members ORDER BY workspace_id, user_id`)).rows as { workspace_id: string; user_id: string }[];
 }
 
-// The caller holds jobLock. Earlier runs stay as evidence; the job points at its newest run after the next claim.
+// The caller holds jobLock. Recovery preserves evidence without starting another run.
 export async function noteInterruption(store: Store, runId: string) {
   await store.recover(runId);
   await store.transaction(async () => {
@@ -107,32 +83,15 @@ export async function noteInterruption(store: Store, runId: string) {
 }
 
 export async function abandonJob(store: Store, jobId: string) {
-  let job = (await store.query("SELECT * FROM browser_jobs WHERE job_id=$1 AND status='running'", [jobId])).rows[0];
+  const job = (await store.query("SELECT * FROM browser_jobs WHERE job_id=$1 AND status='running'", [jobId])).rows[0];
   if (!job) return;
   await store.withScope({ workspaceId: job.workspace_id, userId: job.user_id, agentId: job.agent_id, projectId: job.project_id, taskId: job.task_id }, async () => {
     if (job.run_id) await noteInterruption(store, job.run_id);
-    job = (await store.query("SELECT * FROM browser_jobs WHERE job_id=$1 AND status='running'", [jobId])).rows[0];
-    if (!job) return;
-    const earlier = runIdList(job.previous_run_ids);
-    const thisRun = job.run_id ? await dispatchedCount(store, [job.run_id]) : 0;
-    const decision = continuation({
-      kind: job.request?.kind, resumes: Number(job.resumes ?? 0), runId: job.run_id ?? null, cancelId: job.cancel_id ?? null, maxActions: job.settings?.maxActions,
-    }, thisRun, await dispatchedCount(store, earlier));
-    if (decision.kind === 'resume') {
-      const updated = await store.query(`UPDATE browser_jobs SET status='queued', worker_id=NULL, started_at=NULL, finished_at=NULL, error=NULL, next_attempt_at=now(),
-        resumes=resumes+1, previous_run_ids=previous_run_ids || ARRAY[run_id]::uuid[], run_id=NULL
-        WHERE job_id=$1 AND status='running' AND cancel_id IS NULL AND resumes<$2 AND run_id IS NOT NULL RETURNING job_id`, [jobId, MAX_JOB_RESUMES]);
-      if (updated.rowCount) return;
-    } else if (decision.kind === 'requeue') {
-      const updated = await store.query(`UPDATE browser_jobs SET status='queued', worker_id=NULL, started_at=NULL, finished_at=NULL, error=NULL, next_attempt_at=now(), run_id=NULL
-        WHERE job_id=$1 AND status='running' AND cancel_id IS NULL RETURNING job_id`, [jobId]);
-      if (updated.rowCount) return;
-    }
-    const current = (await store.query("SELECT cancel_id FROM browser_jobs WHERE job_id=$1 AND status='running'", [jobId])).rows[0];
-    if (!current) return;
-    const cancelled = !!current.cancel_id;
-    await store.query("UPDATE browser_jobs SET status=$2, error=$3, finished_at=now() WHERE job_id=$1 AND status='running'",
-      [jobId, cancelled ? 'cancelled' : 'interrupted', cancelled ? CANCELLED : decision.kind === 'finish' ? decision.error : INTERRUPTED]);
+    // Read cancellation in the update so a stop requested during recovery wins.
+    await store.query(`UPDATE browser_jobs SET
+      status=CASE WHEN cancel_id IS NOT NULL THEN 'cancelled' ELSE 'interrupted' END,
+      error=CASE WHEN cancel_id IS NOT NULL THEN $2 ELSE $3 END, finished_at=now()
+      WHERE job_id=$1 AND status='running'`, [jobId, CANCELLED, INTERRUPTED]);
   });
 }
 
