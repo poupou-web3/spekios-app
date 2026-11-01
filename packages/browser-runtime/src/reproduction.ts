@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Store } from './store.js';
 import { MAX_REPLAY_ORDINAL, MAX_REPLAY_STEPS, isUuid, type BrowserCommand, type Capture } from './contracts.js';
-import { sameObservedState, stateFingerprint } from './exploration-policy.js';
+import { sameObservedState, sameRegisteredSite, stateFingerprint } from './exploration-policy.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
 import { observedCommand } from './browser-interactions.js';
 import type { FixVerification } from './fix-verification.js';
@@ -59,11 +59,11 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
     if (steps.length === 0) {
       if (command?.type !== 'navigate' || command.url !== source.target_url) throw new Error('Replay must begin with the original navigation.');
     } else if (command?.type === 'navigate') {
-      // Returns reopen the entry page; resumes reopen a same-origin page that an
-      // earlier run observed. Both replay as the exact recorded navigation.
+      // Returns reopen the entry page; resumes reopen a page on the same
+      // registered domain that an earlier run observed. Both replay as the exact recorded navigation.
       const permitted = action.spec.exploration?.purpose === 'return' ? command.url === source.target_url
-        : action.spec.exploration?.purpose === 'resume' && new URL(command.url).origin === origin;
-      if (!permitted) throw new Error('Source navigation is not a recorded return or resume within the entry origin.');
+        : action.spec.exploration?.purpose === 'resume' && sameRegisteredSite(origin, new URL(command.url));
+      if (!permitted) throw new Error('Source navigation is not a recorded return or resume within the entry site.');
     } else {
       if (!command?.control) throw new Error('Source path includes a missing control.');
       observedCommand(command,before,origin);

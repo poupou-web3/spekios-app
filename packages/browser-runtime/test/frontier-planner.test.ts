@@ -290,10 +290,15 @@ test('remembered URLs with secrets, sign-out or risky actions are never reopened
   const origin = 'https://app.example';
   for (const url of [origin + '/products', origin + '/search?q=notebook', origin + '/#/settings', origin + '/docs/guide.html'])
     assert.equal(jumpableUrl(url, origin), true, url);
+  for (const url of ['https://v2.bubblemaps.io/eth', 'https://intel.bubblemaps.io/', 'https://www.bubblemaps.io/'])
+    assert.equal(jumpableUrl(url, 'https://bubblemaps.io'), true, url);
   for (const url of [origin + '/reset?token=abc', origin + '/invite?code=1', origin + '/callback?state=x&session=y', origin + '/logout', origin + '/account/sign-out',
     origin + '/items/delete', origin + '/checkout', origin + '/billing/upgrade', 'https://other.example/products', 'http://app.example/products',
-    'https://user:pass@app.example/', origin + '/%E0%A4%A', 'not a url'])
+    'https://user:pass@app.example/', origin + '/%E0%A4%A', 'not a url', 'https://notbubblemaps.io/', 'https://b.github.io/'])
     assert.equal(jumpableUrl(url, origin), false, url);
+  assert.equal(jumpableUrl('https://notbubblemaps.io/', 'https://bubblemaps.io'), false);
+  assert.equal(jumpableUrl('https://evil.co.uk/', 'https://www.example.co.uk'), false);
+  assert.equal(jumpableUrl('https://shop.example.co.uk/products', 'https://www.example.co.uk'), true);
 });
 
 const link = (id: string, href: string): ObservedControl => ({control_id:id,role:'link',name:id,href,disabled:false,ambiguous:false,submits_form:false});
