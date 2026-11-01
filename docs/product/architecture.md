@@ -26,6 +26,7 @@ Spec decisions:
 | Knowledge base | Implemented as triage: intended behavior and known bugs, matched in later runs by page, control, viewport and sign-in state. Free-text product notes are deferred. |
 | Triage | `bug`, `intended_behavior`, `duplicate`, `needs_review`. Agents decide, but never replace a person's decision. Known behavior is labelled, never dropped. |
 | Exploration strategy | Each run shares its actions between new territory, deep journeys and re-walks of the app map, 50/30/20 by default, adaptive and configurable per user ([guide](../../apps/docs/src/content/docs/guides/exploration-strategy.md)). Depth and coverage per level are reported for each run and across runs. |
+| Model cost | Unchanged screens reuse an earlier run's ranking instead of a new planning call, and an optional cheaper model handles navigation, with a full reassessment when its result is not clean ([guide](../../apps/docs/src/content/docs/guides/exploration-cost.md)). |
 | Budgets | No limit by default. Each user sets optional action, time, token and cost limits per run, with project and model overrides ([exploration limits](../../apps/docs/src/content/docs/guides/exploration-limits.md)). Workspace-wide spend budgets are deferred. |
 | Schedules and CI | Deployment rechecks through the API, MCP and `scripts/scout-recheck.mjs`. A built-in scheduler is deferred: run the script from CI or cron. |
 
