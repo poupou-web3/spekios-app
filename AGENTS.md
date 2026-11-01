@@ -12,6 +12,10 @@ Most of the time, start that branch from an up-to-date `main`:
 
 Use a short, descriptive branch name for the change. Keep unrelated work on its own branch.
 
+## Commits
+
+Do not add `Co-authored-by` trailers, or any other co-author attribution, to commit messages.
+
 ## Tests
 
 Agents do not have to run the full test suite on every change. They should run every test that the change may have affected. If it is unclear whether a test is affected, run it.
