@@ -5,11 +5,14 @@ import type { Store } from './store.js';
 import { isUuid } from './contracts.js';
 import { AuthVault } from './auth-session.js';
 import { accessSignals, AccessStopped } from './access-detection.js';
+import { AccountCreation, testAccount, type TestAccount, type AccountStep } from './account-creation.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 export type AccessResult={context_id:string;session_id:string|null;verification:string}|null;
 export type AccessReason='login_required'|'login_available'|'user_requested'|'session_expired';
 type Active={id:string;runId:string;store:Store;page:Page;origin:string;targetUrl:string;mode:string;reason:AccessReason;
   status:'waiting'|'active';lease?:string;client?:string;frame?:string;inputs:Map<string,string>;
+  account?:{id:string;fingerprint:string;details:TestAccount;creating:boolean};
   baseline:string;timer:ReturnType<typeof setTimeout>;cleanup?:()=>void;resolve:(result:AccessResult)=>void;reject:(error:Error)=>void};
 const same=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);};
 export function validateHumanInput(value:unknown):Record<string,any>{
@@ -35,7 +38,7 @@ export class AccessHandoff {
       res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
       if(!same(req.headers.authorization??'','Bearer '+token)){res.writeHead(401);res.end();return;}
       try{
-        const match=/^\/(access|sessions)\/([a-f0-9-]{36})\/(start|screen|input|complete|skip|cancel|revoke)$/.exec(req.url??'');
+        const match=/^\/(access|sessions)\/([a-f0-9-]{36})\/(start|screen|input|complete|skip|cancel|revoke|create-account)$/.exec(req.url??'');
         if(!match||!isUuid(match[2])||(req.method!=='POST'&&!(req.method==='GET'&&match[3]==='screen')))throw new Error('not_found');
         let body=Buffer.alloc(0);for await(const chunk of req){body=Buffer.concat([body,chunk]);if(body.length>8192)throw new Error('invalid_input');}
         const value=body.length?JSON.parse(body.toString()):{};
@@ -47,7 +50,7 @@ export class AccessHandoff {
         if(Buffer.isBuffer(response)){const a=this.active;if(!a||a.id!==match[2])throw new Error('access_closed');
           res.setHeader('Content-Type','image/png');res.setHeader('X-Scout-Frame-Id',a.frame!);res.end(response);
         }else{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(response));}
-      }catch(error){const allowed=['not_found','invalid_input','access_closed','access_claimed','lease_required','stale_frame','outside_app','login_not_complete','not_editable','skip_unavailable'];
+      }catch(error){const allowed=['not_found','invalid_input','access_closed','access_claimed','lease_required','stale_frame','outside_app','login_not_complete','not_editable','skip_unavailable','invalid_account_details','account_attempt_conflict','account_creation_in_progress'];
         const code=error instanceof Error&&allowed.includes(error.message)?error.message:'private_control_failed';
         res.writeHead(code==='not_found'?404:409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:code}));}
     });
@@ -84,9 +87,47 @@ export class AccessHandoff {
     try{await a.store.transaction(async()=>{
       await a.store.query('UPDATE browser_access_requests SET status=$2,session_id=$3,verification=$4,finished_at=now() WHERE access_id=$1',
         [a.id,status,result?.session_id??null,result?.verification??null]);
+      if(status==='skipped')await a.store.query("UPDATE runtime_runs SET config=config || '{\"auth_mode\":\"public\"}'::jsonb WHERE run_id=$1",[a.runId]);
       await a.store.event(a.runId,'access.'+status,{access_id:a.id,context_id:result?.context_id??null,session_id:result?.session_id??null,verification:result?.verification??null,private_observation:true});
     });}catch{a.reject(new Error('Login handoff state could not be saved.'));throw new Error('private_control_failed');}
     if(status==='completed'||status==='skipped')a.resolve(result);else a.reject(new AccessStopped('access_'+status));
+  }
+  private async createAccount(a:Active,remember:boolean){
+    const attempt=a.account!,driver=new AccountCreation(attempt.details,a.origin);
+    let outcome:AccountStep='unsupported_signup';
+    try{
+      for(let step=0;step<8;step++){
+        outcome=await this.serial(async()=>{
+          if(this.active!==a)throw new Error('access_closed');
+          const run=(await a.store.pool.query('SELECT cancel_id FROM runtime_runs WHERE run_id=$1',[a.runId])).rows[0];
+          if(!run||run.cancel_id){await this.finish('cancelled');throw new Error('access_closed');}
+          return driver.step(a.page);
+        });
+        if(outcome!=='progress')break;
+        await delay(300);
+      }
+      if(outcome==='ready'){
+        await this.serial(async()=>{
+          if(this.active!==a)throw new Error('access_closed');
+          const response=await a.page.goto(a.targetUrl,{waitUntil:'load',timeout:5000});
+          const signals=await accessSignals(a.page);
+          if(!response||response.status()>=400||new URL(a.page.url()).origin!==a.origin||signals.login_form||!signals.signed_in){outcome='verification_required';return;}
+          const verification='account_created_entry_page_sign_out_control',contextId=randomUUID();
+          const sessionId=remember?await this.vault.save(a.page.context(),{session_id:contextId,origin:a.origin,execution_mode:a.mode},a.runId,verification):null;
+          await this.finish('completed',{context_id:contextId,session_id:sessionId,verification});
+        });
+        if(this.active!==a)return;
+      }
+    }catch{outcome='unsupported_signup';}
+    await this.serial(async()=>{
+      if(this.active!==a)return;
+      attempt.creating=false;
+      const reason=outcome==='progress'?'signup_not_completed':outcome;
+      await a.store.transaction(async()=>{
+        await a.store.query('UPDATE browser_access_requests SET verification=$2 WHERE access_id=$1',[a.id,'account_creation_help_'+reason]);
+        await a.store.event(a.runId,'access.account_creation_needs_help',{access_id:a.id,account_id:attempt.id,reason,private_observation:true});
+      });
+    });
   }
   private async control(id:string,action:string,body:Record<string,any>,lease:string):Promise<Buffer|Record<string,unknown>>{
     const a=this.active;if(!a||a.id!==id)throw new Error('access_closed');
@@ -102,7 +143,6 @@ export class AccessHandoff {
       return {lease:a.lease,viewport:a.page.viewportSize(),expires_in_seconds:600};
     }
     if(action==='skip'&&a.status==='waiting'){
-      if(a.reason!=='login_available')throw new Error('skip_unavailable');
       await this.finish('skipped');return {status:'skipped'};
     }
     // Cancelling an unclaimed request never gives control to a second browser.
@@ -110,11 +150,29 @@ export class AccessHandoff {
     if(!a.lease||!same(lease,a.lease))throw new Error('lease_required');
     if(action==='cancel'){await this.finish('cancelled');return {status:'cancelled'};}
     if(new URL(a.page.url()).origin!==a.origin)throw new Error('outside_app');
+    if(action==='create-account'){
+      if(Object.keys(body).some(k=>!['attempt_id','email','name','remember'].includes(k))||!isUuid(body.attempt_id)||typeof body.remember!=='boolean')throw new Error('invalid_input');
+      const fingerprint=createHash('sha256').update(JSON.stringify([body.email,body.name,body.remember])).digest('hex');
+      if(a.account){
+        if(a.account.id!==body.attempt_id||a.account.fingerprint!==fingerprint)throw new Error('account_attempt_conflict');
+        return {status:a.account.creating?'creating':'needs_help',account:a.account.details};
+      }
+      const details=testAccount(body.email,body.name);
+      await this.vault.saveAccount(body.attempt_id,details,a.origin,a.mode,a.runId);
+      await a.store.transaction(async()=>{
+        await a.store.query("UPDATE browser_access_requests SET verification='account_creation_in_progress' WHERE access_id=$1",[id]);
+        await a.store.event(a.runId,'access.account_creation_requested',{access_id:id,account_id:body.attempt_id,private_observation:true});
+      });
+      a.account={id:body.attempt_id,fingerprint,details,creating:true};
+      void this.createAccount(a,body.remember).catch(()=>{});
+      return {status:'creating',account:details};
+    }
     if(action==='screen'){
       const image=await a.page.screenshot({type:'png',fullPage:false,caret:'hide',timeout:5000});
       a.frame=randomUUID();return image; // Transient display only: no spool, bucket, model or event payload.
     }
     if(action==='input'){
+      if(a.account?.creating)throw new Error('account_creation_in_progress');
       const input=validateHumanInput(body),fingerprint=createHash('sha256').update(JSON.stringify(input)).digest('hex');
       if(a.inputs.has(input.input_id)){if(a.inputs.get(input.input_id)!==fingerprint)throw new Error('invalid_input');return {accepted:true,reused:true};}
       if(a.inputs.size>=1000)throw new Error('invalid_input');
@@ -136,6 +194,7 @@ export class AccessHandoff {
       a.frame=undefined;return {accepted:true};
     }
     if(action==='complete'){
+      if(a.account?.creating)throw new Error('account_creation_in_progress');
       if(Object.keys(body).some(k=>k!=='remember')||typeof body.remember!=='boolean')throw new Error('invalid_input');
       if((await accessSignals(a.page)).login_form)throw new Error('login_not_complete');
       // Check the requested entry page again; do not accept a closed popup as proof of access.

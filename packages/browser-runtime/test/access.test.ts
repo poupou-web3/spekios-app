@@ -109,6 +109,46 @@ test('private sign-in resumes exploration without recording authentication mater
       assert.equal((await request(row.access_id,'skip',{})).status,200);
       const result=await pending;assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
       assert.equal(result.report.actions.length,2);assert.ok(result.report.events.some(e=>e.event_type==='access.skipped'));
+      assert.equal(result.report.run.config.auth_mode,'public');
+    });
+    await t.test('explicit account creation uses private credentials and resumes authenticated exploration once',async()=>{
+      const pending=explore(store,fixture.url+'/auth/required',{...options,maxActions:3}),row=await waitRequest();
+      assert.equal((await request(row.access_id,'create-account',{attempt_id:randomUUID(),email:'agent@example.test',name:'Spekios QA',remember:false})).status,409,'A private lease is required.');
+      const {lease}=await (await request(row.access_id,'start',{client_id:randomUUID()})).json();
+      const body={attempt_id:randomUUID(),email:'agent@example.test',name:'Spekios QA',remember:true};
+      const response=await request(row.access_id,'create-account',body,lease);assert.equal(response.status,200);
+      const {account}=await response.json();assert.equal(account.email,body.email);assert.ok(account.password.length>=24);
+      assert.equal((await request(row.access_id,'create-account',body,lease)).status,200,'An uncertain request must reuse its account attempt.');
+      assert.equal((await request(row.access_id,'create-account',{...body,attempt_id:randomUUID()},lease)).status,409);
+      const result=await pending;assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      assert.equal(fixture.createdAccounts.length,1);assert.equal(fixture.createdAccounts[0].password,account.password);
+      assert.equal(result.report.run.config.auth_contexts[0].verification,'account_created_entry_page_sign_out_control');
+      assert.ok(result.report.run.config.auth_contexts[0].session_id);
+      const sealed=await readFile(join(access.vault.directory,body.attempt_id+'.account-sealed'));assert.ok(!sealed.includes(Buffer.from(account.password)));
+      const manifest=(await store.get(result.report.run.manifest_key)).toString();
+      for(const marker of [account.password,account.email,'PRIVATE_SIGNUP_ONLY'])assert.ok(!manifest.includes(marker),'Private signup leaked into run evidence.');
+      await access.vault.revoke(result.report.run.config.auth_contexts[0].session_id);
+    });
+    await t.test('required login can be declined for the rest of the run while public coverage continues',async()=>{
+      const pending=explore(store,fixture.url+'/recovery/public-access',{...options,maxActions:8});
+      const row=await waitRequest();assert.equal(row.reason,'login_required');
+      assert.equal((await request(row.access_id,'skip',{})).status,200);
+      const result=await pending;
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      assert.equal(result.report.run.config.auth_mode,'public');
+      assert.equal(result.report.events.filter(e=>e.event_type==='access.requested').length,1);
+      assert.equal(result.report.events.filter(e=>e.event_type==='access.public_recovery').length,2,'A second login gate must recover without asking again.');
+      assert.ok(result.report.captures.some(c=>c.observation.url===fixture.url+'/help'),'The public Help branch must still be explored.');
+      assert.ok(!JSON.stringify(result.report.captures).includes('PRIVATE_LOGIN_ONLY'));
+    });
+    await t.test('declining a required entry login records public-only access as blocked',async()=>{
+      const pending=explore(store,fixture.url+'/auth/required',options),row=await waitRequest();
+      assert.equal((await request(row.access_id,'skip',{})).status,200);
+      const result=await pending;
+      assert.equal(result.report.run.lifecycle,'blocked');assert.equal(result.report.run.error,'login_required');
+      assert.equal(result.report.run.config.auth_mode,'public');
+      assert.ok(result.report.events.some(e=>e.event_type==='access.skipped'));
+      assert.ok(!JSON.stringify(result.report.captures).includes('PRIVATE_LOGIN_ONLY'));
     });
     await t.test('public-only mode reports a required login as blocked',async()=>{
       const result=await explore(store,fixture.url+'/auth/required',{...options,authMode:'public'});

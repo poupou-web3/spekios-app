@@ -132,6 +132,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/history/domain", get(history::summary))
         .route("/v1/identity", get(identity::whoami))
         .route(
+            "/v1/browser-access/account-identity",
+            get(access::account_identity),
+        )
+        .route(
             "/v1/workspaces",
             axum::routing::post(identity::create_workspace),
         )

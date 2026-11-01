@@ -4,18 +4,19 @@ import { join } from 'node:path';
 import type { BrowserContext } from 'playwright';
 import { isUuid, workspaceId, userId } from './contracts.js';
 import type { Store } from './store.js';
+import type { TestAccount } from './account-creation.js';
 
 export type SessionState = Awaited<ReturnType<BrowserContext['storageState']>>;
 export type SessionScope = { session_id: string; origin: string; execution_mode: string; workspace_id?:string; user_id?:string };
 const associatedData = (scope: SessionScope) => Buffer.from(JSON.stringify({ version:1, workspace_id:scope.workspace_id??workspaceId,user_id:scope.user_id??userId,...scope }));
-export function sealSession(state: SessionState, scope: SessionScope, key: Buffer) {
+function sealValue(state: unknown, scope: SessionScope, key: Buffer) {
   if (key.length !== 32) throw new Error('Authentication vault key is unavailable.');
   const iv=randomBytes(12), cipher=createCipheriv('aes-256-gcm',key,iv);
   cipher.setAAD(associatedData(scope));
   const data=Buffer.concat([cipher.update(JSON.stringify(state)),cipher.final()]);
   return Buffer.concat([Buffer.from('SQA1'),iv,cipher.getAuthTag(),data]);
 }
-export function openSession(bytes: Buffer, scope: SessionScope, key: Buffer): SessionState {
+function openValue(bytes: Buffer, scope: SessionScope, key: Buffer): unknown {
   try {
     if(bytes.subarray(0,4).toString()!=='SQA1'||bytes.length>2_000_000)throw new Error();
     const cipher=createDecipheriv('aes-256-gcm',key,bytes.subarray(4,16));
@@ -23,6 +24,8 @@ export function openSession(bytes: Buffer, scope: SessionScope, key: Buffer): Se
     return JSON.parse(Buffer.concat([cipher.update(bytes.subarray(32)),cipher.final()]).toString());
   } catch { throw new Error('Authentication session could not be decrypted for this app and workspace.'); }
 }
+export function sealSession(state:SessionState,scope:SessionScope,key:Buffer){return sealValue(state,scope,key);}
+export function openSession(bytes:Buffer,scope:SessionScope,key:Buffer):SessionState{return openValue(bytes,scope,key) as SessionState;}
 export class AuthVault {
   readonly directory=process.env.SCOUT_AUTH_VAULT ?? '/data/auth';
   constructor(private store: Store) {}
@@ -35,6 +38,14 @@ export class AuthVault {
     const key=await readFile(path);if(key.length!==32)throw new Error('Authentication vault key is unavailable.');return key;
   }
   private file(id:string){if(!isUuid(id))throw new Error('Invalid session ID.');return join(this.directory,id+'.sealed');}
+  async saveAccount(id:string,account:TestAccount,origin:string,executionMode:string,runId:string){
+    if(!isUuid(id))throw new Error('Invalid account ID.');
+    const owner=(await this.store.pool.query('SELECT workspace_id,user_id FROM runtime_runs WHERE run_id=$1',[runId])).rows[0];
+    if(!owner)throw new Error('Authentication run is unavailable.');
+    const scope={session_id:id,origin,execution_mode:executionMode,workspace_id:owner.workspace_id,user_id:owner.user_id,purpose:'test_account'};
+    const file=join(this.directory,id+'.account-sealed'),sealed=sealValue(account,scope,await this.key());
+    const f=await open(file,'wx',0o600);try{await f.writeFile(sealed);await f.sync();}finally{await f.close();}
+  }
   async save(context:BrowserContext,scope:SessionScope,runId:string,verification:string){
     const state=await context.storageState({indexedDB:true});
     // The browser is restricted to one app origin. Do not persist identity-provider cookies.

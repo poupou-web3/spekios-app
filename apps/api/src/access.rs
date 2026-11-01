@@ -10,6 +10,15 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
 
+pub async fn account_identity(ScopedState(state): ScopedState) -> Response {
+    match crate::web_auth::account_email(&state).await {
+        Ok(email) => {
+            Json(json!({"source":if email.is_some(){Some("lovable")}else{None},"email":email}))
+                .into_response()
+        }
+        Err(response) => response,
+    }
+}
 pub async fn list(ScopedState(state): ScopedState) -> Response {
     match query(&state,"SELECT jsonb_build_object('requests',COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY created_at DESC) FROM (SELECT * FROM browser_access_requests WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50) a),'[]'::jsonb),'sessions',COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY created_at DESC) FROM (SELECT session_id,origin,execution_mode,created_at,expires_at,revoked_at,verification FROM browser_sessions WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50) s),'[]'::jsonb))",&[&state.principal.workspace_id,&state.principal.user_id]).await {
         Ok(Some(value))=>Json(value).into_response(),Ok(None)=>Json(json!({"requests":[],"sessions":[]})).into_response(),Err(r)=>r,
@@ -129,7 +138,7 @@ pub async fn control(
 ) -> Response {
     if !matches!(
         action.as_str(),
-        "start" | "input" | "complete" | "skip" | "cancel"
+        "start" | "input" | "complete" | "skip" | "cancel" | "create-account"
     ) {
         return error(StatusCode::NOT_FOUND, "access_operation_not_found");
     }
