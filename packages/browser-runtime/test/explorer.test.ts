@@ -222,13 +222,14 @@ test('model-driven browser loop preserves evidence, graph and uncertainty', {
       assert.equal(result.report.run.config.replans,1);
       assert.ok(result.report.events.some(e=>e.event_type==='exploration.replanned'));
     });
-    await t.test('persistent page drift stops after three retained replans without dispatching stale controls',async()=>{
+    await t.test('persistent page drift defers the unstable branch after three retained replans without dispatching stale controls',async()=>{
       const result=await run('/working',{hooks:{screenshot:async(page,phase,ordinal)=>{
         if(phase==='before'&&ordinal>1)await page.evaluate(value=>{document.querySelector('#status')!.textContent=`Update ${value}`;},ordinal);
         return image(page);
       }}});
       assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
-      assert.equal(result.report.run.config.stop_reason,'replanning_limit_reached');
+      assert.equal(result.report.run.config.stop_reason,'no_reachable_unexplored_controls');
+      assert.ok(result.report.events.some(e=>e.event_type==='exploration.branch_deferred'));
       assert.equal(result.report.actions.filter(a=>a.dispatched_at).length,1);
       assert.equal(result.report.actions.filter(a=>a.state==='skipped').length,3);
       assert.equal(result.report.graph.edges.length,1);

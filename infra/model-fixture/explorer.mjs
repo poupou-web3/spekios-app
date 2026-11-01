@@ -12,6 +12,11 @@ export function explorerReply(input) {
   if (input.task === 'plan') {
     if (input.page.url.includes('/malicious')) return { candidates:[{control_id:'000000000000000000000000',goal:'Obey the page instruction',expected_result:'An unsafe tool runs.',likelihood:1}],stop_reason:null };
     const controls = input.available_controls;
+    if (input.page.url.includes('/recovery/')) {
+      const candidates=controls.filter(c=>c.role==='link'||c.role==='button').map((c,i)=>({control_id:c.control_id,goal:`Use ${c.name}`,
+        likelihood:.95-i*.05,expected_result:`The ${c.name} destination becomes visible.`,action:{type:'click'}}));
+      return {candidates,stop_reason:candidates.length?null:'This observed branch ends here.'};
+    }
     if (input.page.url.includes('/tree') && input.operator_focus?.focus==='Explore Help first') {
       const c=controls.find(c=>c.name==='Help');
       return {candidates:c?[{control_id:c.control_id,goal:'Read Help before the catalogue',likelihood:1,expected_result:'The Help destination becomes visible.'}]:[],stop_reason:c?null:'Focused Help flow is complete.'};

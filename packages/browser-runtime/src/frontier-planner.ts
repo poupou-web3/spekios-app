@@ -5,7 +5,7 @@ import { jumpableUrl, type MapTransition, type MemorySnapshot } from './app-memo
 import { controlEntry, pageTemplate, transitionKey } from './app-map.js';
 import type { StrategyMode } from './exploration-strategy.js';
 
-export const PLANNER_VERSION = 'frontier-v3';
+export const PLANNER_VERSION = 'frontier-v4';
 // A remembered page whose controls were observed but never ranked by a model.
 export const UNRANKED_MEMORY_SCORE = .3;
 // Actions one top-level area may take before new territory starts sharing
@@ -23,6 +23,12 @@ type Node = {
 export type RouteStep = {
   from_state_id: string; to_state_id: string; command: BrowserCommand;
   source_action_id: string; expected_result: string; reset?: boolean;
+  // A fallback to an already observed, safe page URL. Its state must be
+  // observed again; opening a URL does not restore transient UI state.
+  reopen?: boolean;
+  // Escape an unstable page through an already observed, permitted link.
+  // Its destination has not necessarily been observed yet.
+  recovery?: boolean;
   // Reopens a page remembered from earlier runs. Its destination is a new
   // observation in this run, never an assumed restored state.
   memory?: { url: string; title: string | null; open_controls: number; source_run_id: string };
@@ -53,8 +59,11 @@ export class FrontierPlanner {
   readonly nodes = new Map<string, Node>();
   private readonly edges: RouteStep[] = [];
   private readonly repetitions = new Map<string, number>();
-  private readonly returnAttempts = new Map<string, number>();
   private readonly failedRoutes = new Set<string>();
+  private readonly routeResults = new Map<string, { successes: number; failures: number }>();
+  private readonly failedRestorations = new Set<string>();
+  private readonly deferredPages = new Map<string, string>();
+  private readonly blockedControls = new Map<string, Set<string>>();
   private readonly navigated = new Set<string>();
   private root: string | null = null;
   private rootAction: string | null = null;
@@ -102,7 +111,23 @@ export class FrontierPlanner {
   available(id: string) {
     const node = this.nodes.get(id)!;
     return (node.capture.observation.controls ?? []).filter(control => !node.attempted.has(control.control_id)
+      && !this.localBlockReason(id, control.control_id)
       && !this.memory?.withheld?.has(control.control_id) && !blockedReason(control, new URL(this.targetUrl).origin));
+  }
+  localBlockReason(id: string, controlId: string) {
+    const url = this.nodes.get(id)!.capture.observation.url;
+    return this.deferredPages.get(url) ?? (this.blockedControls.get(url)?.has(controlId) ? 'unavailable_this_run' : null);
+  }
+  deferPage(id: string, reason: string) {
+    const url = this.nodes.get(id)!.capture.observation.url;
+    this.deferredPages.set(url, reason);
+    return url;
+  }
+  blockControl(id: string, controlId: string) {
+    const url = this.nodes.get(id)!.capture.observation.url;
+    const blocked = this.blockedControls.get(url) ?? new Set<string>();
+    blocked.add(controlId);
+    this.blockedControls.set(url, blocked);
   }
   refocus() {
     // Preserve observed paths/attempted actions. Cached hypotheses may guide a
@@ -131,15 +156,27 @@ export class FrontierPlanner {
       this.repetitions.set(key, (this.repetitions.get(key) ?? 0) + 1);
     }
   }
-  transition(step: RouteStep, verdict: string, returning?: RouteStep) {
+  transition(step: RouteStep, verdict: string, returning?: RouteStep, navigationSucceeded = verdict === 'no_issue_observed') {
     const from = this.nodes.get(step.from_state_id);
     if (from) { const area = this.branchOf(from) ?? 'root'; this.branchSpent.set(area, (this.branchSpent.get(area) ?? 0) + 1); }
     if (returning) {
       const key = this.routeKey(returning);
-      this.returnAttempts.set(key, (this.returnAttempts.get(key) ?? 0) + 1);
-      if (step.to_state_id !== returning.to_state_id || verdict !== 'no_issue_observed') this.failedRoutes.add(key);
+      const results = this.routeResults.get(key) ?? { successes: 0, failures: 0 };
+      if (step.to_state_id !== returning.to_state_id || !navigationSucceeded) {
+        results.failures++;
+        this.failedRoutes.add(key);
+        if (returning.command.type === 'navigate' && (returning.reset || returning.reopen))
+          this.failedRestorations.add(`${returning.to_state_id}:${returning.command.url}`);
+      } else {
+        results.successes++;
+        this.failedRoutes.delete(key);
+      }
+      this.routeResults.set(key, results);
     }
-    if (verdict !== 'no_issue_observed') return;
+    // Runtime navigation success is independent of the model's bug verdict.
+    // Never replay input changes or form submissions merely to get somewhere.
+    if (!navigationSucceeded || !['navigate', 'click', 'scroll'].includes(step.command.type)) return;
+    this.failedRoutes.delete(this.routeKey(step));
     if (step.command.type === 'navigate' && step.to_state_id === this.root && !this.rootAction) this.rootAction = step.source_action_id;
     if (step.from_state_id !== step.to_state_id && !this.edges.some(e => this.routeKey(e) === this.routeKey(step))) this.edges.push(step);
   }
@@ -147,32 +184,57 @@ export class FrontierPlanner {
     return `${step.from_state_id}:${step.to_state_id}:${commandKey(step.command)}`;
   }
   private usable(step: RouteStep) {
-    const key = this.routeKey(step);
-    return !this.failedRoutes.has(key) && (this.returnAttempts.get(key) ?? 0) < 2;
+    const source = this.nodes.get(step.from_state_id);
+    return !(source && step.command.type !== 'navigate' && this.localBlockReason(source.id, step.command.control.control_id))
+      && !this.failedRoutes.has(this.routeKey(step)) && !(step.command.type === 'navigate' && (step.reset || step.reopen)
+        && this.failedRestorations.has(`${step.to_state_id}:${step.command.url}`));
   }
-  // Shortest recorded routes from one state to every state it reaches, in
-  // one breadth-first pass over the usable edges.
-  private reach(from: string): Map<string, RouteStep[]> {
+  private routeCost(path: RouteStep[]) {
+    return path.reduce((cost, step) => {
+      const results = this.routeResults.get(this.routeKey(step));
+      return cost + 1 + (results ? 2 * results.failures / (results.successes + 1) : 0);
+    }, 0);
+  }
+  // Keep non-dominated paths: a cheap route must not hide a shorter one that
+  // is the only route fitting the remaining action budget.
+  private reach(from: string, maxSteps: number): Map<string, RouteStep[]> {
     const out = new Map<string, RouteStep[]>();
-    for (const edge of this.edges) if (this.usable(edge)) out.set(edge.from_state_id, [...(out.get(edge.from_state_id) ?? []), edge]);
-    const paths = new Map<string, RouteStep[]>([[from, []]]), queue = [from];
+    for (const edge of this.edges) if (this.usable(edge)
+      && !this.deferredPages.has(this.nodes.get(edge.from_state_id)?.capture.observation.url ?? '')
+      && !this.deferredPages.has(this.nodes.get(edge.to_state_id)?.capture.observation.url ?? ''))
+      out.set(edge.from_state_id, [...(out.get(edge.from_state_id) ?? []), edge]);
+    const paths = new Map<string, RouteStep[]>([[from, []]]);
+    const labels = new Map<string, { steps: number; cost: number }[]>([[from, [{ steps: 0, cost: 0 }]]]);
+    const queue = [{ id: from, path: [] as RouteStep[], cost: 0 }];
     for (let i = 0; i < queue.length; i++) {
-      const path = paths.get(queue[i])!;
-      for (const edge of out.get(queue[i]) ?? []) if (!paths.has(edge.to_state_id)) { paths.set(edge.to_state_id, [...path, edge]); queue.push(edge.to_state_id); }
+      const current = queue[i];
+      if (current.path.length >= maxSteps) continue;
+      for (const edge of out.get(current.id) ?? []) {
+        const path = [...current.path, edge], cost = this.routeCost(path), previous = labels.get(edge.to_state_id) ?? [];
+        if (previous.some(p => p.steps <= path.length && p.cost <= cost)) continue;
+        labels.set(edge.to_state_id, [...previous.filter(p => !(path.length <= p.steps && cost <= p.cost)), { steps: path.length, cost }]);
+        const best = paths.get(edge.to_state_id);
+        if (!best || cost < this.routeCost(best)) paths.set(edge.to_state_id, path);
+        queue.push({ id: edge.to_state_id, path, cost });
+      }
     }
     return paths;
   }
   // A direct route, or a reset to the entry state and a route from there.
-  private routes(from: string): (to: string) => RouteStep[] | null {
-    const direct = this.reach(from);
-    if (!this.root || !this.rootAction || from === this.root) return to => direct.get(to) ?? null;
-    const reset: RouteStep = { from_state_id: from, to_state_id: this.root, source_action_id: this.rootAction,
+  private routes(from: string, remainingActions: number): (to: string) => RouteStep[] | null {
+    const direct = this.reach(from, remainingActions - 1);
+    const reset: RouteStep | null = this.root && this.rootAction && from !== this.root ? { from_state_id: from, to_state_id: this.root, source_action_id: this.rootAction,
       command: { type: 'navigate', url: this.targetUrl }, reset: true,
-      expected_result: 'The previously observed application entry state becomes visible.' };
-    const fromRoot = this.usable(reset) ? this.reach(this.root) : new Map<string, RouteStep[]>();
+      expected_result: 'The previously observed application entry state becomes visible.' } : null;
+    const fromRoot = reset && this.usable(reset) && !this.deferredPages.has(this.targetUrl) && remainingActions >= 2 ? this.reach(reset.to_state_id, remainingActions - 2) : new Map<string, RouteStep[]>();
     return to => {
-      const path = direct.get(to) ?? null, tail = fromRoot.get(to), viaRoot = tail ? [reset, ...tail] : null;
-      return path && (!viaRoot || path.length <= viaRoot.length) ? path : viaRoot;
+      const path = direct.get(to) ?? null, tail = fromRoot.get(to), viaRoot = reset && tail ? [reset, ...tail] : null;
+      if (path || viaRoot) return path && (!viaRoot || this.routeCost(path) <= this.routeCost(viaRoot)) ? path : viaRoot;
+      const node = this.nodes.get(to), url = node?.capture.observation.url;
+      if (!node || !url || remainingActions < 2 || this.deferredPages.has(url) || this.failedRestorations.has(`${to}:${url}`)
+        || url === this.nodes.get(from)?.capture.observation.url || !jumpableUrl(url, new URL(this.targetUrl).origin)) return null;
+      return [{ from_state_id: from, to_state_id: to, command: { type: 'navigate', url }, reopen: true,
+        source_action_id: node.capture.action_id, expected_result: 'The previously observed page opens; its current state is checked again.' }];
     };
   }
   // The top-level area a state belongs to: its depth-1 ancestor.
@@ -215,7 +277,7 @@ export class FrontierPlanner {
   // screens with unranked controls, a journey prefers deeper screens nearby,
   // and a re-walk lists transitions earlier runs recorded.
   rank(currentId: string, remainingActions: number, mode?: StrategyMode): RankedPath[] {
-    const routeTo = this.routes(currentId);
+    const routeTo = this.routes(currentId, remainingActions);
     if (mode === 'rewalk') return this.sorted(this.rewalks(routeTo, remainingActions));
     const ranked: RankedPath[] = [];
     const { fair } = this.balance();
@@ -276,7 +338,28 @@ export class FrontierPlanner {
       }
     }
     ranked.push(...this.remembered(currentId, remainingActions, mode));
+    ranked.push(...this.recoveries(currentId, remainingActions, mode));
     return this.sorted(ranked);
+  }
+  private recoveries(currentId: string, remainingActions: number, mode?: StrategyMode): RankedPath[] {
+    if (remainingActions < 1 || mode === 'rewalk') return [];
+    const origin = new URL(this.targetUrl).origin, result = new Map<string, RankedPath>();
+    for (const node of this.nodes.values()) {
+      if (!this.deferredPages.has(node.capture.observation.url)) continue;
+      for (const control of node.capture.observation.controls ?? []) {
+        const url = control.href;
+        if (control.role !== 'link' || !url || this.navigated.has(url) || this.deferredPages.has(url)
+          || blockedReason(control, origin) || !jumpableUrl(url, origin)) continue;
+        const proposal = node.proposals.get(control.control_id), likelihood = proposal?.likelihood ?? UNRANKED_MEMORY_SCORE;
+        const step: RouteStep = { from_state_id: currentId, to_state_id: `recovery:${url}`, command: { type: 'navigate', url }, recovery: true,
+          source_action_id: node.capture.action_id, expected_result: `The observed link "${control.name}" opens a page that can be inspected.` };
+        result.set(url, { state_id: step.to_state_id, control_id: control.control_id, name: control.name, goal: `Leave the unstable page through ${control.name}`,
+          expected_result: step.expected_result, likelihood, path_likelihood_score: likelihood, priority: likelihood / 1.3, focus_stale: false,
+          travel_steps: 1, path_state_ids: [], route: [step], components: { ...ZERO, reach_weight: 1 },
+          reason: 'An unstable page was deferred; open a previously observed, permitted link and plan from its actual destination.' });
+      }
+    }
+    return [...result.values()];
   }
   // Transitions earlier runs recorded from screens equivalent to ones this
   // run reached, repeated to compare where they lead and what they show now.
@@ -366,7 +449,7 @@ export class FrontierPlanner {
       for (const control of node.capture.observation.controls ?? []) {
         if (control.role === 'scroll') continue;
         if (node.attempted.has(control.control_id)) { level.controls++; level.tried++; }
-        else if (blockedReason(control, origin)) level.blocked++;
+        else if (this.localBlockReason(node.id, control.control_id) || blockedReason(control, origin)) level.blocked++;
         else level.controls++;
       }
       levels.set(node.depth, level);

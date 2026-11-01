@@ -72,6 +72,16 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
       content=`<h1>Submission policies</h1><form method='post' action='/forbidden-write'><label>Draft title <input></label><button>Save draft</button></form>
         <form role='search' action='/forbidden-sensitive'><input name='token' type='hidden' value='do-not-store'><label>Search private <input type='search'></label><button>Search private</button></form>
         <form role='search' action='/journeys/result'><label>Search override <input type='search'></label><button formaction='https://outside.invalid/search'>Outside search</button><button formtarget='_blank'>Popup search</button><button formaction='/forbidden-delete'>Delete records</button></form>`;
+    }else if(path==='/recovery/entry'){
+      content="<h1>Catalogue entry</h1><a href='/recovery/hub'>Open catalogue</a>";
+    }else if(path==='/recovery/hub'||path==='/recovery/drift'){
+      content=`<h1>Branching catalogue</h1><p id='status'>Ready</p>${Array.from({length:5},(_,i)=>`<a href='/recovery/leaf-${i+1}'>Open leaf ${i+1}</a>`).join(' ')}`;
+    }else if(path==='/recovery/tool'){
+      content=`<h1>Changing controls</h1><p id='status'>Ready</p>${Array.from({length:6},(_,i)=>`<button onclick="document.querySelector('#status').textContent='Preview ready'">Preview ${i+1}</button>`).join(' ')}<a href='/recovery/leaf-1'>Open leaf 1</a>`;
+    }else if(path==='/recovery/covered'){
+      content=`<h1>Covered lower controls</h1>${Array.from({length:6},(_,i)=>`<div style='height:700px'></div><span style='position:relative;display:inline-block'><button onclick="location.href='/forbidden-covered'">Covered preview ${i+1}</button><span style='position:absolute;inset:0;background:#ddd;z-index:2'>Overlay</span></span>`).join('')}<div style='height:700px'></div><a href='/recovery/leaf-1'>Open leaf 1</a>`;
+    }else if(/^\/recovery\/leaf-\d+$/.test(path)){
+      content=`<h1>Catalogue leaf ${path.slice(path.lastIndexOf('-')+1)}</h1><p>This branch ends here.</p>`;
     }else if(path==='/auth/login'){
       content=`<h1>Sign in</h1><p>PRIVATE_LOGIN_ONLY — controlled test fixture</p><form action='/auth/session' method='post'>
         <label>Email <input name='email' type='email' autocomplete='username' autofocus></label>

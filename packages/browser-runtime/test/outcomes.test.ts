@@ -106,16 +106,19 @@ test('real-browser action completion, diagnostics and safe form journeys',{
       assert.equal(action.outcome.status,'observation_failed');assert.ok(action.outcome.diagnostics.http_errors>0);
       assert.ok(result.report.events.some(e=>e.action_id===action.action_id&&e.event_type==='action.settling_frame'));
     });
-    await t.test('a persistent busy state times out once and never plans another action',async()=>{
+    await t.test('a persistent busy action retains its inconclusive evidence and yields to Help',async()=>{
       const result=await explore(store,fixture.url+'/journeys/busy',{...options,maxActions:4});saved.busy=result.run_id;
       assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
-      assert.equal(result.report.run.config.stop_reason,'action_completion_unresolved');
-      assert.equal(result.report.actions.length,2);
+      assert.equal(result.report.run.config.stop_reason,'no_reachable_unexplored_controls');
+      assert.equal(result.report.actions.length,3);
+      assert.equal(result.report.actions[2].spec.command.control.name,'Help');
+      assert.equal(result.report.actions[2].outcome.status,'settled');
+      assert.ok(result.report.events.some(e=>e.event_type==='exploration.action_recovered'));
       const action=result.report.actions[1];
       assert.equal(action.assessment.verdict,'inconclusive');assert.equal(action.outcome.status,'timed_out');
       assert.ok(action.outcome.elapsed_ms<COMPLETION_LIMITS.timeout_ms+3000);
       assert.ok(action.outcome.samples<=COMPLETION_LIMITS.max_frames);
-      assert.equal(result.report.graph.edges.length,2);
+      assert.equal(result.report.graph.edges.length,3);
     });
     await t.test('a CSS animation settles and stays one state while its pixels remain stored',async()=>{
       const result=await explore(store,fixture.url+'/journeys/animation',{...options,maxActions:4});saved.animation=result.run_id;

@@ -44,13 +44,111 @@ test('dead ends return through recorded routes, reserving budget for the unexplo
   planner.transition({...next.route[0],to_state_id:'unexpected'},'no_issue_observed',next.route[0]);
   assert.equal(planner.rank('leaf',2).length,0,'A failed restoration must not be silently retried.');
 });
-test('a route through a suspect transition is never reused to reach another frontier',()=>{
+test('an unverified route is not replayed, but its observed safe URL can be reopened',()=>{
   const planner = new FrontierPlanner('http://app/');
   planner.observe('root',capture('http://app/',[]),undefined,{},1,true);
   planner.observe('unreachable',capture('http://app/panel',[button('details')]),'root',{},.8);
   planner.plan('unreachable',[proposal('details',.9)]);
   planner.transition({from_state_id:'root',to_state_id:'unreachable',command:command('panel'),source_action_id:'suspect',expected_result:'Panel appears'},'suspect');
-  assert.equal(planner.rank('root',10).length,0);
+  const next = planner.rank('root',10)[0];
+  assert.equal(next.route[0].reopen,true);
+  assert.deepEqual(next.route[0].command,{type:'navigate',url:'http://app/panel'});
+});
+
+test('successful returns stay usable beyond two trips even when the page has a suspect finding',()=>{
+  const planner = new FrontierPlanner('http://app/');
+  start(planner,[button('open')]);
+  planner.observe('leaf',capture('http://app/leaf',[button('more')]),'root');
+  planner.plan('leaf',[proposal('more',.9)]);
+  const step={from_state_id:'root',to_state_id:'leaf',command:command('open'),source_action_id:'open',expected_result:'Leaf opens'};
+  planner.transition(step,'suspect',undefined,true);
+  for(let i=0;i<6;i++){
+    assert.equal(planner.rank('root',2)[0].route[0].command.type,'click');
+    planner.transition(step,'suspect',step,true);
+  }
+  assert.equal(planner.rank('root',2)[0].route[0].source_action_id,'open');
+});
+
+test('a changed return learns its actual destination without assuming the old screen was restored',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  start(planner,[]);
+  for(const id of ['expected','actual']){
+    planner.observe(id,capture(`http://app/${id}`,[button(id)]),'root');
+    planner.plan(id,[proposal(id,.9)]);
+  }
+  const step={from_state_id:'root',to_state_id:'expected',command:command('open'),source_action_id:'open',expected_result:'Expected opens'};
+  planner.transition(step,'no_issue_observed');
+  planner.transition({...step,to_state_id:'actual'},'inconclusive',step,true);
+  const paths=planner.rank('root',3);
+  assert.equal(paths.find(p=>p.state_id==='actual')!.route[0].to_state_id,'actual');
+  assert.equal(paths.find(p=>p.state_id==='expected')!.route[0].reopen,true);
+});
+
+test('route selection prefers reliable travel while keeping shorter alternatives within the action budget',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  start(planner,[]);
+  planner.observe('via',capture('http://app/',[]),'root');
+  planner.observe('target',capture('http://app/',[button('more')]),'via');
+  planner.plan('target',[proposal('more',.9)]);
+  const direct={from_state_id:'root',to_state_id:'target',command:command('shortcut'),source_action_id:'shortcut',expected_result:'Target opens'};
+  planner.transition(direct,'no_issue_observed');
+  planner.transition({...direct,to_state_id:'root'},'inconclusive',direct,false);
+  // Fresh evidence reestablishes the route, retaining its past failure cost.
+  planner.transition(direct,'no_issue_observed');
+  planner.transition({...direct,to_state_id:'via',command:command('via')},'no_issue_observed');
+  planner.transition({...direct,from_state_id:'via',command:command('next')},'no_issue_observed');
+  assert.deepEqual(planner.rank('root',3)[0].route.map(s=>s.command.type==='click'?s.command.control.name:''),['via','next']);
+  assert.equal(planner.rank('root',2)[0].route[0].source_action_id,'shortcut');
+});
+
+test('failure to restore one transient state does not disable a reliable return to another state at the same URL',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  start(planner,[button('other')]);
+  planner.plan('root',[proposal('other',.8)]);
+  planner.observe('transient',capture('http://app/',[button('next')]),'root');
+  planner.plan('transient',[proposal('next',.9)]);
+  planner.observe('leaf',capture('http://app/leaf',[]),'transient');
+  const shortcut=planner.rank('leaf',3).find(p=>p.state_id==='transient')!.route[0];
+  assert.equal(shortcut.reopen,true);
+  planner.transition({...shortcut,to_state_id:'root'},'no_issue_observed',shortcut,true);
+  const remaining=planner.rank('leaf',3);
+  assert.ok(remaining.some(p=>p.state_id==='root'));
+  assert.ok(!remaining.some(p=>p.state_id==='transient'));
+});
+
+test('navigation failure cannot establish a return route and form writes are not replayed as travel',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  start(planner,[]);
+  planner.observe('panel',capture('http://app/',[button('more')]),'root');
+  planner.plan('panel',[proposal('more',.9)]);
+  const step={from_state_id:'root',to_state_id:'panel',command:command('open'),source_action_id:'open',expected_result:'Panel opens'};
+  planner.transition(step,'no_issue_observed',undefined,false);
+  assert.equal(planner.rank('root',3).length,0);
+  planner.transition({...step,command:{type:'fill',value:'draft',control:{...button('field'),role:'textbox',input_type:'text'}}},'no_issue_observed',undefined,true);
+  assert.equal(planner.rank('root',3).length,0);
+});
+
+test('an unavailable control stays blocked across states on its page while sibling controls remain available',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  start(planner,[button('gone'),button('other')]);
+  planner.blockControl('root','gone');
+  planner.observe('updated',capture('http://app/',[button('gone'),button('other')]),'root');
+  assert.deepEqual(planner.available('updated').map(c=>c.name),['other']);
+  assert.equal(planner.coverage().reduce((n,l)=>n+l.blocked,0),2);
+});
+
+test('deferring a changing page preserves exits through observed safe links and excludes unsafe destinations',()=>{
+  const planner=new FrontierPlanner('http://app/');
+  start(planner,[{...button('next'),role:'link',href:'http://app/leaf'},
+    {...button('outside'),role:'link',href:'https://other.test/'},
+    {...button('token'),role:'link',href:'http://app/next?token=private'}]);
+  planner.deferPage('root','persistent_page_drift');
+  assert.equal(planner.available('root').length,0);
+  const paths=planner.rank('root',1,'breadth');
+  assert.deepEqual(paths.map(p=>p.route[0].command),[{type:'navigate',url:'http://app/leaf'}]);
+  assert.equal(paths[0].route[0].recovery,true);
+  planner.attempted('root',paths[0].route[0].command,true);
+  assert.equal(planner.rank('root',2,'breadth').length,0,'Recovery navigation is attempted only once.');
 });
 test('covered and unsafe controls cannot gain eligibility from high likelihood',()=>{
   const planner = new FrontierPlanner('http://app/');
