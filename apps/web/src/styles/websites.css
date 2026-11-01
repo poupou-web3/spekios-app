@@ -59,8 +59,10 @@
 .website-test-link > p { margin-top: 5px; overflow-wrap: anywhere; font-size: 12px; }
 .website-test-link footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 23px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 .website-test-link footer svg { flex: none; width: 15px; height: 15px; }
-.website-test-card > .button { position: absolute; right: 12px; bottom: 10px; background: var(--surface); }
-.website-test-card:has(> .button) footer { padding-right: 35px; }
+.website-test-actions { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 6px; }
+.website-test-actions:empty { display: none; }
+.website-test-actions .button { background: var(--surface); }
+.website-test-card:has(> .website-test-actions:not(:empty)) footer { padding-right: 80px; }
 .website-pagination { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
 .website-app .issue-page, .website-app .connection-page { max-width: 1400px; }
 .website-app .connection-top { justify-content: flex-end; margin-bottom: 24px; }

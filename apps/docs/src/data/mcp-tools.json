@@ -681,7 +681,7 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default.",
+      "description": "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default. continue_from_run_id carries on from a failed, interrupted or cancelled exploration instead of starting again at the entry page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -698,6 +698,11 @@
           },
           "auto_reproduce": {
             "type": "boolean"
+          },
+          "continue_from_run_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
           },
           "job_id": {
             "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",

@@ -7,7 +7,7 @@ import { ModelClient } from './model-client.js';
 import { AccessHandoff } from './access-handoff.js';
 import { AutomaticReproductionScheduler, type GatewayStatus } from './automatic-reproduction.js';
 import { browserEndpoint, browserSlots } from './browser-sandbox.js';
-import { abandonJob, claimJob, dispatchedCount, jobLock, memberScopes, recoverAbandoned, runIdList } from './job-queue.js';
+import { abandonJob, claimJob, dispatchedCount, jobLock, memberScopes, recoverAbandoned, resumeBudget, runIdList } from './job-queue.js';
 
 // Target sites never run beside the credentials and saved logins this worker holds.
 if (!browserEndpoint()) throw new Error('The browser worker needs SCOUT_BROWSER_ENDPOINT so target sites run in the browser sandbox.');
@@ -54,14 +54,14 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
       let resume: { attempt: number; previousRunIds: string[]; jobMaxActions: number | null; carriedActions: number } | undefined;
       if (previous.length) {
         const carried = await dispatchedCount(session, previous);
-        const remaining = budget == null ? Infinity : budget - carried;
-        if (!(remaining >= 1)) {
+        const plan = resumeBudget({ continueFrom: typeof job.request?.continue_from_run_id === 'string', maxActions: budget }, carried);
+        if ('stop' in plan) {
           await session.query("UPDATE browser_jobs SET status='interrupted', error=$2, finished_at=now() WHERE job_id=$1 AND status='running' AND worker_id=$3",
             [job.job_id, 'Exploration stopped after its action budget was used. In-flight actions were not repeated.', workerId]);
           return;
         }
-        maxActions = remaining === Infinity ? null : remaining;
-        resume = { attempt: Number(job.resumes), previousRunIds: previous, jobMaxActions: budget ?? null, carriedActions: carried };
+        maxActions = plan.maxActions;
+        resume = { attempt: Number(job.resumes), previousRunIds: previous, jobMaxActions: budget ?? null, carriedActions: plan.carriedActions };
       }
       try {
         const currentOrigins = (process.env.SCOUT_ALLOWED_ORIGINS ?? 'http://exploration-fixture:8082').split(',').map(s => s.trim());

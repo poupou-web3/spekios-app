@@ -9,7 +9,7 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,selectWebsite,workspaceWebsites};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,continueRequest,selectWebsite,workspaceWebsites};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});
@@ -148,6 +148,27 @@ test('a failed model plan names the request, the provider error and the reasonin
   assert.doesNotMatch(ui.runView(),/The model answer was cut off/);
   ui.state.report.run.error='<script>alert(1)</script>';
   assert.doesNotMatch(ui.runView(),/<script>alert/);
+});
+test('a stopped exploration can continue from its recorded pages or start again',async()=>{
+  const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
+  const stopped=run('stopped',{lifecycle:'failed',config:{runtime_version:'explorer-v1',replay_of:null,viewport_profile:'desktop',auth_mode:'public'}});
+  ui.state.report={run:stopped,actions:[],captures:[]};ui.state.runId='stopped';ui.state.runs=[stopped];
+  const html=ui.runView();
+  assert.match(html,/data-action="continue-run" data-id="stopped"/);assert.match(html,/Continue exploration/);
+  assert.match(html,/data-action="restart-run" data-id="stopped"/);assert.match(html,/Run again/);
+  assert.match(html,/class="button primary" title="Carry on from the pages this run already recorded"/);
+  assert.match(html,/class="button" title="Start a new test at the same address"/);
+  await click(ui,'continue-run','stopped');
+  assert.equal(posted[0].continue_from_run_id,'stopped');assert.equal(posted[0].kind,'explore');assert.equal(posted[0].target_url,'https://stopped.test');assert.equal(posted[0].viewport_profile,'desktop');
+  ui.state.jobs=[{job_id:'carrying',status:'queued',request:{kind:'explore',target_url:'https://stopped.test',continue_from_run_id:'stopped',viewport_profile:'desktop'},settings:{viewportProfile:'desktop'}}];
+  assert.equal(ui.continueRequest(stopped),null,'a continuation of this run is already queued');
+  assert.equal(ui.restartRequest('run',stopped).kind,'explore');assert.equal(ui.restartRequest('run',stopped).continue_from_run_id,undefined);
+  ui.state.jobs=[{job_id:'fresh',status:'running',request:{kind:'explore',target_url:'https://stopped.test',viewport_profile:'desktop'},settings:{viewportProfile:'desktop'}}];
+  assert.equal(ui.restartRequest('run',stopped),null,'a fresh start of the same test is already running');
+  assert.equal(ui.continueRequest(stopped).continue_from_run_id,'stopped');
+  ui.state.jobs=[];stopped.lifecycle='blocked';assert.equal(ui.continueRequest(stopped),null);assert.equal(ui.restartRequest('run',stopped).kind,'explore');
+  stopped.lifecycle='cancelled';stopped.config.resume={previous_run_ids:['a','b','c']};assert.equal(ui.continueRequest(stopped),null,'three earlier runs already fill the continuation history');
+  stopped.config.replay_of={source_action_id:'suspect'};delete stopped.config.resume;assert.equal(ui.continueRequest(stopped),null);
 });
 test('a run page and an unstarted job offer one restart each',async()=>{
   const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
@@ -364,4 +385,14 @@ test('manual navigation cancels a deferred price target before a late refresh co
   const pending=ui.refresh();await started;ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3');
   ui.location.hash='#/settings/data';await ui.route();assert.equal(ui.state.priceTarget,null);release();await pending;await new Promise(setImmediate);
   assert.equal(ui.state.settingsSection,'data');assert.equal(ui.state.priceTarget,null);
+});
+
+
+test('Continue exploration remains available in the website overview and scoped history',async()=>{
+  const posts=[],data=payloads(),ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posts.push(JSON.parse(options.body));return response({job:{job_id:'new-continuation'}});}return response(data[path]);}});connect(ui);ready(ui);
+  const stopped=run('stopped',{lifecycle:'failed',target_url:'http://larchwood:8084/shop'}),other=run('other',{lifecycle:'failed'});
+  ui.state.runs=[stopped,other];ui.selectWebsite('http://larchwood:8084');
+  let html=ui.home();assert.match(html,/class="website-test-actions"/);assert.match(html,/data-action="continue-run" data-id="stopped"/);assert.doesNotMatch(html,/data-action="continue-run" data-id="other"/);
+  ui.state.websitePage='tests';assert.match(ui.home(),/data-action="continue-run" data-id="stopped"/);
+  await click(ui,'continue-run','stopped');assert.equal(posts[0].continue_from_run_id,'stopped');assert.equal(posts[0].target_url,'http://larchwood:8084/shop');assert.equal(ui.state.websiteOrigin,'http://larchwood:8084');
 });

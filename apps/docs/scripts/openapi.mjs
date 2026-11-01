@@ -226,6 +226,7 @@ export function openapi(catalog) {
     viewport_profile: choice('desktop', 'tablet', 'mobile'),
     auth_mode: choice('auto', 'sign_in', 'public'), session_id: uuid, auto_reproduce: bool,
     app_memory: { type: 'boolean', description: 'Override the saved memory default for this run. False explores without reading or recording cross-run memory.' },
+    continue_from_run_id: { ...uuid, description: 'Resume this failed, interrupted or cancelled exploration. The new job uses current settings, plans from the pages that run recorded, and does not repeat a dispatched action. The target URL and viewport must match the run.' },
   }, ['job_id', 'kind', 'target_url']);
   const jobReproduce = strict({ project_id:uuid,task_id:uuid,job_id: uuid, kind: { const: 'reproduce', type: 'string' }, source_action_id: uuid }, ['job_id', 'kind', 'source_action_id']);
   const verificationFields={candidate_url:{type:'string',maxLength:2048,format:'uri'},deployment_ref:{type:'string',minLength:1,maxLength:200},auth_mode:choice('auto','public'),session_id:uuid,project_id:uuid,task_id:uuid};

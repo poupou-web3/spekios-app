@@ -185,7 +185,14 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     // A resumed run plans with what its interrupted runs covered. With memory
     // on those runs are already in the memory snapshot; only withheld controls are added.
     let resumed: MemorySnapshot | null = null;
-    const planningMemory = () => memory.snapshot ? (resumed ? { ...memory.snapshot, withheld: resumed.withheld } : memory.snapshot) : resumed;
+    // A continuation plans from the pages the stopped run recorded. App memory
+    // still supplies scores and the map. The pages to reopen are this
+    // exploration's, not every page remembered for the app.
+    const planningMemory = () => {
+      const base = memory.snapshot ? (resumed ? { ...memory.snapshot, withheld: resumed.withheld } : memory.snapshot) : resumed;
+      if (!base || !resume || !resumed) return base;
+      return { ...base, prefer_unfinished: true, pages: resumed.pages, by_page: resumed.by_page, prior_runs: resumed.prior_runs, withheld: resumed.withheld };
+    };
     const resume = replay ? undefined : options.resume;
     const memoryScopes: ReturnType<AppMemory['summary']>[] = [];
     const openMemory = async () => {
