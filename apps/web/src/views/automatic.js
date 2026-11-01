@@ -51,12 +51,12 @@ export function replayControl(action,reproduction,eligible){
 }
 export async function cancelAutomatic(id){
   const key='automatic:'+id;if(state.cancelling.has(key))return;
-  const token=state.token,developmentAccess=state.developmentAccess;state.cancelling.add(key);render();
+  const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth;state.cancelling.add(key);render();
   try{
     const result=await (await api('/v1/runs/'+id+'/automatic-reproductions/cancel',{})).json();
-    if((token!==state.token||developmentAccess!==state.developmentAccess))return;
+    if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
     if(state.report?.run.run_id===id){state.report.run.auto_reproduction_cancel_id=result.cancellation_id;if(result.status==='cancelled')state.report.run.auto_reproduction_cancelled_at=new Date().toISOString();}
     toast(result.status==='cancelled'?'Automatic checks stopped. Recorded evidence is retained.':'Stopping automatic checks. In-flight model usage may still settle.');await refresh();
-  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess))toast(error.message);}
-  finally{state.cancelling.delete(key);if((token===state.token&&developmentAccess===state.developmentAccess))render();}
+  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth))toast(error.message);}
+  finally{state.cancelling.delete(key);if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth))render();}
 }

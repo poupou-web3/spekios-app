@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#f6f7f4" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#0f1411" media="(prefers-color-scheme: dark)"><meta name="color-scheme" content="light dark">
-  <title>Connect your agent · ScoutQA</title>
+  <title>Connect your agent · SpekiosQA</title>
   <script src="/assets/ui/theme-init.js"></script>
   <link rel="stylesheet" href="/assets/ui/styles/tokens.css"><link rel="stylesheet" href="/assets/ui/styles/base.css"><link rel="stylesheet" href="/assets/ui/styles/components.css"><link rel="stylesheet" href="/assets/ui/styles/shell.css"><link rel="stylesheet" href="/assets/app/styles/pages.css"><script type="module" src="/assets/app/connect.js"></script>
 </head>
@@ -11,10 +11,10 @@
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <main id="main-content" class="content connection-page">
   <header class="connection-top"><a class="brand" href="/"><span class="mark"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/></svg></span>scout <small>QA FOR YOU & YOUR AGENT</small></a><div class="row"><div data-theme-slot></div><a class="button quiet" href="/">← Your workspace</a></div></header>
-  <div class="connection-heading"><p class="eyebrow">YOUR WORKSPACE. YOUR AGENT.</p><h1 id="connection-title">Bring your agent to Scout.</h1><p id="connection-description">Connect once. Ask your agent to test a URL, follow the run and bring back findings with evidence.</p></div>
+  <div class="connection-heading"><p class="eyebrow">YOUR WORKSPACE. YOUR AGENT.</p><h1 id="connection-title">Bring your agent to Spekios.</h1><p id="connection-description">Connect once. Ask your agent to test a URL, follow the run and bring back findings with evidence.</p></div>
   <div id="connection-status" class="connection-status" role="status" aria-live="polite"></div>
   <section id="manager-login" class="panel connection-signin" hidden>
-    <h2>Open your workspace to continue</h2><p>Use your existing Scout workspace access. Your agent will receive its own limited connection.</p>
+    <h2>Open your workspace to continue</h2><p>Use your existing Spekios workspace access. Your agent will receive its own limited connection.</p>
     <form id="manager-form" class="login-card"><label for="manager-token">Workspace access token</label><input id="manager-token" type="password" autocomplete="off" required minlength="32"><button class="button primary" type="submit">Open workspace</button></form>
   </section>
   <section id="connections" hidden>
@@ -30,7 +30,7 @@
     <div id="connection-onboarding" class="connection-layout">
       <section class="panel connection-setup" aria-labelledby="setup-title">
         <div class="connection-step-label"><span>01</span><p class="eyebrow">CHOOSE YOUR AGENT</p></div>
-        <h2 id="setup-title">Where do you want to use Scout?</h2><p class="small muted">Use an agent app that supports MCP connections and browser sign-in.</p>
+        <h2 id="setup-title">Where do you want to use Spekios?</h2><p class="small muted">Use an agent app that supports MCP connections and browser sign-in.</p>
         <div class="connection-clients" role="group" aria-label="Your agent app">
           <button class="connection-client" id="client-desktop" aria-pressed="true"><strong>Codex / ChatGPT desktop</strong><span>Connect an app on your computer</span></button>
           <button class="connection-client" id="client-claude" aria-pressed="false"><strong>Claude</strong><span>Connect through your Claude account</span></button>
@@ -38,20 +38,20 @@
         </div>
         <div class="connection-step-label"><span>02</span><p class="eyebrow">ADD SCOUT TO YOUR AGENT</p></div>
         <div id="network-notice" class="connection-warning" hidden></div>
-        <label for="mcp-url" class="small">Scout connection URL</label><div class="connection-copy-row"><input id="mcp-url" readonly aria-describedby="url-help"><button id="copy-url" class="button" disabled>Copy URL</button></div>
+        <label for="mcp-url" class="small">Spekios connection URL</label><div class="connection-copy-row"><input id="mcp-url" readonly aria-describedby="url-help"><button id="copy-url" class="button" disabled>Copy URL</button></div>
         <p id="url-help" class="small muted">This address contains no secret. Your agent opens a browser for approval.</p>
         <ol id="client-steps" class="connection-instructions"></ol>
         <a id="client-help" class="connection-doc-link" href="https://learn.chatgpt.com/docs/extend/mcp?surface=app" target="_blank" rel="noopener noreferrer">Agent app instructions ↗</a>
         <div class="connection-step-label"><span>03</span><p class="eyebrow">APPROVE & START TESTING</p></div>
-        <p class="small">Review the workspace and permissions when your agent opens Scout. Then give it a URL to test.</p>
+        <p class="small">Review the workspace and permissions when your agent opens Spekios. Then give it a URL to test.</p>
         <label for="test-url" class="small">Your app URL <span class="muted">(optional)</span></label><input id="test-url" type="url" placeholder="https://your-app.com" maxlength="2048">
         <div class="connection-prompt"><p id="starter-prompt"></p><button id="copy-prompt" class="button">Copy prompt for your agent</button></div>
       </section>
       <aside class="connection-companion">
         <div class="connection-illustration" aria-hidden="true"><span class="connection-you">You</span><span class="connection-line">↔</span><span class="connection-scout">S</span><span class="connection-line">↔</span><span class="connection-you">Agent</span></div>
-        <h2>A shared view of your testing.</h2><p>Your agent works in your workspace. You can follow its runs in Scout and open the same screenshots, findings and reports.</p>
+        <h2>A shared view of your testing.</h2><p>Your agent works in your workspace. You can follow its runs in Spekios and open the same screenshots, findings and reports.</p>
         <ul><li>Find previous tests for a URL or domain.</li><li>Start a test and check progress later.</li><li>Get expected vs. actual behavior with evidence.</li></ul>
-        <p class="small muted">Your agent app manages its connection securely. You never need to paste a Scout secret into a conversation.</p>
+        <p class="small muted">Your agent app manages its connection securely. You never need to paste a Spekios secret into a conversation.</p>
         <details class="connection-advanced"><summary>Using the development connector?</summary><p class="small">The existing native connector still works. Enter its browser approval code below.</p><form id="code-form" class="login-card"><label for="user-code">Connector code</label><input id="user-code" required maxlength="15" autocomplete="off" placeholder="ABCD-EF12-3456"><button class="button" type="submit">Review connection</button></form></details>
       </aside>
     </div>

@@ -2,6 +2,8 @@ FROM rust:1.91.0-slim-bookworm@sha256:81c97592d519ba7397e8adccb0345fb5a91965c0a4
 WORKDIR /build
 COPY apps/api/Cargo.toml apps/api/Cargo.lock apps/api/build.rs ./
 COPY apps/api/src ./src
+# Required by the opt-in disposable-database auth integration test.
+COPY infra/postgres/023-web-auth.sql /infra/postgres/023-web-auth.sql
 COPY apps/web /web
 COPY packages/web-ui/src /packages/web-ui/src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

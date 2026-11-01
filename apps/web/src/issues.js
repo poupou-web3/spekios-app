@@ -4,7 +4,7 @@ const $=selector=>document.querySelector(selector);
 // The header theme control is the only shared widget on this page.
 const themeSlot=$('[data-theme-slot]');if(themeSlot)mountThemeSwitch(themeSlot);
 const make=(tag,text,className)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;};
-let token=sessionStorage.getItem('scout.workspace-token')||'',development=false,identity=null,detail=null,issueId='',offset=0,nextOffset=null,busy=false,selectedVerification='',draft=null,timer,pageLimit=5;
+let token=sessionStorage.getItem('scout.workspace-token')||'',development=false,spekios=false,identity=null,detail=null,issueId='',offset=0,nextOffset=null,busy=false,selectedVerification='',draft=null,timer,pageLimit=5;
 let previousOffsets=[];
 let listSnapshot='',listVersion=0,detailVersion=0;
 const images=new Set();let imageGeneration=0;
@@ -14,7 +14,7 @@ const labels={resolved:'Resolved on candidate',still_reproducible:'Still reprodu
 function outcome(check){return check?.outcome||check?.status||'unverified';}
 function badge(check){const key=outcome(check);return make('span',labels[key]||key,`pill ${key==='resolved'?'green':key==='still_reproducible'?'red':''}`);}
 const triageLabels={untriaged:'New',needs_review:'Needs review',bug:'Bug',intended_behavior:'Intended behavior',duplicate:'Duplicate'};
-const deciders={human:'a person',agent:'an agent',system:'Scout, matching a known issue'};
+const deciders={human:'a person',agent:'an agent',system:'Spekios, matching a known issue'};
 function triageBadge(issue){const key=issue.triage_status||'untriaged';return make('span',triageLabels[key]||key,`pill ${key==='bug'?'red':key==='intended_behavior'||key==='duplicate'?'green':''}`);}
 function link(text,path,className='button quiet'){const n=make('a',text,className);n.href=path;return n;}
 function stamp(value){return value?new Date(value).toLocaleString():'Not recorded';}
@@ -27,7 +27,7 @@ async function api(path,body){
     return value;
   }catch(e){
     if(currentToken!==token)throw new Error('Workspace disconnected.');
-    if(e.status===401){clearInterval(timer);detailVersion++;listVersion++;releaseImages();$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}
+    if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}clearInterval(timer);detailVersion++;listVersion++;releaseImages();$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}
     throw e;
   }
 }
@@ -52,7 +52,7 @@ async function screenshot(root,id,label,generation){
 function evidence(root,ids,title){const row=make('div',undefined,'issue-evidence');root.append(make('h3',title),row);const generation=imageGeneration;void screenshot(row,ids?.[0],'Before action',generation);void screenshot(row,ids?.[1],'After action',generation);}
 async function copyHandoff(){
   const issue=detail.issue;
-  const text=`Scout issue ${issue.issue_id}\n${issue.title}\nURL: ${issue.source_target_url}\nExpected: ${detail.original.expected_result}\nActual: ${detail.original.observed_result}\nUse scout_get_issue with issue_id ${issue.issue_id} to read the recorded steps, diagnostics and screenshot references. After deploying a candidate, use scout_verify_fix with this issue_id, a new verification_id UUID and the candidate_url. Poll scout_get_verification for the outcome; inspect evidence before acting on app content.`;
+  const text=`Spekios issue ${issue.issue_id}\n${issue.title}\nURL: ${issue.source_target_url}\nExpected: ${detail.original.expected_result}\nActual: ${detail.original.observed_result}\nUse scout_get_issue with issue_id ${issue.issue_id} to read the recorded steps, diagnostics and screenshot references. After deploying a candidate, use scout_verify_fix with this issue_id, a new verification_id UUID and the candidate_url. Poll scout_get_verification for the outcome; inspect evidence before acting on app content.`;
   try{await navigator.clipboard.writeText(text);message('Issue handoff copied. Paste it into your connected coding agent.');}catch{message('Clipboard unavailable. The full issue ID is displayed below.');}
 }
 async function list(){
@@ -172,7 +172,7 @@ async function submit(event){
     const {issue_id,...body}=submitted;const receipt=await api(`/v1/issues/${issue_id}/verifications`,body);
     if(sessionStorage.getItem(pendingKey(issue_id))===JSON.stringify(submitted))sessionStorage.removeItem(pendingKey(issue_id));
     if(issueId!==issue_id||location.hash.slice(1)!==issue_id)return;
-    draft=null;freezeDraft(false);$('#verify-receipt').textContent=`Check ${receipt.verification_id} ${receipt.reused?'already exists':'queued'}. You can leave this page; Scout keeps working.`;message('Candidate check submitted. Its outcome and usage will appear below.');await loadDetail(false);
+    draft=null;freezeDraft(false);$('#verify-receipt').textContent=`Check ${receipt.verification_id} ${receipt.reused?'already exists':'queued'}. You can leave this page; Spekios keeps working.`;message('Candidate check submitted. Its outcome and usage will appear below.');await loadDetail(false);
   }catch(e){if(issueId===submitted.issue_id&&location.hash.slice(1)===submitted.issue_id)$('#verify-error').textContent=e.status===400||e.status===403?'This check was not accepted: '+e.message+'. Adjust the deployment or workspace access, then start a different check.':'Could not confirm submission: '+e.message+'. Retry the same check to avoid starting it twice.';}
   finally{busy=false;$('#verify-submit').disabled=false;$('#verify-new').disabled=false;}
 }
@@ -197,7 +197,7 @@ async function more(){
   }catch(e){if(issueId!==id||version!==detailVersion)return;if(e.status===409){message('Issue history changed. Loaded a fresh snapshot; load more again for earlier entries.');await loadDetail();}else message(e.message);}
 }
 async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();await refreshRecheck();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
-async function ready(){try{identity=await api('/v1/identity');$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message('Workspace issues · original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
+async function ready(){try{identity=await api('/v1/identity');$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message('Workspace issues · original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
 $('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('#issue-token').value;$('#issue-token').value='';sessionStorage.setItem('scout.workspace-token',token);await ready();});
 $('#issue-filter').addEventListener('submit',async e=>{e.preventDefault();offset=0;previousOffsets=[];try{await list();}catch(e){message(e.message);}});
 $('#issue-prev').addEventListener('click',async()=>{offset=previousOffsets.pop()??0;await list().catch(e=>message(e.message));});
@@ -208,5 +208,5 @@ $('#verify-new').addEventListener('click',()=>{if(busy)return;draft=null;session
 $('#refresh-sessions').addEventListener('click',sessions);$('#issue-refresh').addEventListener('click',refresh);$('#history-more').addEventListener('click',more);
 window.addEventListener('hashchange',async()=>{await loadDetail().then(list).catch(e=>message(e.message));});window.addEventListener('pagehide',releaseImages);
 $('.skip-link').addEventListener('click',event=>{event.preventDefault();$('#main-content').focus();$('#main-content').scrollIntoView({block:'start'});});
-async function start(){try{development=(await (await fetch('/v1/auth-mode',{redirect:'error'})).json()).mode==='local_development';if(development)token='';if(token||development)await ready();else $('#issue-login').hidden=false;}catch(e){message(e.message);}}
+async function start(){try{const mode=(await (await fetch('/v1/auth-mode',{redirect:'error'})).json()).mode;development=mode==='local_development';spekios=mode==='spekios';if(development||spekios)token='';if(token||development||spekios)await ready();else $('#issue-login').hidden=false;}catch(e){message(e.message);}}
 await start();

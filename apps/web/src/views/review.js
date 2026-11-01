@@ -29,17 +29,17 @@ export async function submitReview(actionId){
   if(!draft.rationale.trim()||draft.rationale.length>2000){draft.error='Enter a reason of 1–2,000 characters.';render();return;}
   if(draft.disposition==='confirmed'&&(!confirmable(action)||draft.expectation_basis.trim().length<10||!['low','medium','high','critical'].includes(draft.severity))){draft.error='Confirmation requires reproduced evidence, an expectation basis of at least 10 characters and a severity.';render();return;}
   draft.reviewId||=crypto.randomUUID();draft.submitting=true;draft.error='';render();
-  const token=state.token,developmentAccess=state.developmentAccess,runId=state.runId;
+  const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth,runId=state.runId;
   try{
     const result=await (await api('/v1/actions/'+encodeURIComponent(actionId)+'/reviews',{review_id:draft.reviewId,expected_revision:Number(draft.revision),disposition:draft.disposition,rationale:draft.rationale,expectation_basis:draft.expectation_basis,severity:draft.severity||null},{},55000)).json();
-    if((token!==state.token||developmentAccess!==state.developmentAccess))return;
+    if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
     if(state.runId===runId&&state.report){state.report.finding_reviews=[...(state.report.finding_reviews||[]).filter(r=>r.review_id!==result.review.review_id),result.review];}
     reviewDrafts.delete(actionId);toast(result.reused?'Showing the saved human review.':'Human review saved.');
   }catch(error){
-    if((token!==state.token||developmentAccess!==state.developmentAccess))return;
+    if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
     draft.error={review_id_conflict:'This submission ID belongs to different review content. Change the decision or reason to start a new submission.',reproduction_required:'A successful matching reproduction is required before confirmation.',incomplete_evidence:'The server could not verify complete evidence. Inspect the original run and reproduction before retrying.',evidence_checksum_mismatch:'Stored evidence failed its integrity check. Confirmation was not saved.',evidence_invalid_metadata:'Stored observation metadata failed its integrity check. Confirmation was not saved.',evidence_unavailable:'Evidence storage is unavailable. Your input is preserved; try again when it is available.',evidence_timeout:'Evidence verification timed out. Your input is preserved; retry to check whether this review was saved.',source_not_reviewable:'This action is not eligible for human review. Refresh the workspace to see its current status.'}[error.code]||error.message;
     if(error.code==='revision_conflict'||error.code==='revision_mismatch'){
-      try{const report=await get('/v1/runs/'+runId);if((token!==state.token||developmentAccess!==state.developmentAccess))return;if(state.runId===runId)state.report=report;draft.revision=Math.max(0,...(report.finding_reviews||[]).filter(r=>(r.action_id||r.source_action_id)===actionId).map(r=>Number(r.revision)));draft.reviewId=null;draft.error='Another review was saved. The history has been refreshed and your input is preserved. Review the latest decision, then save again.';}catch{draft.error='The review changed, but refreshing failed. Your input is preserved. Refresh the workspace before retrying.';}
+      try{const report=await get('/v1/runs/'+runId);if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;if(state.runId===runId)state.report=report;draft.revision=Math.max(0,...(report.finding_reviews||[]).filter(r=>(r.action_id||r.source_action_id)===actionId).map(r=>Number(r.revision)));draft.reviewId=null;draft.error='Another review was saved. The history has been refreshed and your input is preserved. Review the latest decision, then save again.';}catch{draft.error='The review changed, but refreshing failed. Your input is preserved. Refresh the workspace before retrying.';}
     }
-  }finally{draft.submitting=false;if((token===state.token&&developmentAccess===state.developmentAccess))render();}
+  }finally{draft.submitting=false;if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth))render();}
 }

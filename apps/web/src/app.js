@@ -40,18 +40,18 @@ export function render(){
   if(renderAgain){renderAgain=false;render();}
 }
 export async function refresh(){
-  if(refreshing||(!state.token&&!state.developmentAccess))return;refreshing=true;
-  const token=state.token,developmentAccess=state.developmentAccess;
+  if(refreshing||(!state.token&&!state.developmentAccess&&!state.browserAuth))return;refreshing=true;
+  const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth;
   try{
     const [runs,jobs,providers,access]=await Promise.all(['/v1/runs','/v1/browser-jobs','/v1/model-providers','/v1/browser-access'].map(get));
-    if((token!==state.token||developmentAccess!==state.developmentAccess))return;
+    if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
     // Memory is shown only in Settings; other views do not poll it.
-    if(state.view==='settings'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess)state.memoryError=error.message;}}
+    if(state.view==='settings'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
     if(privateLogin&&!access.requests.some(a=>a.access_id===privateLogin.id&&['waiting','active'].includes(a.status)))await closePrivateLogin(false);
-    if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
+    if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
     state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();render();followSubmittedJob();
-  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess)){state.error=error.message;render();}}finally{refreshing=false;}
+  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){state.error=error.message;render();}}finally{refreshing=false;}
 }
 export async function route(){
   const parts=location.hash.replace(/^#\/?/,'').split('/');
@@ -68,8 +68,15 @@ export async function bootstrapSession(){
   try{
     const response=await fetch('/v1/auth-mode',{cache:'no-store',redirect:'error',signal:AbortSignal.timeout(5000)});
     if(!response.ok)throw new Error('Access mode unavailable.');
-    state.developmentAccess=(await response.json()).mode==='local_development';
+    const mode=(await response.json()).mode;
+    state.spekiosAuth=mode==='spekios';
+    state.developmentAccess=mode==='local_development';
+    if(state.spekiosAuth){
+      state.token='';sessionStorage.removeItem('scout.workspace-token');
+      const identity=await fetch('/v1/identity',{cache:'no-store',redirect:'error'});
+      state.browserAuth=identity.ok;
+    }
   }catch{state.developmentAccess=false;}
   if(state.developmentAccess){state.token='';sessionStorage.removeItem('scout.workspace-token');}
-  if(state.developmentAccess||state.token){state.connected=true;await route();}else login();
+  if(state.developmentAccess||state.browserAuth||state.token){state.connected=true;await route();}else login();
 }

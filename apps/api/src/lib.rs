@@ -27,6 +27,7 @@ pub mod reviews;
 mod runs;
 pub mod steering;
 pub mod ui;
+pub mod web_auth;
 
 /// Legacy local workspace retained for CLI fixtures and operator bootstrap.
 /// Model prompts may reach 64 KiB; JSON escaping can roughly double the body.
@@ -44,6 +45,7 @@ pub struct AppState {
     bearer: Arc<str>,
     dev_auth_bypass: bool,
     public_origin: Option<Arc<str>>,
+    web_auth: Option<Arc<web_auth::Config>>,
 }
 
 impl AppState {
@@ -67,6 +69,7 @@ impl AppState {
             bearer: Arc::from(format!("Bearer {token}")),
             dev_auth_bypass: false,
             public_origin: None,
+            web_auth: None,
         })
     }
 
@@ -101,7 +104,7 @@ impl AppState {
     /// Explicit local-development convenience. Worker and CLI bearer
     /// authentication remains available and the token is still required.
     pub fn with_dev_auth_bypass(mut self, enabled: bool) -> Self {
-        self.dev_auth_bypass = enabled && self.public_origin.is_none();
+        self.dev_auth_bypass = enabled && self.public_origin.is_none() && self.web_auth.is_none();
         self
     }
 }
@@ -243,6 +246,9 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(ui::index))
         .route("/connect", get(ui::connect))
         .route("/issues", get(ui::issues))
+        .route("/login", get(web_auth::login))
+        .route("/auth/callback", get(web_auth::callback))
+        .route("/logout", get(web_auth::logout_page).post(web_auth::logout))
         .route("/v1/agent-setup", get(oauth::setup))
         .route("/.well-known/oauth-protected-resource", get(oauth::resource_metadata))
         .route("/.well-known/oauth-protected-resource/mcp", get(oauth::resource_metadata))
@@ -326,6 +332,11 @@ async fn authorize_request(
             }
         } else {
             None
+        }
+    } else if count == 0 && allow_dev {
+        match web_auth::authenticate(&state, request.headers(), request.method()).await {
+            Ok(principal) => principal,
+            Err(response) => return response,
         }
     } else {
         None
@@ -572,7 +583,9 @@ fn local_development_request(request: &Request) -> bool {
 }
 
 async fn auth_mode(State(state): State<AppState>, request: Request) -> Response {
-    let mode = if state.dev_auth_bypass && local_development_request(&request) {
+    let mode = if state.web_auth.is_some() {
+        "spekios"
+    } else if state.dev_auth_bypass && local_development_request(&request) {
         "local_development"
     } else {
         "bearer_token"

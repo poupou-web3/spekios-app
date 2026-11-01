@@ -1,5 +1,7 @@
 # Scout QA
 
+**Spekios sign-in:** [Google, Apple and email/password login through the Lovable wrapper](./SPEKIOS_AUTH.md), including localhost setup and the secure handoff contract.
+
 **Documentation:** [Product, agent and API guides](./apps/docs/README.md). Start the independent, self-hosted documentation with `docker compose -f compose.docs.yaml up -d --build --wait`, then open [ScoutQA docs](http://127.0.0.1:18090). It includes plain Markdown, LLM indexes, OpenAPI and generated MCP tool references.
 
 **For users and their agents:** Open **Connect your agent** in the workspace, add the displayed MCP URL in a compatible agent app and approve in your browser. No checkout or `just` command is needed for this connection. [User connection guide](./apps/docs/src/content/docs/agents/connect.md). Cloud connectors require a publicly reachable HTTPS Scout deployment; the default stack remains local.

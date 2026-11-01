@@ -128,3 +128,20 @@ test('a late tokenless refresh cannot reconnect a closed development session',as
   ui.state.developmentAccess=false;ui.state.connected=false;bodies.forEach(resolve=>resolve({runs:[],jobs:[],workers:[],settings:{}}));await pending;
   assert.equal(ui.state.connected,false);assert.equal(ui.state.developmentAccess,false);
 });
+test('Spekios mode uses the cookie session and clears stale manual credentials',async()=>{
+  const data=payloads(),requests=[],ui=workspace({fetch:async(path,options)=>{requests.push({path,options});return response(path==='/v1/auth-mode'?{mode:'spekios'}:path==='/v1/identity'?{workspace_id:'private-workspace'}:data[path]);}});
+  ui.state.token='old-token';ui.saved.set('scout.workspace-token','old-token');await ui.bootstrapSession();
+  assert.equal(ui.state.browserAuth,true);assert.equal(ui.state.spekiosAuth,true);assert.equal(ui.state.developmentAccess,false);assert.equal(ui.state.connected,true);
+  assert.equal(ui.saved.has('scout.workspace-token'),false);assert.ok(requests.every(r=>!r.options?.headers?.Authorization));
+});
+test('Spekios without a session shows hosted sign-in instead of the token form',async()=>{
+  const ui=workspace({fetch:async(path)=>path==='/v1/auth-mode'?response({mode:'spekios'}):{ok:false,status:401,json:async()=>({error:'unauthorized'})}});
+  await ui.bootstrapSession();assert.equal(ui.state.connected,false);assert.match(ui.node.innerHTML,/href="\/login"/);assert.doesNotMatch(ui.node.innerHTML,/id="token"|id="login-form"/);
+});
+test('a late cookie-authenticated refresh cannot reopen an expired session',async()=>{
+  const bodies=[];let allStarted;const started=new Promise(resolve=>{allStarted=resolve;});
+  const ui=workspace({fetch:async()=>({ok:true,status:200,json:()=>new Promise(resolve=>{bodies.push(resolve);if(bodies.length===4)allStarted();})})});
+  ui.state.browserAuth=true;ui.state.connected=true;const pending=ui.refresh();await started;
+  ui.state.browserAuth=false;ui.state.connected=false;bodies.forEach(resolve=>resolve({runs:[],jobs:[],workers:[],settings:{}}));await pending;
+  assert.equal(ui.state.connected,false);
+});

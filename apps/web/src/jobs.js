@@ -31,12 +31,12 @@ export function followSubmittedJob(){
 export function clearTrackedJob(){state.trackedJobId=null;sessionStorage.removeItem('scout.tracked-job');}
 export async function submitJob(request){
   if(state.submitting)return;state.submitting=true;state.error='';state.launchError='';render();
-  const token=state.token,developmentAccess=state.developmentAccess,originView=state.view,originRun=state.runId;
+  const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth,originView=state.view,originRun=state.runId;
   let saved;try{saved=JSON.parse(sessionStorage.getItem('scout.pending-job')||'null');}catch{}
   const spec=saved&&JSON.stringify(saved.request)===JSON.stringify(request)?saved:{request,job_id:crypto.randomUUID()};
   sessionStorage.setItem('scout.pending-job',JSON.stringify(spec));
   try{
-    const response=await (await api('/v1/browser-jobs',{job_id:spec.job_id,...request})).json();if((token!==state.token||developmentAccess!==state.developmentAccess))return;
+    const response=await (await api('/v1/browser-jobs',{job_id:spec.job_id,...request})).json();if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
     sessionStorage.removeItem('scout.pending-job');toast(response.reused?'Showing the existing job.':'Queued. Your test will open here when the browser starts.');
     if(state.view===originView&&state.runId===originRun){
       if(originView==='workspace'){
@@ -45,6 +45,6 @@ export async function submitJob(request){
       }
     }
     await refresh();
-  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess)){if(error.code==='target_origin_not_allowed'&&request.kind==='explore')state.launchError='Public https sites can be tested from here. Other addresses have to be added to this server’s allowed origins.';else state.error=error.message;}}
-  finally{state.submitting=false;if((token===state.token&&developmentAccess===state.developmentAccess))render();}
+  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){if(error.code==='target_origin_not_allowed'&&request.kind==='explore')state.launchError='Public https sites can be tested from here. Other addresses have to be added to this server’s allowed origins.';else state.error=error.message;}}
+  finally{state.submitting=false;if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth))render();}
 }

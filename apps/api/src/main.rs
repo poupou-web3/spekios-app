@@ -22,9 +22,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let token = env::var("SCOUT_API_TOKEN").map_err(|_| "SCOUT_API_TOKEN is required")?;
+    let web_auth = scout_api::web_auth::Config::from_env()?;
+    if web_auth.is_some() && env::var("PGHOST").is_err() {
+        return Err("Spekios authentication requires PostgreSQL".into());
+    }
     let mut state = AppState::new(None, &token)?
         .with_dev_auth_bypass(env::var("SCOUT_DEV_AUTH_BYPASS").as_deref() == Ok("true"))
-        .with_public_origin(env::var("SCOUT_PUBLIC_ORIGIN").ok().as_deref())?;
+        .with_public_origin(env::var("SCOUT_PUBLIC_ORIGIN").ok().as_deref())?
+        .with_web_auth(web_auth)?;
     if env::var("PGHOST").is_ok() {
         let database = Arc::new(scout_api::db::Postgres::connect().await?);
         state.database = Some(database.clone());
