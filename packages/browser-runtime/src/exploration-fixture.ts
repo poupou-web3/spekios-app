@@ -67,7 +67,7 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
     }else if(path==='/journeys/help'){
       content='<h1>Help centre</h1><p>This alternative branch is available.</p>';
     }else if(path==='/journeys/overlap'||path==='/journeys/overlap-stuck'){
-      const settle=path.endsWith('/stuck')?'':'setTimeout(()=>{hero.style.position="static";intro.style.position="static";document.querySelector("#layout").textContent="separated"},2200);';
+      const settle=path==='/journeys/overlap-stuck'?'':'setTimeout(()=>{hero.style.position="static";intro.style.position="static";document.querySelector("#layout").textContent="separated"},2200);';
       content=`<h1 id='hero' style='position:absolute;top:40px'>Stages</h1><p id='intro' style='position:absolute;top:46px;max-width:280px'>Introductory paragraph about the stage.</p><p id='layout'>overlapping</p><a href='/journeys/help'>Help</a><script>const hero=document.querySelector('#hero'),intro=document.querySelector('#intro');${settle}</script>`;
     }else if(path==='/journeys/busy'||path==='/journeys/animation'){
       content=`<h1>Delayed workspace</h1><button onclick="document.querySelector('#status').${path.endsWith('/busy')?"setAttribute('aria-busy','true')":"style.animation='pulse 100ms infinite alternate'"}">Start activity</button><p id='status'>Working</p><a href='/journeys/help'>Help</a><style>@keyframes pulse{from{color:rgb(0,0,0)}to{color:rgb(180,0,0)}}</style>`;

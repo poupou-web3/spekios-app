@@ -133,6 +133,9 @@ test('real-browser action completion, diagnostics and safe form journeys',{
       const assessments=result.report.events.filter(e=>e.action_id===action.action_id&&e.event_type==='model.decision_accepted'&&e.payload.kind==='assessment');
       assert.equal(assessments.length,2);
       assert.ok(result.report.events.some(e=>e.action_id===action.action_id&&e.event_type==='action.layout_recheck'));
+      const afters=result.report.captures.filter(c=>c.action_id===action.action_id&&c.phase==='after');
+      assert.deepEqual(afters.map(c=>c.capture_id).sort(),[action.assessment.layout_recheck.earlier_after_capture_id,action.after_capture_id].sort(),'Both screenshots stay as evidence.');
+      assert.match(afters.find(c=>c.capture_id===action.after_capture_id).observation.text,/separated/);
     });
     await t.test('overlapping content that remains after a longer wait stays a finding',async()=>{
       const result=await explore(store,fixture.url+'/journeys/overlap-stuck',{...options,maxActions:1});
@@ -141,6 +144,8 @@ test('real-browser action completion, diagnostics and safe form journeys',{
       assert.equal(action.assessment.verdict,'suspect');
       assert.equal(action.assessment.layout_recheck.outcome,'still_present');
       assert.equal(action.assessment.layout_recheck.later_verdict,'suspect');
+      assert.notEqual(action.after_capture_id,action.assessment.layout_recheck.earlier_after_capture_id);
+      assert.match(result.report.captures.find(c=>c.capture_id===action.after_capture_id).observation.text,/overlapping/,'The stuck page never separates.');
     });
     await t.test('a CSS animation settles and stays one state while its pixels remain stored',async()=>{
       const result=await explore(store,fixture.url+'/journeys/animation',{...options,maxActions:4});saved.animation=result.run_id;
