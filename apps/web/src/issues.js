@@ -1,4 +1,4 @@
-import {workspaceRequest,requireOk} from '/assets/ui/http.js';
+import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
 const $=selector=>document.querySelector(selector);
 // The header theme control is the only shared widget on this page.
@@ -198,7 +198,7 @@ async function more(){
 }
 async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();await refreshRecheck();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
 async function ready(){try{identity=await api('/v1/identity');$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message('Workspace issues · original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
-$('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('#issue-token').value;$('#issue-token').value='';sessionStorage.setItem('scout.workspace-token',token);await ready();});
+$('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();const email=$('#issue-email').value.trim(),password=$('#issue-password').value;$('#issue-password').value='';try{await signIn(email,password);token=password;sessionStorage.setItem('scout.workspace-token',token);await ready();}catch(error){message(error.message);}});
 $('#issue-filter').addEventListener('submit',async e=>{e.preventDefault();offset=0;previousOffsets=[];try{await list();}catch(e){message(e.message);}});
 $('#issue-prev').addEventListener('click',async()=>{offset=previousOffsets.pop()??0;await list().catch(e=>message(e.message));});
 $('#issue-next').addEventListener('click',async()=>{if(nextOffset===null)return;previousOffsets.push(offset);offset=nextOffset;await list().catch(e=>message(e.message));});

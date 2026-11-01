@@ -263,6 +263,11 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::extract::DefaultBodyLimit::max(65_536))
         .route("/assets/{*path}", get(ui::asset_file))
         .route("/v1/auth-mode", get(auth_mode))
+        .route(
+            "/v1/workspace-login",
+            axum::routing::post(workspace_login)
+                .layer(axum::extract::DefaultBodyLimit::max(4_096)),
+        )
         .route("/healthz", get(|| async { Json(json!({"status":"ok","service":"scout-api","version":env!("CARGO_PKG_VERSION")})) }))
         .merge(protected)
         .merge(mcp)
@@ -581,6 +586,43 @@ fn local_development_request(request: &Request) -> bool {
         }
     }
     true
+}
+
+#[derive(serde::Deserialize)]
+struct WorkspaceLogin {
+    email: String,
+    password: String,
+}
+
+/// Local workspace sign-in. Email `admin` and the operator token as the password
+/// confirm the same credential the browser will send as a bearer token.
+async fn workspace_login(
+    State(state): State<AppState>,
+    payload: Result<Json<WorkspaceLogin>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let Ok(Json(body)) = payload else {
+        return error(StatusCode::UNAUTHORIZED, "invalid_credentials");
+    };
+    if body.email.len() > 254 || body.password.len() > 256 {
+        return error(StatusCode::UNAUTHORIZED, "invalid_credentials");
+    }
+    let email_ok = body
+        .email
+        .trim()
+        .to_ascii_lowercase()
+        .as_bytes()
+        .ct_eq(b"admin");
+    let token = state
+        .bearer
+        .as_ref()
+        .strip_prefix("Bearer ")
+        .unwrap_or_default();
+    let password_ok = body.password.as_bytes().ct_eq(token.as_bytes());
+    if bool::from(email_ok) && bool::from(password_ok) {
+        Json(json!({"ok": true})).into_response()
+    } else {
+        error(StatusCode::UNAUTHORIZED, "invalid_credentials")
+    }
 }
 
 async fn auth_mode(State(state): State<AppState>, request: Request) -> Response {
@@ -1074,6 +1116,48 @@ mod tests {
             .status(),
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    async fn post_login(body: &str) -> Response {
+        let app = router(AppState::new(None, TOKEN).unwrap());
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/workspace-login")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn workspace_login_accepts_admin_and_the_operator_token_only() {
+        let ok = post_login(&format!(r#"{{"email":"admin","password":"{TOKEN}"}}"#)).await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        assert!(ok.headers().get("set-cookie").is_none());
+        let bytes = to_bytes(ok.into_body(), 1024).await.unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains(TOKEN));
+        assert_eq!(
+            post_login(&format!(r#"{{"email":" Admin ","password":"{TOKEN}"}}"#))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        for body in [
+            format!(r#"{{"email":"other@example.com","password":"{TOKEN}"}}"#),
+            r#"{"email":"admin","password":"wrong-password-that-is-long-enough-0001"}"#.to_string(),
+            r#"{"email":"admin"}"#.to_string(),
+            "not-json".to_string(),
+        ] {
+            let denied = post_login(&body).await;
+            assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+            let text = String::from_utf8_lossy(&to_bytes(denied.into_body(), 1024).await.unwrap())
+                .into_owned();
+            assert!(!text.contains(TOKEN));
+            assert!(text.contains("invalid_credentials"));
+        }
     }
 
     #[tokio::test]

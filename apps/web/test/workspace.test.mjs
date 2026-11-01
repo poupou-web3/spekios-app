@@ -175,11 +175,28 @@ test('development mode opens the workspace without sending or retaining a bearer
   assert.ok(requests.some(r=>r.path==='/v1/runs'));assert.ok(requests.every(r=>!r.options?.headers?.Authorization));
   assert.match(ui.node.innerHTML,/Paste a URL/);assert.match(ui.node.innerHTML,/id="target-url"/);assert.match(ui.node.innerHTML,/Start testing/);assert.match(ui.node.innerHTML,/sign-in disabled/);assert.doesNotMatch(ui.node.innerHTML,/id="login-form"|Disconnect workspace/);
 });
-test('normal mode and a failed mode lookup preserve the manual token login',async()=>{
+test('normal mode and a failed mode lookup preserve the email and password login',async()=>{
   for(const mode of ['bearer_token','unknown',null]){
     const ui=workspace({fetch:async()=>{if(mode===null)throw new Error('Offline');return response({mode});}});await ui.bootstrapSession();
-    assert.equal(ui.state.developmentAccess,false);assert.equal(ui.state.connected,false);assert.match(ui.node.innerHTML,/id="login-form"/);
+    assert.equal(ui.state.developmentAccess,false);assert.equal(ui.state.connected,false);assert.match(ui.node.innerHTML,/id="login-form"/);assert.match(ui.node.innerHTML,/id="email"/);assert.match(ui.node.innerHTML,/id="password"/);assert.doesNotMatch(ui.node.innerHTML,/Workspace access token|id="token"/);
   }
+});
+test('email and password sign-in keeps the password only after the workspace accepts it',async()=>{
+  const requests=[],data=payloads(),password='fixture-password-value-000000000000';
+  const ui=workspace({FormData:class{get(name){return name==='email'?' admin ':password;}},fetch:async(path,options)=>{requests.push({path,options});if(path==='/v1/workspace-login')return{ok:true,status:200,json:async()=>({ok:true})};return response(path==='/readyz'?{status:'ok'}:data[path]);}});
+  await ui.handlers.submit[0]({preventDefault(){},target:{id:'login-form'}});
+  assert.equal(ui.state.connected,true);assert.equal(ui.state.token,password);assert.equal(ui.saved.get('scout.workspace-token'),password);
+  const login=requests.find(r=>r.path==='/v1/workspace-login');
+  assert.equal(JSON.parse(login.options.body).email,'admin');assert.equal(JSON.parse(login.options.body).password,password);
+  assert.equal(login.options.headers.Authorization,undefined);
+  assert.ok(requests.some(r=>r.path==='/readyz'&&r.options.headers.Authorization==='Bearer '+password));
+  assert.match(ui.node.innerHTML,/Paste a URL/);assert.doesNotMatch(ui.node.innerHTML,new RegExp(password));
+});
+test('a rejected email or password stays on the sign-in screen',async()=>{
+  const ui=workspace({FormData:class{get(name){return name==='email'?'someone':'not-the-workspace-password-000000000000';}},fetch:async()=>({ok:false,status:401,json:async()=>({error:'invalid_credentials'})})});
+  await ui.handlers.submit[0]({preventDefault(){},target:{id:'login-form'}});
+  assert.equal(ui.state.connected,false);assert.equal(ui.state.token,'');assert.equal(ui.saved.has('scout.workspace-token'),false);
+  assert.match(ui.node.innerHTML,/Email or password is incorrect/);assert.match(ui.node.innerHTML,/id="login-form"/);
 });
 test('normal mode uses an existing token and a protected401 returns to token login',async()=>{
   const data=payloads(),headers=[],ui=workspace({fetch:async(path,options)=>{headers.push(options?.headers);return response(path==='/v1/auth-mode'?{mode:'bearer_token'}:data[path]);}});
