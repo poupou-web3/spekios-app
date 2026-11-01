@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,launchUrlError,accessBanner,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,launchUrlError,accessNotifications,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{
@@ -124,9 +124,9 @@ test('login prompts escape target data and saved sessions are scoped to the sele
   assert.ok(ui.authOptions().includes('value="right"'));
   assert.ok(!ui.authOptions().includes('value="wrong-app"'));
   assert.ok(!ui.authOptions().includes('value="wrong-mode"'));
-  assert.match(ui.accessBanner(),/Explore public pages/);
-  assert.ok(!ui.accessBanner().includes('<script>'));
-  assert.match(ui.accessBanner(),/Cancel run/);
+  assert.match(ui.accessNotifications(),/Explore public pages/);
+  assert.ok(!ui.accessNotifications().includes('<script>'));
+  assert.match(ui.accessNotifications(),/Cancel run/);
   assert.match(ui.savedSessions(),/Remove session/);
   assert.doesNotMatch(ui.savedSessions(),/fixture-only-password|scout_app_session/);
 });

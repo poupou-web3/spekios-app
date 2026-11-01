@@ -9,14 +9,6 @@ export function workspaceWebsites(){
 }
 export function selectedWebsite(){return workspaceWebsites().find(site=>site.origin===state.websiteOrigin)||null;}
 export function websiteRuns(){return state.websiteOrigin?state.runs.filter(run=>websiteOrigin(run.target_url)===state.websiteOrigin):state.runs;}
-export function jobBelongsToWebsite(job){
-  if(!state.websiteOrigin)return true;
-  const parent=state.jobs.find(item=>item.job_id===job.parent_job_id);
-  const run=state.runs.find(item=>item.run_id===job.run_id);
-  const target=job.request?.target_url||job.request?.candidate_url||run?.target_url||parent?.request?.target_url;
-  if(target)return websiteOrigin(target)===state.websiteOrigin;
-  return job.job_id===state.trackedJobId||!!job.run_id&&job.run_id===state.runId;
-}
 export function selectWebsite(origin,{prefill=false}={}){
   const normalized=websiteOrigin(origin);if(!normalized)return;
   if(state.websiteOrigin!==normalized){state.websiteOrigin=normalized;state.runOffset=0;state.runNextOffset=null;state.runTotal=0;state.search='';state.runFilter='all';state.runMode='all';state.sessionId='';state.launchError='';}

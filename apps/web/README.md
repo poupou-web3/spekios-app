@@ -10,7 +10,7 @@ src/
   state.js         shared state; values several modules change live on `state`
   api.js, images.js, jobs.js, shell.js, private-login.js
   websites.js, website-state.js, website-page.js  grouping, switcher and shared page navigation
-  views/           home, run, action, review, steering, automatic, flow, settings, drawer, export
+  views/           home, run, action, review, steering, automatic, flow, settings, activity, drawer, export
   report/          Markdown / evidence ZIP / JSON report builders (pure modules)
   connect.js       agent connection page
   issues.js        issue history and fix verification page
@@ -23,6 +23,8 @@ test/              node --test suites; support.mjs links src/ for the vm sandbox
 Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`.
 
 The website switcher groups entry URLs by origin, keeping staging subdomains and local ports separate. Its catalog covers the complete owned run history; selected-website test history pages through 50 runs at a time. The overview shows the latest tests, while Tests retains search, filters and usage. Issues use the same exact origin filter. Recent shortcuts are limited to three per website in this tab, with icons for reports, findings, flow maps and pages. Settings and agent connection remain workspace actions at the bottom.
+
+Activity opens from the bottom of the workspace sidebar, or the sticky mobile footer. Its side panel (bottom sheet on mobile) shows running jobs across websites, private sign-in requests, workspace refresh errors and the ten most recent job results. It never opens automatically or inserts background work into a report, overview or settings page. The job API includes all active jobs and the fifty latest finished jobs so older running work stays visible. The panel keeps polling while open; evidence and export drawers retain their existing polling behavior. A newly submitted test still follows its own run until the user navigates elsewhere.
 
 Favicons load directly from the website origin with no referrer and a globe fallback; no third-party favicon service receives the tested URL. The workspace CSP allows HTTP/HTTPS images for these icons, while scripts, styles and API requests remain same-origin. `styles/websites.css` applies this navigation to all customer pages.
 

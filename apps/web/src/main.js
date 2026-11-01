@@ -66,11 +66,13 @@ root.addEventListener('click',async e=>{
   if(action==='open-findings'){state.openFindingsRun=el.dataset.id;if(state.runId===el.dataset.id){state.tab='findings';state.findingFilter='needs_review';state.openFindingsRun=null;rememberWorkspacePage();render();}else location.hash='#/workspace/'+el.dataset.id;}
   if(action==='run-filter'){state.runFilter=el.dataset.value;render();}
   if(action==='runs-page'){state.runOffset=Math.max(0,Number(el.dataset.offset)||0);await refresh();}
+  if(action==='activity-view-run'){state.drawer=null;if(state.runId===el.dataset.id)render();else location.hash='#/workspace/'+el.dataset.id;}
+  if(action==='open-activity'){closeReportExport();state.drawer={title:'Activity',activity:true};render();}
   if(action==='dismiss-tracked-job'){clearTrackedJob();render();}
   if(action==='cancel-automatic'||action==='retry-automatic')await cancelAutomatic(el.dataset.id);
   if(action==='cancel-run'||action==='cancel-job')await cancelWork(action==='cancel-run'?'run':'job',el.dataset.id);
   if(action==='restart-run'||action==='restart-job')await restartWork(action==='restart-run'?'run':'job',el.dataset.id);
-  if(action==='app-login')await openPrivateLogin(el.dataset.id);
+  if(action==='app-login'){state.drawer=null;render();await openPrivateLogin(el.dataset.id);}
   if(action==='skip-login'){try{await api('/v1/browser-access/'+el.dataset.id+'/skip',{});await refresh();}catch(error){toast(error.message);}}
   if(action==='cancel-login'){const access=state.access.requests.find(a=>a.access_id===el.dataset.id);if(access)await cancelWork('run',access.run_id);}
   if(action==='revoke-session'){try{await api('/v1/browser-sessions/'+el.dataset.id+'/revoke',{});if(state.sessionId===el.dataset.id)state.sessionId='';await refresh();toast('Saved session removed. A running browser remains signed in until it closes.');}catch(error){toast(error.message);}}
@@ -122,7 +124,7 @@ document.addEventListener('keydown',e=>{
 // during the redraw and puts the old text back. The model ID field is then ready for the next model.
 function addModelAndRefocus(){document.activeElement?.blur?.();addSavedModel();render();document.getElementById('new-model-model')?.focus();}
 window.addEventListener('hashchange',route);
-setInterval(()=>{if(state.connected&&!document.hidden&&!state.drawer&&!state.submitting)void refresh();},5000);
+setInterval(()=>{if(state.connected&&!document.hidden&&(!state.drawer||state.drawer.activity)&&!state.submitting)void refresh();},5000);
 bindThemeSwitch(root);
 if(document.readyState==='complete')void bootstrapSession();
 else window.addEventListener('DOMContentLoaded',()=>void bootstrapSession(),{once:true});

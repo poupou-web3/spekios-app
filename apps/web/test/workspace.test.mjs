@@ -9,7 +9,7 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,selectWebsite,workspaceWebsites};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,selectWebsite,workspaceWebsites};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});
@@ -25,10 +25,10 @@ test('website selection scopes history and keeps the overview focused on the sel
   assert.match(ui.shell(ui.home()),/Test a new URL/);assert.doesNotMatch(ui.shell(ui.home()),/>Recent tests<\/div>/);
   ui.state.websitePage='tests';assert.match(ui.home(),/id="run-search"/);
 });
-test('queued work and private sign-in prompts follow the selected website',()=>{
+test('activity collects queued work and private sign-in across websites',()=>{
   const ui=workspace();ui.state.jobs=[{job_id:'a',status:'queued',request:{kind:'explore',target_url:'https://a.test/checkout'}},{job_id:'b',status:'running',request:{kind:'explore',target_url:'https://b.test/private'}}];
   ui.state.access.requests=[{status:'waiting',origin:'https://a.test',access_id:'a-access'},{status:'waiting',origin:'https://b.test',access_id:'b-access'}];
-  ui.selectWebsite('https://a.test');const html=ui.jobBanner();assert.match(html,/a\.test/);assert.doesNotMatch(html,/b\.test|b-access/);
+  ui.selectWebsite('https://a.test');const html=ui.activityView();assert.match(html,/a\.test/);assert.match(html,/b\.test/);assert.match(html,/b-access/);assert.doesNotMatch(ui.home(),/b-access|In progress/);assert.match(ui.activityButton(),/2 running, 2 notifications/);
   assert.equal(ui.workspaceWebsites().filter(s=>s.origin==='https://a.test').length,1);
 });
 test('a scoped URL restores the website and requests its history without dropping the complete website catalog',async()=>{
@@ -94,7 +94,7 @@ test('new jobs stay in Workspace, follow exactly one linked run, and retain dura
   const data=payloads([job]),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job,reused:false}:data[path])});connect(ui);
   await ui.submitJob({kind:'explore',target_url:'https://test.app'});
   assert.equal(ui.location.hash,'#/workspace');assert.equal(ui.state.view,'workspace');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.tracked-job'),job.job_id);
-  assert.match(ui.jobBanner(),/Your test will open here/);assert.equal(ui.followSubmittedJob(),false);
+  assert.match(ui.activityView(),/Your test will open here/);assert.equal(ui.followSubmittedJob(),false);
   job.run_id='00000000-0000-4000-8000-000000000099';assert.equal(ui.followSubmittedJob(),true);assert.equal(ui.location.hash,'#/workspace/'+job.run_id);assert.equal(ui.state.trackedJobId,null);assert.equal(ui.followSubmittedJob(),false);
 });
 test('manual navigation cancels automatic follow intent and late admission does not hijack settings',async()=>{
@@ -113,8 +113,8 @@ test('an origin outside the public web is explained on the launch field',async()
 });
 test('failed or cancelled admission without a run remains visible to its user',()=>{
   const ui=workspace();ui.state.trackedJobId='job';ui.state.jobs=[{job_id:'job',status:'failed',run_id:null,error:'<script>target failure</script>'}];
-  assert.match(ui.jobBanner(),/Your test could not start/);assert.match(ui.jobBanner(),/Job job/);assert.doesNotMatch(ui.jobBanner(),/#\/operations|back office/i);assert.doesNotMatch(ui.jobBanner(),/<script>/);
-  ui.state.jobs[0].status='cancelled';assert.match(ui.jobBanner(),/cancelled before launch/);assert.equal(ui.followSubmittedJob(),false);
+  assert.match(ui.activityView(),/Your test could not start/);assert.match(ui.activityView(),/Job job/);assert.doesNotMatch(ui.activityView(),/#\/operations|back office/i);assert.doesNotMatch(ui.activityView(),/<script>/);
+  ui.state.jobs[0].status='cancelled';assert.match(ui.activityView(),/cancelled before launch/);assert.equal(ui.followSubmittedJob(),false);
 });
 const ready=ui=>Object.assign(ui.state,{settings:{provider:'openrouter',model:'model'},providers:{gateway_ready:true,providers:[{provider:'openrouter',configured:true}]},workers:[{available:true}]});
 const click=(ui,action,id)=>ui.handlers.click[0]({target:{closest:selector=>selector==='[data-action]'?{dataset:{action,id},tagName:'BUTTON'}:null}});
@@ -155,7 +155,7 @@ test('a run page and an unstarted job offer one restart each',async()=>{
   assert.match(ui.runView(),/data-action="restart-run" data-id="stopped" >.*Run again/);
   ui.state.report.run.lifecycle='completed';assert.doesNotMatch(ui.runView(),/restart-run/);
   Object.assign(ui.state,{report:null,runId:null,trackedJobId:'job',jobs:[{job_id:'job',status:'failed',run_id:null,request:{kind:'reproduce',source_action_id:'suspect'}}]});
-  assert.match(ui.jobBanner(),/data-action="restart-job" data-id="job" >.*Try again/);
+  assert.match(ui.activityView(),/data-action="restart-job" data-id="job" >.*Try again/);
   await click(ui,'restart-job','job');assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'reproduce',source_action_id:'suspect'});
 });
 test('resumed, queued, older and verification runs restart only where it is safe',()=>{
@@ -218,9 +218,9 @@ test('closing a drawer restores focus by stable identity after its opener was re
   ui.document.activeElement=old;ui.state.drawer={title:'Evidence',raw:{}};ui.render();assert.equal(focused,'close');
   ui.state.drawer=null;ui.render();assert.equal(focused,'new opener');
 });
-test('run pages show only one private login prompt',()=>{
+test('private login prompts appear once in Activity and stay out of session content',()=>{
   const ui=workspace();ui.state.runId='run';ui.state.access={requests:[{access_id:'access',run_id:'run',status:'waiting',reason:'login_required',origin:'https://test.app'}],sessions:[]};
-  const html=ui.shell(ui.jobBanner());assert.equal((html.match(/Open private login/g)||[]).length,1);
+  assert.doesNotMatch(ui.shell('Recorded session'),/Open private login/);ui.state.drawer={activity:true,title:'Activity'};const html=ui.shell('Recorded session');assert.equal((html.match(/Open private login/g)||[]).length,1);
 });
 test('development mode opens the workspace without sending or retaining a bearer token',async()=>{
   const requests=[],data=payloads(),ui=workspace({fetch:async(path,options)=>{requests.push({path,options});return response(path==='/v1/auth-mode'?{mode:'local_development'}:data[path]);}});
@@ -281,4 +281,45 @@ test('a late cookie-authenticated refresh cannot reopen an expired session',asyn
   ui.state.browserAuth=true;ui.state.connected=true;const pending=ui.refresh();await started;
   ui.state.browserAuth=false;ui.state.connected=false;bodies.forEach(resolve=>resolve({runs:[],jobs:[],workers:[],settings:{}}));await pending;
   assert.equal(ui.state.connected,false);
+});
+
+
+test('background activity and notifications never enter the selected report or open by themselves',async()=>{
+  const report={run:run('selected'),actions:[],captures:[]};
+  const data=payloads([{job_id:'other-job',status:'running',run_id:'other-run',request:{kind:'explore',target_url:'https://unrelated.test/private'}}]);
+  const ui=workspace({fetch:async path=>response(path==='/v1/runs/selected'?report:data[path])});connect(ui);
+  Object.assign(ui.state,{runId:'selected',report,websiteOrigin:'https://selected.test',tab:'flow',trackedJobId:'other-job'});
+  await ui.refresh();
+  assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');assert.equal(ui.location.hash,'#/workspace');
+  const selected=ui.shell(ui.runView());assert.doesNotMatch(selected,/https:\/\/unrelated.test\/private|View run|Stop run|activity-card/);
+  ui.state.error='<script>refresh failure</script>';assert.doesNotMatch(ui.shell(ui.runView()),/refresh failure|Showing the last available data/);
+  await click(ui,'open-activity');
+  assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');
+  const open=ui.drawer();assert.match(open,/role="dialog"/);assert.match(open,/Across all websites/);assert.match(open,/https:\/\/unrelated.test\/private/);assert.match(open,/data-action="cancel-job" data-id="other-job"/);assert.match(open,/#\/workspace\/other-run/);assert.match(open,/refresh failure/);assert.doesNotMatch(open,/<script>/);
+  await click(ui,'close-drawer');assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');
+});
+test('Activity stays live while open and evidence drawers keep their polling pause',async()=>{
+  let poll,requests=0;const data=payloads([{job_id:'job',status:'running',request:{kind:'explore',target_url:'https://other.test'}}]);
+  const ui=workspace({setInterval(fn,ms){if(ms===5000)poll=fn;},fetch:async path=>{requests++;return response(data[path]);}});connect(ui);ui.selectWebsite('https://selected.test');
+  await click(ui,'open-activity');poll();await new Promise(setImmediate);
+  assert.equal(requests,4);assert.equal(ui.state.drawer.activity,true);assert.match(ui.drawer(),/other.test/);
+  data['/v1/browser-jobs'].jobs[0].status='completed';poll();await new Promise(setImmediate);
+  assert.equal(requests,8);assert.match(ui.activityButton(),/0 running/);assert.match(ui.drawer(),/Completed/);assert.equal(ui.state.websiteOrigin,'https://selected.test');
+  ui.state.drawer={title:'Evidence',raw:{}};poll();await new Promise(setImmediate);assert.equal(requests,8);
+});
+test('Activity shows recent results once and keeps an older failed admission available',()=>{
+  const ui=workspace();ui.state.trackedJobId='failed';ui.state.jobs=[{job_id:'failed',status:'failed',error:'worker unavailable',request:{kind:'explore',target_url:'https://old.test'}}];
+  for(let i=0;i<12;i++)ui.state.jobs.push({job_id:'job-'+i,status:'completed',run_id:'run-'+i,finished_at:'2026-11-01T12:'+String(i).padStart(2,'0')+':00Z',request:{kind:'explore',target_url:'https://done.test'}});
+  const html=ui.activityView();assert.equal((html.match(/class="activity-card"/g)||[]).length,11);assert.equal((html.match(/Your test could not start/g)||[]).length,1);assert.match(html,/#\/workspace\/run-11/);assert.doesNotMatch(html,/#\/workspace\/run-0"/);
+  assert.match(ui.activityButton(),/0 running, 1 notifications/);
+});
+
+test('desktop and mobile Activity controls have distinct focus identities',()=>{
+  const ui=workspace(),html=ui.shell('Recorded session');assert.equal((html.match(/id="activity-trigger"/g)||[]).length,1);assert.equal((html.match(/id="activity-trigger-mobile"/g)||[]).length,1);
+});
+
+test('viewing the current run from Activity closes the panel without resetting its tab',async()=>{
+  const ui=workspace();connect(ui);Object.assign(ui.state,{runId:'current',report:{run:run('current'),actions:[],captures:[]},tab:'flow',drawer:{activity:true,title:'Activity'}});
+  await click(ui,'activity-view-run','current');assert.equal(ui.state.drawer,null);assert.equal(ui.state.tab,'flow');assert.equal(ui.state.runId,'current');
+  ui.state.drawer={activity:true,title:'Activity'};await click(ui,'activity-view-run','other');assert.equal(ui.state.drawer,null);assert.equal(ui.location.hash,'#/workspace/other');
 });

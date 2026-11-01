@@ -1,11 +1,11 @@
-// Workspace home: launch form, setup checklist, job banners and the runs table.
+// Workspace home: launch form, setup checklist and the runs table.
 import {button,empty,icon,pill} from '/assets/ui/components.js';
 import {date,elapsed,esc,fixture,name,number,providerName,runStatus,short} from '/assets/ui/format.js';
-import {cancelButton,restartButton,STOPPED} from '../jobs.js';
+import {restartButton,STOPPED} from '../jobs.js';
 import {state} from '../state.js';
 import {estimateCost,tokenSplit,tokenSum,usd} from '/assets/ui/usage.js';
-import {jobBelongsToWebsite,selectedWebsite,websiteRuns} from '../website-state.js';
-import {normalizeTargetUrl,websiteHref,websiteLabel,websiteOrigin,websitePath} from '../websites.js';
+import {selectedWebsite,websiteRuns} from '../website-state.js';
+import {normalizeTargetUrl,websiteHref,websiteLabel,websitePath} from '../websites.js';
 // A run's tokens with their input/output split and estimated cost, for the runs table.
 export function runUsage(usage){
   if(!usage)return '<span class="small muted">—</span>';
@@ -57,15 +57,6 @@ export function updateTargetUrl(value){
 export function authOptions(){
   return `<label>Sign-in<select form="run-form" name="auth_mode" id="auth-mode">${SIGN_IN.map(([value,label])=>`<option value="${value}" ${state.authMode===value?'selected':''}>${label}</option>`).join('')}</select></label><label>Saved app session<select form="run-form" name="session_id" id="app-session" ${state.authMode==='public'?'disabled':''}>${sessionChoices()}</select></label>`;
 }
-export function accessBanner(){
-  return (state.access.requests||[]).filter(a=>['waiting','active'].includes(a.status)&&(!state.websiteOrigin||websiteOrigin(a.origin)===state.websiteOrigin||websiteRuns().some(run=>run.run_id===a.run_id))).map(a=>`<section class="notice access-notice" role="status">${icon('info')}<div><strong>${a.status==='active'?'Private sign-in in progress':a.reason==='login_available'?'Sign-in is available':'Sign-in needed to continue'}</strong><p>${esc(a.origin)} · ${a.status==='active'?'The browser is reserved for the person signing in.':'Open the test browser and sign in yourself. Spekios will continue from the authenticated app.'}</p><span class="small muted">Request ${short(a.access_id)} · expires ${date(a.expires_at)}</span></div><div class="access-buttons">${a.status==='waiting'?button('app-login','Open private login','globe',`data-id="${a.access_id}"`):''}${a.status==='waiting'&&a.reason==='login_available'?button('skip-login','Explore public pages','arrow',`data-id="${a.access_id}"`):''}${button('cancel-login','Cancel run','close',`data-id="${a.access_id}"`)}</div></section>`).join('');
-}
-export function jobBanner(){
-  const active=state.jobs.filter(j=>['queued','running'].includes(j.status)&&jobBelongsToWebsite(j));
-  const tracked=state.jobs.find(j=>j.job_id===state.trackedJobId),terminal=tracked&&!tracked.run_id&&!['queued','running'].includes(tracked.status);
-  const stopped=terminal?`<div class="notice ${tracked.status==='cancelled'?'':'amber'}" role="status">${icon('info')}<div><strong>Your test ${tracked.status==='cancelled'?'was cancelled before launch':'could not start'}</strong><p>${esc(tracked.error||'No browser run was created. Start the exploration again when the worker is available.')}</p><span class="small mono">Job ${esc(tracked.job_id)}</span></div>${restartButton('job',tracked)}${button('dismiss-tracked-job','Dismiss','close')}</div>`:'';
-  return accessBanner()+stopped+active.map(job=>`<div class="notice" role="status">${icon('pulse')}<span>${job.cancel_requested_at?'Stopping':job.status==='running'?'In progress':'Queued'} · ${esc(job.request?.kind==='explore'?job.request.target_url:job.parent_job_id?'Automatic fresh-browser reproduction':'Fresh-browser reproduction')}${job.job_id===state.trackedJobId?' · Your test will open here':''}</span>${job.run_id?`<a class="button" href="#/workspace/${esc(job.run_id)}">View run ${icon('arrow')}</a>`:''}${cancelButton('job',job)}</div>`).join('');
-}
 export function workspaceRuns(){
   const search=state.search.toLowerCase().trim();
   return websiteRuns().filter(r=>{
@@ -97,5 +88,5 @@ export function overviewTests(){
   return `<section class="website-recent"><div class="website-section-heading"><h2>Recent tests</h2><a class="button quiet" href="${websiteHref(state.websiteOrigin,'tests')}">View all tests ${icon('arrow')}</a></div><div class="website-test-grid">${runs.map(run=>`<article class="website-test-card"><a class="website-test-link" href="#/workspace/${esc(run.run_id)}"><header><span class="small muted">${date(run.created_at)}</span>${pill(runStatus(run))}</header><h3>${run.config?.replay_of?'Fresh-browser reproduction':'Website exploration'}</h3><p class="small muted">${esc(state.websiteOrigin?websitePath(run.target_url):name(run))} · ${esc(run.config?.viewport_profile||'desktop')}${fixture(run)?' · Test data':''}</p><footer><span>${number(run.summary?.actions)} actions${run.config?.replay_of?' · See source finding':run.summary?` · ${number(run.summary.pending_findings)} findings to review`:' · Summary not loaded'}</span>${icon('arrow')}</footer></a>${restartButton('run',run,true)}</article>`).join('')}</div></section>`;
 }
 export function home(){
-  return state.websitePage==='tests'?`<div class="page-heading"><div><p class="eyebrow">Website history</p><h1>Tests</h1><p>${esc(state.websiteOrigin?websiteLabel(state.websiteOrigin):'Your workspace')}</p></div><a class="button primary" href="${websiteHref(state.websiteOrigin)}" data-action="focus-launch">${icon('plus')}New test</a></div>${jobBanner()}${recentTests()}`:`${hero()}${jobBanner()}${workspaceSetup()}${overviewTests()}`;
+  return state.websitePage==='tests'?`<div class="page-heading"><div><p class="eyebrow">Website history</p><h1>Tests</h1><p>${esc(state.websiteOrigin?websiteLabel(state.websiteOrigin):'Your workspace')}</p></div><a class="button primary" href="${websiteHref(state.websiteOrigin)}" data-action="focus-launch">${icon('plus')}New test</a></div>${recentTests()}`:`${hero()}${workspaceSetup()}${overviewTests()}`;
 }
