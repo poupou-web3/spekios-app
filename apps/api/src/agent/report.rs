@@ -755,6 +755,7 @@ pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
           "geometry_changed":action["comparison"]["geometry_changed"],"decoded_pixels_identical":action["comparison"]["decoded_pixels_identical"],
           "pixel_change_is_bug_verdict":false},
         "diagnostics":{"completion":fields(&action["outcome"],&["status","reason","elapsed_ms","pending_requests","busy","diagnostics"]),
+          "layout_recheck":assessment["layout_recheck"].clone(),
           "signals":signals,"recorded_events":diagnostics.len(),"signals_truncated":diagnostics.iter().filter(|e|signal(e)).count()>12,
           "stack_traces_collected":false,"causation_established":false},
         "evidence":{"captures":captures,"mask":artifact_ref(report,&action["comparison"]["raw_mask_artifact"]),
@@ -846,7 +847,8 @@ fn build_report(report: &Value, progress: Option<Value>, options: &ReportQuery) 
         "triage":triage_totals(report,&actions),
         "execution_issue_count":execution_issues.len(),
         // Depth reached, coverage per level and how the strategies shared the run, once it ends.
-        "coverage_by_depth":run["config"]["coverage_by_depth"],"strategy":run["config"]["strategy"]},
+        "coverage_by_depth":run["config"]["coverage_by_depth"],"strategy":run["config"]["strategy"],
+        "model_use":run["config"]["model_use"]},
       "execution_issues":execution_issues,
       "progress":progress,"steering":steering_summary(&report["steering"]),"usage":report["model_usage"],"fix_verification":report["fix_verification"],
       "automatic_checks":list(&report["automatic_reproductions"]).iter().map(automatic_summary).collect::<Vec<_>>(),

@@ -61,6 +61,43 @@ impl Strategy {
         )
     }
 }
+/// A cheaper model for navigation actions: opening a URL, following a link
+/// and scrolling. Anything it does not assess as clean is reassessed by the
+/// exploration model. Absent or null: one model for everything.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NavigationModel {
+    provider: String,
+    model: String,
+}
+fn valid_model(model: &str) -> bool {
+    !model.is_empty()
+        && model.len() <= 200
+        && model
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"/:._-".contains(&c))
+}
+impl NavigationModel {
+    fn normalize(&self, free_only: bool) -> Result<Value, &'static str> {
+        let model = self.model.trim();
+        if !matches!(
+            self.provider.as_str(),
+            "openai" | "anthropic" | "openrouter" | "meta"
+        ) || self.model.chars().any(char::is_control)
+            || !valid_model(model)
+        {
+            return Err("invalid_navigation_model");
+        }
+        if free_only
+            && self.provider == "openrouter"
+            && model != "openrouter/free"
+            && !model.ends_with(":free")
+        {
+            return Err("free_only_requires_free_model");
+        }
+        Ok(json!({"provider":self.provider,"model":model}))
+    }
+}
 pub fn default_strategy() -> Value {
     json!({"breadth":50,"depth":30,"rewalk":20,"adaptive":true})
 }
@@ -253,6 +290,11 @@ pub struct SettingsSubmission {
     /// Absent keeps the default split.
     #[serde(default)]
     exploration_strategy: Option<Strategy>,
+    /// Reuse a screen's ranking from earlier runs when it has not changed.
+    #[serde(default = "enabled")]
+    reuse_rankings: bool,
+    #[serde(default)]
+    navigation_model: Option<NavigationModel>,
     viewport_profile: String,
     free_only: bool,
     auto_reproduce: bool,
@@ -285,13 +327,7 @@ impl SettingsSubmission {
             return Err("invalid_settings_provider");
         }
         let model = self.model.trim();
-        if self.model.chars().any(char::is_control)
-            || model.is_empty()
-            || model.len() > 200
-            || !model
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"/:._-".contains(&c))
-        {
+        if self.model.chars().any(char::is_control) || !valid_model(model) {
             return Err("invalid_settings_model");
         }
         let mut limits = Limits {
@@ -324,6 +360,10 @@ impl SettingsSubmission {
             Some(strategy) => strategy.normalize()?,
             None => default_strategy(),
         };
+        let navigation_model = match &self.navigation_model {
+            Some(navigation) => navigation.normalize(self.free_only)?,
+            None => Value::Null,
+        };
         if !(1..=3).contains(&self.max_auto_reproductions)
             || !(1..=MAX_AUTO_REPLAY_ACTIONS).contains(&self.max_auto_replay_actions)
         {
@@ -348,7 +388,8 @@ impl SettingsSubmission {
                     "viewportProfile":self.viewport_profile,"freeOnly":free_only,
                     "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
                     "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory,
-                    "explorationStrategy":strategy
+                    "explorationStrategy":strategy,"reuseRankings":self.reuse_rankings,
+                    "navigationModel":navigation_model
                 });
                 settings.as_object_mut().unwrap().extend(limits);
                 settings
@@ -371,6 +412,8 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
             "stopAfterIdleActions",
             "limitOverrides",
             "explorationStrategy",
+            "reuseRankings",
+            "navigationModel",
             "viewportProfile",
             "freeOnly",
             "autoReproduce",
@@ -948,6 +991,7 @@ impl Queue {
                 "maxMinutes":optional_setting("SCOUT_EXPLORER_MAX_MINUTES",MAX_EXPLORATION_MINUTES),
                 "maxTokens":null,"maxCostUsd":null,"stopAfterIdleActions":DEFAULT_IDLE_ACTIONS,"limitOverrides":[],
                 "explorationStrategy":default_strategy(),
+                "reuseRankings":env::var("SCOUT_EXPLORER_REUSE_RANKINGS").as_deref()!=Ok("false"),"navigationModel":null,
                 "appMemory":env::var("SCOUT_EXPLORER_APP_MEMORY").as_deref()!=Ok("false"),
                 "autoReproduce":env::var("SCOUT_AUTO_REPRODUCE").as_deref()==Ok("true"),
                 "maxAutoReproductions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_CASES",2,3),
@@ -1344,6 +1388,23 @@ mod tests {
                 "exploration_strategy",
                 json!({"breadth":-10,"depth":90,"rewalk":20,"adaptive":true}),
             ),
+            ("reuse_rankings", json!("yes")),
+            (
+                "navigation_model",
+                json!({"provider":"other","model":"cheap"}),
+            ),
+            (
+                "navigation_model",
+                json!({"provider":"openai","model":"a b"}),
+            ),
+            (
+                "navigation_model",
+                json!({"provider":"openai","model":"cheap","tier":"x"}),
+            ),
+            (
+                "navigation_model",
+                json!({"provider":"openrouter","model":"paid/model"}),
+            ),
             ("api_key", json!("cannot-save-secrets")),
             ("allowed_origins", json!(["https://other.test"])),
             ("allowedOrigins", json!(["https://other.test"])),
@@ -1394,6 +1455,29 @@ mod tests {
             default_strategy(),
             "Omitted strategy keeps the default split"
         );
+        let defaults = normalize_settings(settings_input()).unwrap().settings;
+        assert_eq!(
+            defaults["reuseRankings"], true,
+            "Rankings are reused unless turned off"
+        );
+        assert_eq!(
+            defaults["navigationModel"],
+            Value::Null,
+            "One model by default"
+        );
+        let mut cheaper = settings_input();
+        cheaper["reuse_rankings"] = json!(false);
+        cheaper["navigation_model"] = json!({"provider":"openrouter","model":" vendor/lite:free "});
+        let cheaper = normalize_settings(cheaper).unwrap().settings;
+        assert_eq!(cheaper["reuseRankings"], false);
+        assert_eq!(
+            cheaper["navigationModel"],
+            json!({"provider":"openrouter","model":"vendor/lite:free"})
+        );
+        let mut paid = settings_input();
+        paid["free_only"] = json!(false);
+        paid["navigation_model"] = json!({"provider":"anthropic","model":"small-model"});
+        assert!(normalize_settings(paid).is_ok());
         let mut split = settings_input();
         split["exploration_strategy"] =
             json!({"breadth":0,"depth":70,"rewalk":30,"adaptive":false});

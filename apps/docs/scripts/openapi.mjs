@@ -284,6 +284,9 @@ export function openapi(catalog) {
           viewport_profile: choice('desktop','tablet','mobile'), free_only: bool,
           auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,100),
           app_memory: { type: 'boolean', default: true, description: 'Remember explored pages and controls across runs of the same app, viewport and sign-in state.' },
+          reuse_rankings: { type: 'boolean', default: true, description: 'Reuse what the model ranked on a screen in an earlier run when its address pattern, title, text (numbers and times normalized) and control states are unchanged and the model is the same. Needs app memory. Skips the planning request; recorded as a plan decision with status reused. A ranking is reused at most 10 times; rankings that type text and runs with a testing focus are always ranked afresh.' },
+          navigation_model: { ...strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 } }, ['provider','model']), type: ['object','null'],
+            description: 'A cheaper model that predicts and assesses navigation actions: opening a URL, following a link and scrolling. Any result other than a clean no_issue_observed, or one with browser errors or failed requests, is reassessed by the exploration model. Free-only applies to an OpenRouter navigation model. Omitted or null: one model for everything.' },
         }, ['request_id','expected_revision','provider','model','viewport_profile','free_only','auto_reproduce','max_auto_reproductions','max_auto_replay_actions']),
         ModelRequest: strict({
           request_id: uuid, provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[A-Za-z0-9/:._-]+$' },

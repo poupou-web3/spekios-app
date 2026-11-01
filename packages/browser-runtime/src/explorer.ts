@@ -5,7 +5,7 @@ import { Store, jsonBytes } from './store.js';
 import { CAPTURE_POLICY, capture, installNetworkGate, prepareCaptureContext, type Hooks } from './recorder.js';
 import { MAX_EXPLORATION_ACTIONS, MAX_EXPLORATION_MINUTES, isUuid, type Capture, type ObservedControl } from './contracts.js';
 import { ModelClient, modelSettings } from './model-client.js';
-import { blockedReason, documentFingerprint, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
+import { blockedReason, documentFingerprint, isLayoutOverlap, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
 import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reproduction.js';
 import {loadVerification,bindVerificationCommand,parseFixAssessment,finishVerification} from './fix-verification.js';
 import { FrontierPlanner, PLANNER_VERSION, type BrowserCommand, type ChangeSignal, type RouteStep } from './frontier-planner.js';
@@ -13,13 +13,13 @@ import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewp
 import { commandFor, INTERACTION_VERSION } from './interaction-contract.js';
 import { dispatch, observedCommand, revealControl, validateDispatch, type Reveal } from './browser-interactions.js';
 import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyContext, pageContext as context } from './model-context.js';
-import { AppMemory, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
-import { MAP_VERSION, mapState, transitionKey } from './app-map.js';
+import { AppMemory, MAX_RANKING_REUSES, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
+import { MAP_VERSION, mapState, RANKING_VERSION, rankingEntries, restoreRanking, screenSignature, transitionKey } from './app-map.js';
 import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged } from './access-detection.js';
 import { AuthVault } from './auth-session.js';
 import { openBrowser } from './browser-sandbox.js';
 import { testFormRules, type TestFormRule } from './form-policy.js';
-import { ActionDiagnostics, settleAction, saveOutcome, outcomeContext, incompleteCompletion, COMPLETION_VERSION, COMPLETION_LIMITS, type Completion } from './action-outcome.js';
+import { ActionDiagnostics, settleAction, saveOutcome, outcomeContext, incompleteCompletion, COMPLETION_VERSION, COMPLETION_LIMITS, LATE_LAYOUT_LIMITS, type Completion } from './action-outcome.js';
 import type { AccessHandoff, AccessResult, AccessReason } from './access-handoff.js';
 import { RunControl, RunCancelled } from './run-control.js';
 import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
@@ -37,7 +37,9 @@ Assess EVERY action, including zero or one changed pixel. A pixel difference onl
 If behavior is ambiguous or the expectation is unsupported, report inconclusive and expectation_uncertain=true.
 Never claim a confirmed bug. Credentials, payments and destructive actions require a handoff; choose another allowed flow.`;
 
-type ModelPrediction = { source: 'model'; request_id: string; decision_id: string; goal: string; expected_result: string; context_capture_id: string | null; steering?: PlanningFocus|null };
+type ModelPrediction = { source: 'model'; request_id: string; decision_id: string; goal: string; expected_result: string; context_capture_id: string | null; steering?: PlanningFocus|null;
+  // Set when the plan reused a ranking an earlier run's model request made for the same screen.
+  reused_ranking?: { request_id: string; run_id: string } };
 type ReplayPrediction = { source: 'recorded_replay'; source_prediction_id: string; source_model_request_id: string; goal: string; expected_result: string; context_capture_id: string | null };
 type Spec = { command: BrowserCommand; prediction: ModelPrediction | ReplayPrediction; worker_id: string; agent_id: string; replay_source_action_id?: string;
   exploration?: { purpose: 'explore' | 'return' | 'resume'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep;
@@ -53,11 +55,19 @@ export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: numbe
   stopAfterIdleActions?: number | null;
   // How the run's actions are shared between new territory, deep journeys and re-walks.
   strategy?: StrategySettings | null;
+  // Reuse a screen's ranking from earlier runs when it has not changed (needs app memory).
+  reuseRankings?: boolean;
+  // A cheaper model for navigation actions; anything it does not find clean is reassessed.
+  navigationClient?: ModelClient | null;
   // Worker shutdown closes the browser; the job is then resumed or interrupted.
   shutdown?: AbortSignal;
   // A continuation of an interrupted exploration job, with its remaining budget.
   resume?: { attempt: number; previousRunIds: string[]; jobMaxActions: number | null; carriedActions: number };
   testFormRules?: TestFormRule[]; access?: AccessHandoff; authMode?: 'auto'|'sign_in'|'public'; sessionId?:string; accessTimeoutMs?:number };
+// Opening a URL, following a link and scrolling change what is shown, not the
+// app's data. With a navigation model they are predicted and assessed there.
+const navigationAction = (command: BrowserCommand) => command.type === 'navigate' || command.type === 'scroll'
+  || command.type === 'click' && command.control.role === 'link' && !!command.control.href;
 // An empty or unset server limit means no limit.
 function environmentLimit(name: string, max: number): number | null {
   const value = process.env[name]?.trim();
@@ -133,6 +143,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
   const viewport = viewportProfiles[profile];
   let planner = new FrontierPlanner(targetUrl);
   const executionMode = await client.ready();
+  // A navigation model must be ready in the same mode; otherwise the main model does everything.
+  let navigation = replay ? null : options.navigationClient ?? null, navigationUnavailable: string | null = null;
+  if (navigation && await navigation.ready().catch(() => null) !== executionMode) { navigation = null; navigationUnavailable = 'navigation_model_not_ready'; }
+  const reuseRankings = !replay && options.reuseRankings === true;
   const origin = new URL(targetUrl).origin;
   const formRules = options.testFormRules ? testFormRules(JSON.stringify(options.testFormRules)) : testFormRules();
   const fixtureEvidence = replay?.training_status === 'excluded_fixture' || executionMode === 'protocol_fixture' || origin === 'http://exploration-fixture:8082';
@@ -149,7 +163,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         await options.hooks?.beforeCapture?.(page);
         if((options.access||authContext||replay?.fix_verification)&&(await accessSignals(page)).login_form)throw new PrivateLoginSurface();
       } };
-    const maxModelRequests = replay ? maxActions : maxActions * 3 + MAX_CONSECUTIVE_REPLANS_PER_PAGE * 2;
+    // A navigation model can add one reassessment per action.
+    const maxModelRequests = replay ? maxActions : maxActions * (navigation ? 4 : 3) + MAX_CONSECUTIVE_REPLANS_PER_PAGE * 2;
     const recovery = new ExplorationRecovery();
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
     // Consecutive actions that reached only states already recorded in this run.
@@ -157,6 +172,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     let idleActions = 0, stateCreated = false, mapNovel = false;
     // Re-walks wait while an operator focus steers planning.
     let focused = false;
+    // States ranked in this run; a stored ranking is reused only on a first visit.
+    const plannedStates = new Set<string>();
+    const economy = { plans_requested: 0, plans_reused: 0, rankings_stored: 0, navigation_requests: 0, escalations: 0, fallbacks: 0 };
     // Each recorded state's app-map key, for the transitions between them.
     const mapKeys = new Map<string, string>();
     // Replays never read or write memory; their path is fixed by evidence.
@@ -189,6 +207,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             stop_after_idle_actions: stopAfterIdleActions, context_budgets: CONTEXT_BUDGETS },
           app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] }, app_map_version: MAP_VERSION,
           strategy: replay ? null : { version: STRATEGY_VERSION, settings: strategy.settings },
+          model_tiers: { navigation: navigation?.settings ?? null, navigation_unavailable: navigationUnavailable, navigation_actions: ['navigate','link_click','scroll'],
+            reassess_when: ['not_no_issue_observed','expectation_uncertain','browser_diagnostics','navigation_model_failed'] },
+          ranking_reuse: { version: RANKING_VERSION, enabled: reuseRankings, max_reuses: MAX_RANKING_REUSES },
           resume: resume ? { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, job_max_actions: resume.jobMaxActions, carried_actions: resume.carriedActions } : null,
           scope: allowedOrigins.includes(origin) ? 'operator-allowed-origin' : 'public-https', purpose: fixtureEvidence ? 'runtime_validation' : 'exploration', training_status: fixtureEvidence ? 'excluded_fixture' : 'unreviewed', coverage_complete: false })]);
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
@@ -220,15 +241,19 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     });
 
     let focusRevision=0;
-    async function decide<T>(kind: 'navigation_prediction' | 'plan' | 'assessment', actionId: string | null, captures: string[], input: unknown, validate: (value: unknown) => T) {
+    async function decide<T>(kind: 'navigation_prediction' | 'plan' | 'assessment', actionId: string | null, captures: string[], input: unknown, validate: (value: unknown) => T,
+      requested: 'main' | 'navigation' = 'main') {
       if (++modelRequests > maxModelRequests) throw new Error('Model request budget reached.');
       const decisionId = randomUUID(), requestId = randomUUID();
+      const tier = requested === 'navigation' && navigation ? 'navigation' as const : 'main' as const, model = tier === 'navigation' ? navigation! : client;
+      if (kind === 'plan') economy.plans_requested++;
+      if (tier === 'navigation') economy.navigation_requests++;
       const focus:PlanningFocus|null=await store.transaction(async () => {
         await control.check(true);
         await store.query("INSERT INTO exploration_decisions(decision_id,run_id,action_id,request_id,kind,status,input_capture_ids) VALUES($1,$2,$3,$4,$5,'requested',$6)",
           [decisionId, runId, actionId, requestId, kind, captures]);
         const focus=kind==='plan'&&!replay?await planningFocus(store,runId,decisionId):null;
-        await store.event(runId, 'model.decision_requested', { decision_id: decisionId, request_id: requestId, kind, input_capture_ids: captures, steering:focus }, actionId);
+        await store.event(runId, 'model.decision_requested', { decision_id: decisionId, request_id: requestId, kind, input_capture_ids: captures, steering:focus, model_tier: tier }, actionId);
         return focus;
       });
       if(focus && focusRevision!==focus.revision){
@@ -238,7 +263,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       const planningInput=kind==='plan'?{...(input as Record<string,unknown>),operator_focus:focus}:input;
       let raw: unknown = null, received = false;
       try {
-        const response = await client.complete(requestId, runId, actionId, captures, SYSTEM, planningInput,control.signal);
+        const response = await model.complete(requestId, runId, actionId, captures, SYSTEM, planningInput,control.signal);
         raw = response.value; received = true;
         const result = validate(raw);
         await store.transaction(async () => {
@@ -246,7 +271,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           await store.query("UPDATE exploration_decisions SET status='accepted',result=$2,finished_at=now() WHERE decision_id=$1", [decisionId, JSON.stringify(result)]);
           await store.event(runId, 'model.decision_accepted', { decision_id: decisionId, request_id: requestId, call_id: response.call_id, kind, result }, actionId);
         });
-        return { result, requestId, decisionId, steering:focus };
+        return { result, requestId, decisionId, steering:focus, tier: tier as 'main' | 'navigation' | 'reused' };
       } catch (error) {
         try{await control.check();}catch(stopped){error=stopped;}
         const cancelled=error instanceof RunCancelled;
@@ -257,6 +282,34 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         });
         throw error;
       }
+    }
+    // Predictions for navigation actions go to the navigation model when there
+    // is one; if it fails, the main model answers instead.
+    async function predict(command: BrowserCommand, captures: string[], input: unknown) {
+      if (!navigation || !navigationAction(command)) return decide('navigation_prediction', null, captures, input, parsePrediction);
+      try { return await decide('navigation_prediction', null, captures, input, parsePrediction, 'navigation'); }
+      catch { await control.check(); economy.fallbacks++; return decide('navigation_prediction', null, captures, input, parsePrediction); }
+    }
+    // An unchanged screen reuses the ranking a model made for it before, unless
+    // a testing focus is pending or active. It is recorded as its own decision.
+    async function reuseRanking(signature: string, available: ObservedControl[]) {
+      const stored = await memory.ranking(signature, client.settings);
+      if (!stored) return undefined;
+      if ((await store.query("SELECT 1 FROM run_steering WHERE run_id=$1 AND status IN ('pending','applied') AND focus<>'' LIMIT 1", [runId])).rowCount) return undefined;
+      const candidates = restoreRanking(stored.proposals, available);
+      if (!candidates.length) return undefined;
+      const decisionId = randomUUID(), requestId = randomUUID(), result = { candidates, stop_reason: null };
+      const reusedFrom = { run_id: stored.source_run_id, request_id: stored.source_request_id, decision_id: stored.source_decision_id,
+        ranked_at: stored.created_at, reuse: stored.reuses + 1, max_reuses: MAX_RANKING_REUSES, version: RANKING_VERSION };
+      await store.transaction(async () => {
+        await control.check(true);
+        await store.query("INSERT INTO exploration_decisions(decision_id,run_id,request_id,kind,status,input_capture_ids,result,finished_at) VALUES($1,$2,$3,'plan','reused',$4,$5,now())",
+          [decisionId, runId, requestId, [last!.capture.capture_id], JSON.stringify({ ...result, reused_from: reusedFrom })]);
+        await store.event(runId, 'model.decision_reused', { decision_id: decisionId, request_id: requestId, kind: 'plan', reused_from: reusedFrom, candidates: candidates.length });
+        await memory.reusedRanking(signature, client.settings);
+      });
+      economy.plans_reused++;
+      return { result, requestId, decisionId, steering: null, tier: 'reused' as const, reusedFrom };
     }
     async function state(c: Capture, parentId?: string, signals: Record<string, ChangeSignal> = {}, likelihood = 1, initial = false) {
       // The blank page a run starts from is not part of the app's map.
@@ -309,7 +362,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     let last: { capture: Capture; bytes: Buffer } | undefined, lastState: string | undefined;
     const history: unknown[] = [];
     // How the actions were shared and how much of each depth was covered.
-    const progress = () => replay ? {} : { strategy: strategy.summary(), coverage_by_depth: planner.coverage() };
+    const progress = () => replay ? {} : { strategy: strategy.summary(), coverage_by_depth: planner.coverage(), model_use: economy };
     try {
       await control.check();
       if(replay?.fix_verification?.requires_session&&!authContext?.session_id)throw new AccessStopped('candidate_sign_in_required');
@@ -378,9 +431,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             source_model_request_id: replayStep.source_model_request_id, goal: replayStep.goal, expected_result: replayStep.expected_result,
             context_capture_id: last?.capture.capture_id ?? null }, worker_id: workerId, agent_id: agentId, replay_source_action_id: replayStep.source_action_id };
         } else if (!last) {
-          const decision = await decide('navigation_prediction', null, [], { task: 'navigation_prediction', target_url: targetUrl,
+          const decision = await predict({ type: 'navigate', url: targetUrl }, [], { task: 'navigation_prediction', target_url: targetUrl,
             instruction: 'Predict the observable outcome of opening this URL. You have not observed the page yet; do not invent its content.',
-            response_schema: { goal: 'string', expected_result: 'string' } }, parsePrediction);
+            response_schema: { goal: 'string', expected_result: 'string' } });
           spec = { command: { type: 'navigate', url: targetUrl }, prediction: { source: 'model', request_id: decision.requestId,
             decision_id: decision.decisionId, ...decision.result, context_capture_id: null }, worker_id: workerId, agent_id: agentId };
         } else {
@@ -390,21 +443,34 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const rewalks = focused ? [] : planner.rank(lastState!, remaining, 'rewalk');
           // A re-walk repeats a recorded action and needs no new ranking of this screen.
           const rewalkTurn = strategy.peek({ breadth: { travel_steps: 0 }, depth: { travel_steps: 0 }, rewalk: rewalks[0] }) === 'rewalk';
-          let decision: Awaited<ReturnType<typeof decide<ReturnType<typeof parsePlan>>>> | undefined;
+          let decision: (Awaited<ReturnType<typeof decide<ReturnType<typeof parsePlan>>>> & { reusedFrom?: { request_id: string; run_id: string } }) | undefined;
           if (available.length && !rewalkTurn) {
-            const fitted = fitContext(scale => {
-              const shown = controlContext(available, Math.floor(CONTEXT_BUDGETS.plan_controls_bytes * scale));
-              const appMemory = memory.planningContext(last!.capture.observation.url, shown.controls);
-              return { task: 'plan' as const, page: {...context(last!.capture, scale), controls: undefined},
-                available_controls: shown.controls,available_controls_truncated:shown.controls_truncated,omitted_available_controls:shown.omitted_controls,
-                recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.plan_history * scale)), exploration: planner.context(lastState!),
-                control_changes: Object.fromEntries(shown.controls.flatMap(c => signals[c.control_id]?.newly_exposed || signals[c.control_id]?.changed_pixels ? [[c.control_id, signals[c.control_id]]] : [])),
-                ...(appMemory ? { app_memory: appMemory } : {}), context_scale: scale,
-                instruction: 'Estimate what a user is most likely to do NEXT given this path and current page. Favor continuing a useful journey and newly exposed controls where appropriate. Rank up to eight available controls, each with an observable expectation. Controls with in_viewport=false are further down the page and are scrolled into view before acting; they are not visible in the screenshot. control_changes lists only controls that were newly exposed or contain changed pixels. Use click for buttons/links, fill with short synthetic plain text for editable text/search fields, select with an exact enabled observed option value, set_checked for checkboxes/radios (radios only true), scroll for an observed page scroll control, or submit for an explicitly authorized observed form submitter. For forms, try empty/invalid input when useful, then fill synthetic data and submit to observe validation or the result. Avoid repeating an unchanged value. Do not invent sensitive data, press keys, submit an unauthorized form, or invent controls/scroll coordinates. Likelihood is a conditional estimate, not measured probability. A visual change does not by itself mean a bug.',
-                response_schema: { candidates: [{ control_id: 'observed ID', goal: 'string', expected_result: 'string', likelihood: 'number 0..1',
-                  action:'Exactly one of {type:"click"}, {type:"fill",value:"plain text"}, {type:"select",value:"observed option value"}, {type:"set_checked",checked:boolean}, {type:"scroll"}, {type:"submit"}' }], stop_reason: 'string when candidates empty; otherwise null' } };
-            });
-            decision = await decide('plan', null, [last.capture.capture_id], fitted.input, value => parsePlan(value, fitted.input.available_controls));
+            const firstVisit = !plannedStates.has(lastState!), signature = memory.enabled && firstVisit ? screenSignature(last.capture) : null;
+            if (signature && reuseRankings) decision = await reuseRanking(signature, available);
+            if (!decision) {
+              const fitted = fitContext(scale => {
+                const shown = controlContext(available, Math.floor(CONTEXT_BUDGETS.plan_controls_bytes * scale));
+                const appMemory = memory.planningContext(last!.capture.observation.url, shown.controls);
+                return { task: 'plan' as const, page: {...context(last!.capture, scale), controls: undefined},
+                  available_controls: shown.controls,available_controls_truncated:shown.controls_truncated,omitted_available_controls:shown.omitted_controls,
+                  recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.plan_history * scale)), exploration: planner.context(lastState!),
+                  control_changes: Object.fromEntries(shown.controls.flatMap(c => signals[c.control_id]?.newly_exposed || signals[c.control_id]?.changed_pixels ? [[c.control_id, signals[c.control_id]]] : [])),
+                  ...(appMemory ? { app_memory: appMemory } : {}), context_scale: scale,
+                  instruction: 'Estimate what a user is most likely to do NEXT given this path and current page. Favor continuing a useful journey and newly exposed controls where appropriate. Rank up to eight available controls, each with an observable expectation. Controls with in_viewport=false are further down the page and are scrolled into view before acting; they are not visible in the screenshot. control_changes lists only controls that were newly exposed or contain changed pixels. Use click for buttons/links, fill with short synthetic plain text for editable text/search fields, select with an exact enabled observed option value, set_checked for checkboxes/radios (radios only true), scroll for an observed page scroll control, or submit for an explicitly authorized observed form submitter. For forms, try empty/invalid input when useful, then fill synthetic data and submit to observe validation or the result. Avoid repeating an unchanged value. Do not invent sensitive data, press keys, submit an unauthorized form, or invent controls/scroll coordinates. Likelihood is a conditional estimate, not measured probability. A visual change does not by itself mean a bug.',
+                  response_schema: { candidates: [{ control_id: 'observed ID', goal: 'string', expected_result: 'string', likelihood: 'number 0..1',
+                    action:'Exactly one of {type:"click"}, {type:"fill",value:"plain text"}, {type:"select",value:"observed option value"}, {type:"set_checked",checked:boolean}, {type:"scroll"}, {type:"submit"}' }], stop_reason: 'string when candidates empty; otherwise null' } };
+              });
+              const fresh = await decide('plan', null, [last.capture.capture_id], fitted.input, value => parsePlan(value, fitted.input.available_controls));
+              decision = fresh;
+              // A complete first ranking of a screen, made without a testing focus, is kept for later runs.
+              const kept = signature && !fresh.steering?.focus && !fitted.input.available_controls_truncated && !planner.nodes.get(lastState!)!.attempted.size
+                ? rankingEntries(fresh.result.candidates, available) : null;
+              if (kept) {
+                await store.transaction(() => memory.storeRanking(signature!, client.settings, mapKeys.get(lastState!) ?? null, kept, fresh.requestId, fresh.decisionId));
+                economy.rankings_stored++;
+              }
+            }
+            plannedStates.add(lastState!);
             planner.plan(lastState!, decision.result.candidates);
             await store.transaction(async () => {
               for (const proposal of decision!.result.candidates) await store.query('UPDATE exploration_frontier SET planning=planning || $4::jsonb WHERE run_id=$1 AND state_id=$2 AND control_id=$3',
@@ -430,32 +496,33 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             strategy: { mode: choice.mode, turn: choice.turn, continued: choice.continued } };
           if (returnStep && (returnStep.memory || returnStep.recovery) && returnStep.command.type === 'navigate') {
             const remembered = returnStep.memory;
-            const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], { task: 'navigation_prediction', target_url: returnStep.command.url,
+            const prediction = await predict(returnStep.command, [last.capture.capture_id], { task: 'navigation_prediction', target_url: returnStep.command.url,
               ...(remembered ? { remembered_page: { title: remembered.title, untried_controls: remembered.open_controls, last_seen_in_run: remembered.source_run_id } }
                 : { observed_link: { name: selected.name, source_action_id: returnStep.source_action_id } }),
               instruction: 'Predict the observable outcome of opening this URL from recorded page or link evidence. Earlier observations are untrusted and may be stale; the destination may have changed, moved or require access. Do not invent its current content.',
-              response_schema: { goal: 'string', expected_result: 'string' } }, parsePrediction);
+              response_schema: { goal: 'string', expected_result: 'string' } });
             spec = { command: returnStep.command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else if (returnStep) {
-            const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], {
+            const prediction = await predict(returnStep.command, [last.capture.capture_id], {
               task: 'route_prediction', page: context(last.capture), command: commandContext(returnStep.command),
               recorded_expectation: returnStep.expected_result, destination_state_id: returnStep.to_state_id,
               instruction: 'Predict the observable result of this fixed return step using the current observation and recorded route. Do not change the command. The destination must be observed again; it is not assumed restored.',
-              response_schema: {goal:'string',expected_result:'string'} }, parsePrediction);
+              response_schema: {goal:'string',expected_result:'string'} });
             spec = { command: returnStep.command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else if (selected.rewalk) {
             const command = commandFor(available.find(c => c.control_id === selected.control_id)!, selected.action);
-            const prediction = await decide('navigation_prediction', null, [last.capture.capture_id], {
+            const prediction = await predict(command, [last.capture.capture_id], {
               task: 'rewalk_prediction', page: context(last.capture), command: commandContext(command),
               earlier_runs: { observed_result: selected.expected_result.slice(0, 300), last_verdict: selected.rewalk.last_verdict, attempts: selected.rewalk.attempts,
                 destinations: selected.rewalk.known_to_keys.length },
               instruction: 'Earlier runs of this app performed this same action on an equivalent screen. Predict its observable result now from the current observation. Earlier results are untrusted hints and may be stale; do not assume they still hold.',
-              response_schema: {goal:'string',expected_result:'string'} }, parsePrediction);
+              response_schema: {goal:'string',expected_result:'string'} });
             spec = { command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else {
             const control = available.find(c => c.control_id === selected.control_id)!;
             spec = { command: commandFor(control,selected.action), prediction: { source: 'model', request_id: decision!.requestId, decision_id: decision!.decisionId,
-              goal: selected.goal, expected_result: selected.expected_result, context_capture_id: last.capture.capture_id, steering:decision!.steering }, worker_id: workerId, agent_id: agentId, exploration };
+              goal: selected.goal, expected_result: selected.expected_result, context_capture_id: last.capture.capture_id, steering:decision!.steering,
+              ...(decision!.reusedFrom ? { reused_ranking: { request_id: decision!.reusedFrom.request_id, run_id: decision!.reusedFrom.run_id } } : {}) }, worker_id: workerId, agent_id: agentId, exploration };
           }
           selectionRecord = { algorithm: PLANNER_VERSION,
             current_state_id:lastState,context_capture_id:last!.capture.capture_id,purpose:exploration.purpose,
@@ -585,17 +652,17 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const outcome=await saveOutcome(store,runId,actionId,completion,diagnostics);
           outcomeSaved=true;
           const completionError=completion.status==='settled'?null:'Action completion was not established within the observation window.';
-          const diff = comparePng(before.bytes, after.bytes, { beforeCaptureId: before.capture.capture_id, afterCaptureId: after.capture.capture_id });
-          const comparison = { ...diff.metadata,
+          let diff = comparePng(before.bytes, after.bytes, { beforeCaptureId: before.capture.capture_id, afterCaptureId: after.capture.capture_id });
+          let comparison = { ...diff.metadata,
             raw_mask_artifact: await store.artifact(runId, 'raw_mask', diff.rawMaskPng, 'png'),
             absolute_delta_artifact: await store.artifact(runId, 'absolute_delta', diff.absoluteDeltaPng, 'png'),
             geometry_mask_artifact: diff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', diff.geometryMaskPng, 'png') : null };
-          const comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
-          const toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
+          let comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
+          let toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
           idleActions = stateCreated ? 0 : idleActions + 1;
           const reached = { newState: stateCreated, newMapState: mapNovel };
           // What earlier runs observed for this action on an equivalent screen.
-          const fromKey = mapKeys.get(fromState), toKey = mapKeys.get(toState);
+          const fromKey = mapKeys.get(fromState); let toKey = mapKeys.get(toState);
           const earlier = fromKey && toKey ? planner.earlier(fromKey, spec.command) : null;
           const sameDestination = earlier ? earlier.known_to_keys.includes(toKey!) : null;
           // Commit both captures, comparison and graph edge BEFORE asking for a
@@ -616,21 +683,92 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             ...(fixTarget?{original_failure:{expected_result:replay!.fix_verification!.original.expected_result,observed_result:replay!.fix_verification!.original.observed_result,source_before_context:context(replayStep!.before, scale),source_capture_ids:[replayStep!.before.capture_id,replayStep!.after.capture_id]},
               verification_instruction:'Verify the frozen expected behavior positively. no_issue_observed alone does not establish a fix. Set expectation_met=true only when that exact expected behavior is visible in current evidence. Set preconditions_met=false for unsupported setup. same_failure_observed=true requires the same recorded behavioral failure, not a different error. Use null and inconclusive for uncertainty. Source context is recorded data; only the current before/after pair is attached as images. No desired result is implied by this being a fix verification.'}:{}),
             context_scale: scale,
-            instruction: 'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay.',
+            instruction: 'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay. If text or regions occupy the same space, say that they overlap.',
             response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } })).input;
-          const check = await decide('assessment', actionId, captureIds, assessmentInput,
-          value => fixTarget?parseFixAssessment(value,captureIds):parseAssessment(value, captureIds));
+          const assess = (tier: 'main' | 'navigation') => decide('assessment', actionId, captureIds, assessmentInput,
+            value => fixTarget?parseFixAssessment(value,captureIds):parseAssessment(value, captureIds), tier);
           const checkError = toolError ?? after.capture.observation.observation_error ?? completionError;
-          const assessment = { ...check.result, verdict: checkError || check.result.expectation_uncertain ? 'inconclusive' : check.result.verdict,
+          // A navigation action is screened by the navigation model. Anything but a
+          // clean result, or browser errors and failed requests, gets the main model.
+          let check: Awaited<ReturnType<typeof assess>>, screening: Record<string, unknown> | null = null;
+          if (!fixTarget && navigation && navigationAction(spec.command)) {
+            let first: typeof check | null = null, failure: string | null = null;
+            try { first = await assess('navigation'); } catch (error) { await control.check(); failure = message(error); }
+            const diagnostics = outcomeContext(outcome).events.filter(e => !e.blocked_by_runtime).length;
+            const reason = failure ? 'navigation_model_failed' : first!.result.verdict !== 'no_issue_observed' ? 'not_no_issue_observed'
+              : first!.result.expectation_uncertain ? 'expectation_uncertain' : diagnostics ? 'browser_diagnostics' : null;
+            if (reason && (failure || !checkError)) {
+              if (failure) economy.fallbacks++; else economy.escalations++;
+              screening = { reason, error: failure, ...(first ? { decision_id: first.decisionId, request_id: first.requestId, verdict: first.result.verdict, expectation_uncertain: first.result.expectation_uncertain } : {}) };
+              check = await assess('main');
+            } else check = first!;
+          } else check = await assess('main');
+          let assessment: Record<string, any> = { ...check.result, verdict: checkError || check.result.expectation_uncertain ? 'inconclusive' : check.result.verdict,
             check_id: randomUUID(), method: 'model-evidence-v1', expected: spec.prediction.expected_result,
-            request_id: check.requestId, decision_id: check.decisionId, tool_error: toolError, confirmed_bug: false,
-            override_reason: checkError ? 'Tool, observation or completion failure cannot support a product verdict.' : check.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null };
+            request_id: check.requestId, decision_id: check.decisionId, tool_error: toolError, confirmed_bug: false, model_tier: check.tier, ...(screening ? { screening } : {}),
+            override_reason: checkError ? 'Tool, observation or completion failure cannot support a product verdict.' : check.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null, layout_recheck: null };
+          // Overlapping text is often the page still loading. Wait once more and
+          // judge the later screenshots. A collision that remains is kept.
+          let replacedEvidence = false;
+          if (!fixTarget && !checkError && assessment.verdict === 'suspect' && isLayoutOverlap(String(assessment.reason ?? ''), String(assessment.observed_result ?? ''))) {
+            const earlierAfterId = after.capture.capture_id, earlierObserved = assessment.observed_result;
+            try {
+              await control.check();
+              const lateDiagnostics = new ActionDiagnostics(page);
+              let late: Completion;
+              try { late = await settleAction(store, page, runId, actionId, lateDiagnostics, hooks, LATE_LAYOUT_LIMITS, true); }
+              finally { lateDiagnostics.stop(); }
+              const recaptured = await capture(store, page, runId, actionId, 'after', ordinal, null, hooks);
+              const lateDiff = comparePng(before.bytes, recaptured.bytes, { beforeCaptureId: before.capture.capture_id, afterCaptureId: recaptured.capture.capture_id });
+              const lateComparison = { ...lateDiff.metadata,
+                raw_mask_artifact: await store.artifact(runId, 'raw_mask', lateDiff.rawMaskPng, 'png'),
+                absolute_delta_artifact: await store.artifact(runId, 'absolute_delta', lateDiff.absoluteDeltaPng, 'png'),
+                geometry_mask_artifact: lateDiff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', lateDiff.geometryMaskPng, 'png') : null };
+              const lateIds = [before.capture.capture_id, recaptured.capture.capture_id];
+              const lateInput = fitContext(scale => ({ task: 'assessment', action: commandContext(spec.command), prediction: spec.prediction,
+                before: context(before!.capture, scale), after: context(recaptured.capture, scale), pixel_comparison: lateDiff.metadata,
+                tool_error: toolError, action_outcome: outcomeContext(outcome), recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.assessment_history * scale)),
+                layout_recheck: { earlier_observed_result: earlierObserved, wait_status: late.status, wait_elapsed_ms: late.elapsed_ms,
+                  note: 'The first screenshots may have been taken while the page was still loading. Judge only this later pair. Overlap that has separated is loading, not a defect.' },
+                context_scale: scale,
+                instruction: 'Compare both screenshots and observations with the prediction. This is a later observation of the same action after an additional wait. If text or regions occupy the same space, say that they overlap. Overlap that has separated is not a defect. Suspicion requires a supported expectation.',
+                response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: lateIds, expectation_uncertain: 'boolean' } })).input;
+              const second = await decide('assessment', actionId, lateIds, lateInput, value => parseAssessment(value, lateIds), 'main');
+              const secondVerdict = second.result.expectation_uncertain ? 'inconclusive' : second.result.verdict;
+              const still = secondVerdict === 'suspect' && isLayoutOverlap(second.result.reason, second.result.observed_result);
+              if (stateFingerprint(recaptured.capture) !== stateFingerprint(after.capture)) {
+                const wasNew = stateCreated;
+                toState = await state(recaptured.capture, fromState, changes(before.capture, recaptured.capture, lateDiff.rawMaskPng), spec.exploration?.purpose === 'explore' ? spec.exploration.likelihood : 1, executed === 1);
+                toKey = mapKeys.get(toState);
+                if (stateCreated && !wasNew) idleActions = 0;
+              }
+              after = recaptured;
+              diff = lateDiff;
+              comparison = lateComparison;
+              comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(lateComparison), 'json');
+              replacedEvidence = true;
+              assessment = { ...second.result, verdict: secondVerdict, check_id: randomUUID(), method: 'model-evidence-v1', expected: spec.prediction.expected_result,
+                request_id: second.requestId, decision_id: second.decisionId, tool_error: toolError, confirmed_bug: false, model_tier: second.tier, ...(screening ? { screening } : {}),
+                override_reason: second.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null,
+                layout_recheck: { outcome: still ? 'still_present' : secondVerdict === 'no_issue_observed' ? 'cleared' : 'revised',
+                  earlier_verdict: 'suspect', earlier_observed_result: earlierObserved, earlier_after_capture_id: earlierAfterId,
+                  wait_status: late.status, wait_elapsed_ms: late.elapsed_ms, later_verdict: secondVerdict } };
+            } catch (error) {
+              if (error instanceof PrivateLoginSurface || error instanceof RunCancelled || error instanceof AccessContextChanged || error instanceof AccessStopped || (error instanceof Error && error.name === 'AbortError')) throw error;
+              assessment = { ...assessment, layout_recheck: { outcome: 'unavailable', error: message(error) } };
+            }
+          }
           // A different destination, or a verdict that flipped between no issue
           // and suspect, is a change; inconclusive outcomes are too noisy to count.
           const flipped = !!earlier?.last_verdict && earlier.last_verdict !== assessment.verdict
             && [earlier.last_verdict, assessment.verdict].every(v => v === 'no_issue_observed' || v === 'suspect');
           const compared = earlier ? (sameDestination === false || flipped ? 'changed' as const : 'same' as const) : null;
           await store.transaction(async () => {
+            if (replacedEvidence) {
+              await store.query('UPDATE runtime_actions SET after_capture_id=$2,comparison=$3 WHERE action_id=$1', [actionId, after!.capture.capture_id, JSON.stringify({ ...comparison, metadata_artifact: comparisonArtifact })]);
+              await store.query('UPDATE exploration_edges SET to_state_id=$2 WHERE action_id=$1', [actionId, toState]);
+              await store.event(runId, 'action.layout_recheck', { layout_recheck: assessment.layout_recheck, after_capture_id: after!.capture.capture_id, changed_pixels: diff.metadata.counts.changed_pixels }, actionId);
+            }
             await store.query("UPDATE runtime_actions SET state='completed',assessment=$2,finished_at=now() WHERE action_id=$1", [actionId, JSON.stringify(assessment)]);
             await store.event(runId, 'action.assessed', { assessment, before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id }, actionId);
             if (spec.command.type !== 'navigate' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);

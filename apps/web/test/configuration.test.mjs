@@ -78,7 +78,7 @@ test('an old acknowledgement cannot discard a new draft after reconnecting with 
 });
 test('configuration text is escaped, exposes no secret input and clearly separates immutable environment policy',()=>{
   const ui=workspace();ui.updateConfiguration('model','<script>bad()</script>');const html=ui.configurationView();assert.doesNotMatch(html,/<script>|type="password"/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Queued and running jobs keep their original settings/);assert.match(html,/Saving does not call a model/);
-  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','provider','stop_after_idle_actions','viewport_profile'].sort());
+  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','navigation_model','reuse_rankings','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','provider','stop_after_idle_actions','viewport_profile'].sort());
 });
 test('previous and next follow the visible list, preserve comparison, and reject stale targets',()=>{
   const ui=workspace();ui.state.report={run:{},actions:[{action_id:'one'},{action_id:'two'},{action_id:'three'}],events:[]};ui.state.actionId='one';ui.state.image='compare';ui.state.frameId='old';
@@ -129,4 +129,19 @@ test('the exploration strategy split is a saved default with an adaptive switch'
   ui.updateConfiguration('strategy.depth',40);ui.updateConfiguration('strategy.adaptive',false);assert.equal(ui.configurationError(draft.values),'');
   await ui.saveConfiguration();
   assert.deepEqual(sent.exploration_strategy,{breadth:40,depth:40,rewalk:20,adaptive:false});
+});
+
+test('ranking reuse and a navigation model are saved defaults; one model stays the default',async()=>{
+  let sent;const ui=workspace(async(url,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults,navigationModel:{provider:'openrouter',model:'vendor/lite:free'}}},201);});
+  const values=ui.configurationValues();assert.equal(values.reuse_rankings,true);assert.deepEqual(plain(values.navigation_model),{provider:'',model:''});
+  const html=ui.configurationView();assert.match(html,/Model use/);assert.match(html,/Same as exploration model/);assert.match(html,/data-configuration-field="navigation.model"[^>]*disabled/);
+  for(const navigation_model of [{provider:'other',model:'x'},{provider:'openai',model:'a b'},{provider:'openrouter',model:'paid/model'}])
+    assert.ok(ui.configurationError({...values,navigation_model}),JSON.stringify(navigation_model));
+  assert.equal(ui.configurationError({...values,free_only:false,navigation_model:{provider:'anthropic',model:'small'}}),'');
+  ui.updateConfiguration('navigation.provider','openrouter');ui.updateConfiguration('navigation.model',' vendor/lite:free ');ui.updateConfiguration('reuse_rankings',false);
+  assert.equal(ui.updateConfiguration('navigation.tier','x'),false);
+  assert.equal(ui.configurationError(ui.configurationDraft().values),'');
+  await ui.saveConfiguration();
+  assert.deepEqual(sent.navigation_model,{provider:'openrouter',model:'vendor/lite:free'});assert.equal(sent.reuse_rankings,false);
+  ui.updateConfiguration('navigation.provider','');await ui.saveConfiguration();assert.equal(sent.navigation_model,null,'No provider sends null: one model.');
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { controlEntry, mapState, pageTemplate, transitionKey } from '../src/app-map.js';
+import { controlEntry, mapState, pageTemplate, rankingEntries, restoreRanking, screenSignature, transitionKey } from '../src/app-map.js';
 import type { Capture, ObservedControl } from '../src/contracts.js';
 
 const control = (name: string, href: string | null = null, role = href ? 'link' : 'button'): ObservedControl =>
@@ -50,4 +50,32 @@ test('a transition keys what was done, not the typed text', () => {
   assert.equal(nav.entry, null);
   assert.equal(transitionKey({ type: 'click', control: control('Red shoes', 'https://shop.test/products/12') }).entry,
     controlEntry({ role: 'link', name: 'x', href: 'https://shop.test/products/5' }).key, 'Clicking any item of a list acts on its entry');
+});
+
+test('a screen signature ignores identifiers and clock text but not what the screen says or its control states', () => {
+  const field = (extra: Partial<ObservedControl> = {}) => ({ ...control('Search', null, 'searchbox'), input_type: 'search', ...extra } as ObservedControl);
+  const screen = (url: string, text: string, controls: ObservedControl[]) => capture(url, controls, { text });
+  const base = screenSignature(screen('https://shop.test/orders/12', 'Order 12 placed 10:42', [field(), control('Search now')]));
+  assert.ok(base);
+  assert.equal(screenSignature(screen('https://shop.test/orders/57', 'Order 57 placed 11:05', [field(), control('Search now')])), base, 'Same screen for another order.');
+  assert.notEqual(screenSignature(screen('https://shop.test/orders/12', 'Enter a search term', [field(), control('Search now')])), base, 'A validation message is a different screen.');
+  assert.notEqual(screenSignature(screen('https://shop.test/orders/12', 'Order 12 placed 10:42', [field({ value: 'shoes' }), control('Search now')])), base, 'A filled field is a different screen.');
+  assert.notEqual(screenSignature(screen('https://shop.test/orders/12', 'Order 12 placed 10:42', [field(), { ...control('Search now'), disabled: true }])), base);
+  assert.equal(screenSignature(capture('https://shop.test/', [], { controls_truncated: true })), null, 'A truncated control list is never reused.');
+  assert.equal(screenSignature(capture('about:blank', [])), null);
+});
+
+test('a ranking is stored by control entry, never with typed text, and restored onto a later screen', () => {
+  const cart = control('Cart'), item = control('Red shoes', 'https://shop.test/products/1'), search = { ...control('Search', null, 'searchbox'), input_type: 'search' } as ObservedControl;
+  const proposals = [{ control_id: item.control_id, goal: 'Open a product', expected_result: 'Product page', likelihood: .9, action: { type: 'click' as const } },
+    { control_id: cart.control_id, goal: 'Open cart', expected_result: 'Cart', likelihood: .5, action: { type: 'click' as const } }];
+  const stored = rankingEntries(proposals, [cart, item, search])!;
+  assert.deepEqual(stored.map(p => p.entry_key), [controlEntry(item).key, controlEntry(cart).key]);
+  assert.equal(rankingEntries([...proposals, { control_id: search.control_id, goal: 'Search', expected_result: 'Results', likelihood: .7, action: { type: 'fill', value: 'shoes' } }], [cart, item, search]), null);
+  assert.equal(rankingEntries([], [cart]), null);
+  // A later run lists other products and new control IDs.
+  const later = [{ ...cart, control_id: 'cart-later' }, control('Blue hat', 'https://shop.test/products/9')];
+  const restored = restoreRanking(stored, later);
+  assert.deepEqual(restored.map(p => [p.control_id, p.likelihood]), [[later[1].control_id, .9], ['cart-later', .5]], 'Any item of the list stands in for the ranked one.');
+  assert.deepEqual(restoreRanking(stored, [{ ...cart, disabled: true }]), [], 'A control that no longer permits the action drops out.');
 });

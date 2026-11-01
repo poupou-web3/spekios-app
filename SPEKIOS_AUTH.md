@@ -11,13 +11,13 @@ Lovable project: https://lovable.dev/projects/a393e034-e3f2-4e09-9456-d2b4847902
 
 Implemented: `/login`, `/auth/callback`, POST `/logout`, hosted-login UI,
 host-only HttpOnly cookies, server-side sessions, immutable identity mapping,
-PostgreSQL migration `023-web-auth.sql`, and a local credential setup helper.
+PostgreSQL migration `024-web-auth.sql`, and a local credential setup helper.
 The bridge client `spekios-local` is registered in Lovable with exactly
 `http://localhost:18080/auth/callback`. Its secret is stored only in the ignored,
 mode-0600 `.env.spekios.local`; Lovable receives only the SHA-256 hash.
 
 The wrapper is published at https://spekios.com. The local configuration now
-uses that origin, migration `023-web-auth.sql` has been applied to the local app
+uses that origin, migration `024-web-auth.sql` has been applied to the local app
 database, and the API was rebuilt/restarted successfully with Spekios auth enabled. The published token endpoint recognizes the registered client and
 correctly rejects a deliberately invalid handoff code with `invalid_grant`.
 The private preview is not a usable exchange origin (it returned HTTP 401).
@@ -44,7 +44,7 @@ installation or changing the callback. This installation is already registered.
 Apply the migration and rebuild only the API:
 
 ```sh
-docker compose exec -T postgres psql -X -U scout -d scout -v ON_ERROR_STOP=1 < infra/postgres/023-web-auth.sql
+docker compose exec -T postgres psql -X -U scout -d scout -v ON_ERROR_STOP=1 < infra/postgres/024-web-auth.sql
 docker compose up -d --build --no-deps api
 ```
 

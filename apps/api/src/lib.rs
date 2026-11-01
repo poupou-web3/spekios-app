@@ -244,6 +244,7 @@ pub fn router(state: AppState) -> Router {
         .route_layer(middleware::from_fn_with_state(state.clone(), authorize_mcp));
     Router::new()
         .route("/", get(ui::index))
+        .route("/favicon.svg", get(ui::favicon))
         .route("/connect", get(ui::connect))
         .route("/issues", get(ui::issues))
         .route("/login", get(web_auth::login))
@@ -663,7 +664,7 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         "bounded_url_exploration":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"scope":"public_https_or_allowed_origins","requires_configured_model":true,"coverage_complete":false,
             "interactions":["navigate","click","fill","select","set_checked","scroll","submit"],"interaction_version":"browser-interactions-v2",
             "form_submission":"same_origin_search_or_operator_configured_test_form",
-            "action_completion":{"version":"action-completion-v1","timeout_ms":5000,"sampled_frames":true,"network_and_console_evidence":true}},
+            "action_completion":{"version":"action-completion-v1","timeout_ms":5000,"sampled_frames":true,"network_and_console_evidence":true,"overlap_recheck":{"attempts":1,"timeout_ms":8000,"waits_for":["quiet_pixels","fonts","images"]}}},
         "active_run_steering":{"enabled":state.jobs.is_some(),"version":"focus-v1","application_boundary":"next_planning_decision","max_messages":32,"max_focus_characters":2000,"replay_steering":false},
         "persistent_issues":{"enabled":true,"stable_ids":true,"candidate_verification":true,"outcomes":["resolved","still_reproducible","blocked","inconclusive"],"global_fix_claim":false},
         "issue_triage":{"enabled":true,"decisions":issues::TRIAGE_DECISIONS,"actors":["human","agent","system"],"agent_overrides_human":false,"append_only":true,
@@ -680,6 +681,8 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         "app_login":{"manual_handoff":true,"session_reuse":true,"saved_session_hours":24,"google_oauth":false,"private_login_recording":false},
         "frontier_planning":{"version":"frontier-v4","strategy":{"version":"strategy-v1","modes":["breadth","depth","rewalk"],"default":jobs::default_strategy(),"configurable_per":["user"],"adaptive_floor":0.25,"max_journey_steps":12,"branch_slack":6},"automatic_return":true,"stale_plan_recovery":true,"local_recovery":true,"max_consecutive_replans_per_page":3,"probability_calibrated":false,
             "max_actions":jobs::MAX_EXPLORATION_ACTIONS,"limits":{"default":"none","configurable_per":["user","project","model"],"keys":jobs::LIMIT_KEYS,"max_minutes":jobs::MAX_EXPLORATION_MINUTES,"default_stop_after_idle_actions":jobs::DEFAULT_IDLE_ACTIONS,"usage_limits_count":"settled_reported_usage"},"document_controls":true,"reveal_before_action":true,"max_observed_controls":120,"max_prompt_bytes":65536,"max_duration_minutes_env":"SCOUT_EXPLORER_MAX_MINUTES"},
+        "model_cost":{"ranking_reuse":{"version":"ranking-v1","enabled_by_default":effective_settings["reuseRankings"],"requires":"app_memory","max_reuses":10,"skipped_when":["testing_focus","screen_changed","fill_proposals","truncated_controls"]},
+            "navigation_model":{"configured":effective_settings["navigationModel"],"actions":["navigate","link_click","scroll"],"reassess_with_main_model":["not_no_issue_observed","expectation_uncertain","browser_diagnostics","navigation_model_failed"]}},
         "app_memory":{"version":"app-memory-v1","enabled_by_default":effective_settings["appMemory"],"scope":["origin","viewport_profile","auth_scope","execution_mode"],"keyed_by":"url_and_control_identity","resume_remembered_pages":true,"replays_use_memory":false,"forget":"/v1/app-memory/{scope_id}/forget"},
         "viewport_profiles":["desktop","tablet","mobile"],
         "model_gateway":true,"model_inference":configured && state.gateway.as_ref().is_some_and(|g|g.is_ready()),

@@ -8,6 +8,10 @@ The repository `justfile` wraps the existing scripts and Docker commands. It doe
 
 ```sh
 just dev             # Build/start workspace/API, worker and storage; apply schemas
+just reload          # Rebuild the workspace API and back office; leave databases and workers running
+just reload-api      # Rebuild only the workspace API (it embeds apps/web)
+just reload-backoffice # Rebuild only the operator console
+just reload-env      # Recreate the API so it loads the current .env, without an image rebuild
 just ui              # Start services and print the workspace URL
 just workspace-test  # GUI API/queue/worker integration with simulated models
 just web-test        # Pure rendering, usage and disconnect checks

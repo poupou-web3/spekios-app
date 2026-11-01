@@ -17,4 +17,4 @@ src/
 test/            node --test suites; support.mjs links src/ for the vm sandboxes
 ```
 
-Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`; `just backoffice` starts the stack and prints the URL.
+Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`; `just backoffice` starts the stack and prints the URL. After the stack is already up, `just reload-backoffice` rebuilds only this console.

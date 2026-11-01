@@ -17,6 +17,12 @@ src/
 test/              node --test suites; support.mjs links src/ for the vm sandboxes
 ```
 
-`apps/api/build.rs` lists every `.js` and `.css` file under `src/` at compile time. Adding a module needs no Rust change, but the API must be rebuilt (`just dev`) to serve it.
+`apps/api/build.rs` lists every `.js` and `.css` file under `src/` at compile time. Adding a module needs no Rust change, but the API embeds these files, so serve a UI change with `just reload` (or `just reload-api`). `just dev` is only needed to bring the whole stack up.
 
 Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`.
+
+## Spekios appearance
+
+The customer theme in `src/styles/spekios.css` follows the [Spekios Lovable project](https://lovable.dev/projects/a393e034-e3f2-4e09-9456-d2b48479023a): paper surfaces, Instrument Serif display type, Geist body/mono type, charcoal actions, terracotta accents and a circular signal mark. It loads after the shared styles on all three customer pages, leaving the operator console's theme independent. Dark mode uses warm charcoal surfaces and preserves the existing system/light/dark controls.
+
+Fonts and OFL licenses live in `src/fonts/`; the API embeds a closed list of font files and serves them from the same origin without changing the CSP or depending on Google Fonts at runtime. Public copy uses Spekios; internal API names, environment variables and browser storage keys retain Scout for compatibility.

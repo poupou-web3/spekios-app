@@ -155,3 +155,14 @@ test('coverage by depth and the strategy split are reported when the run recorde
   assert.match(markdown,/\| New territory \| 50% \| 3 \| 3 \| 60% \|/);assert.match(markdown,/\| Re\\-walk known paths \| 20% \| 0 \| 0 \| 0% \|/);
   assert.match(markdown,/compared with earlier runs: 2, of which 1 changed/);assert.doesNotMatch(markdown,/undefined|NaN/);
 });
+
+test('model calls saved by reused rankings and a navigation model are reported when recorded',()=>{
+  const report=fixture();assert.doesNotMatch(reportMarkdown(report,options),/### Model calls/,'Older runs have no record.');
+  report.run.config.model_use={plans_requested:4,plans_reused:3,rankings_stored:1,navigation_requests:6,escalations:1,fallbacks:0};
+  report.run.config.model_tiers={navigation:{provider:'openrouter',model:'vendor/lite:free'},navigation_unavailable:null};
+  let markdown=reportMarkdown(report,options);
+  assert.match(markdown,/\| Rankings reused from earlier runs \| 3 \|/);assert.match(markdown,/\| Navigation model \| openrouter vendor\\\/lite\\:free \|/);
+  assert.match(markdown,/\| Navigation results reassessed by the exploration model \| 1 \|/);assert.doesNotMatch(markdown,/undefined|NaN/);
+  report.run.config.model_tiers={navigation:null,navigation_unavailable:'navigation_model_not_ready'};markdown=reportMarkdown(report,options);
+  assert.match(markdown,/Not used \\\(navigation\\_model\\_not\\_ready\\\)/);
+});

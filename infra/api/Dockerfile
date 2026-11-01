@@ -3,7 +3,7 @@ WORKDIR /build
 COPY apps/api/Cargo.toml apps/api/Cargo.lock apps/api/build.rs ./
 COPY apps/api/src ./src
 # Required by the opt-in disposable-database auth integration test.
-COPY infra/postgres/023-web-auth.sql /infra/postgres/023-web-auth.sql
+COPY infra/postgres/024-web-auth.sql /infra/postgres/024-web-auth.sql
 COPY apps/web /web
 COPY packages/web-ui/src /packages/web-ui/src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

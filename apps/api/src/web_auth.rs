@@ -825,7 +825,7 @@ mod tests {
         // Never point this test at the application database.
         let conn = db.write().await.unwrap();
         conn.batch_execute("CREATE TABLE IF NOT EXISTS workspaces(workspace_id uuid PRIMARY KEY,owner_user_id uuid NOT NULL,name text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());").await.unwrap();
-        conn.batch_execute(include_str!("../../../infra/postgres/023-web-auth.sql"))
+        conn.batch_execute(include_str!("../../../infra/postgres/024-web-auth.sql"))
             .await
             .unwrap();
         conn.batch_execute(

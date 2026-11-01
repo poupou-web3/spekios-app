@@ -6,7 +6,7 @@ import { explore } from '../src/explorer.js';
 import { image } from '../src/recorder.js';
 import { ModelClient, modelSettings } from '../src/model-client.js';
 import { explorationFixture } from '../src/exploration-fixture.js';
-import { blockedReason, parseAssessment, parsePlan, permitBrowserRequest, validateTarget } from '../src/exploration-policy.js';
+import { blockedReason, isLayoutOverlap, parseAssessment, parsePlan, permitBrowserRequest, validateTarget } from '../src/exploration-policy.js';
 import type { ObservedControl } from '../src/contracts.js';
 
 const control: ObservedControl = { control_id: 'a'.repeat(24), role: 'button', name: 'Preview', href: null, disabled: false, submits_form: false, ambiguous: false };
@@ -27,6 +27,12 @@ test('provider selection cannot accidentally reuse the default OpenRouter model'
     if (savedProvider === undefined) delete process.env.SCOUT_EXPLORER_PROVIDER; else process.env.SCOUT_EXPLORER_PROVIDER = savedProvider;
     if (savedModel === undefined) delete process.env.SCOUT_EXPLORER_MODEL; else process.env.SCOUT_EXPLORER_MODEL = savedModel;
   }
+});
+test('only a reported collision asks for a longer layout wait', () => {
+  assert.equal(isLayoutOverlap('The hero tagline visually overlaps the introductory paragraph.', 'The homepage is visible.'), true);
+  assert.equal(isLayoutOverlap('A banner sits on top of the introduction.', 'Page loaded.'), true);
+  assert.equal(isLayoutOverlap('The sections do not overlap.', 'Readable page.'), false);
+  assert.equal(isLayoutOverlap('The draft did not reach Saved.', 'Service unavailable'), false);
 });
 test('model output cannot add tools, invent controls or forge evidence', () => {
   const candidate = {control_id: control.control_id,goal:'Preview item',expected_result:'A preview opens.',likelihood:0.8};

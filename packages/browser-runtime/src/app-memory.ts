@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Store } from './store.js';
 import type { BrowserCommand, Capture } from './contracts.js';
-import { pageTemplate, transitionKey, type MapState } from './app-map.js';
+import { pageTemplate, transitionKey, type MapState, type StoredProposal } from './app-map.js';
+import type { ModelSettings } from './model-client.js';
 import type { ViewportProfile } from './viewports.js';
 import { blockedReason, sameRegisteredSite, type Proposal } from './exploration-policy.js';
 import { actionRisk } from './interaction-contract.js';
@@ -12,6 +13,10 @@ import { actionRisk } from './interaction-contract.js';
 // exact screenshot state from another run is never treated as reached.
 export const MEMORY_VERSION = 'app-memory-v1';
 const MAX_PAGES = 500, MAX_CONTROLS = 5000, MAX_MAP_STATES = 5000, MAX_MAP_TRANSITIONS = 20000;
+// A stored ranking is reused this many times; the next visit asks the model
+// again and replaces it, so rankings follow model and app changes.
+export const MAX_RANKING_REUSES = 10;
+export type StoredRanking = { proposals: StoredProposal[]; source_run_id: string; source_request_id: string; source_decision_id: string; reuses: number; created_at: string };
 export type AuthScope = 'public' | 'signed_in';
 export type MemoryScope = { origin: string; viewport_profile: ViewportProfile; auth_scope: AuthScope; execution_mode: 'live' | 'protocol_fixture' };
 export type RememberedPage = { url: string; title: string | null; visits: number; best_path_score: number | null;
@@ -209,6 +214,27 @@ export class AppMemory {
         last_verdict=EXCLUDED.last_verdict,last_observed_result=EXCLUDED.last_observed_result,last_run_id=EXCLUDED.last_run_id,
         last_action_id=EXCLUDED.last_action_id,last_seen_at=now()`,
       [s.scope_id, from, key, to, entry, command.type, JSON.stringify(control), verdict, observed.slice(0, 300), this.runId, actionId]);
+  }
+
+  // Rankings for one screen signature and model. Reads see earlier runs and
+  // this run alike; a run reuses a ranking only on a screen's first visit.
+  async ranking(signature: string, model: ModelSettings): Promise<StoredRanking | null> {
+    if (!this.snapshot) return null;
+    return (await this.store.query(`SELECT proposals,source_run_id,source_request_id,source_decision_id,reuses,created_at FROM app_map_rankings
+      WHERE scope_id=$1 AND signature=$2 AND provider=$3 AND model=$4 AND reuses<$5`, [this.snapshot.scope_id, signature, model.provider, model.model, MAX_RANKING_REUSES])).rows[0] ?? null;
+  }
+  async storeRanking(signature: string, model: ModelSettings, stateKey: string | null, proposals: StoredProposal[], requestId: string, decisionId: string) {
+    if (!this.snapshot) return;
+    await this.store.query(`INSERT INTO app_map_rankings(scope_id,signature,provider,model,state_key,proposals,source_run_id,source_request_id,source_decision_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT(scope_id,signature,provider,model) DO UPDATE SET state_key=EXCLUDED.state_key,proposals=EXCLUDED.proposals,source_run_id=EXCLUDED.source_run_id,
+        source_request_id=EXCLUDED.source_request_id,source_decision_id=EXCLUDED.source_decision_id,reuses=0,created_at=now(),last_reused_run_id=NULL,last_reused_at=NULL`,
+      [this.snapshot.scope_id, signature, model.provider, model.model, stateKey, JSON.stringify(proposals), this.runId, requestId, decisionId]);
+  }
+  async reusedRanking(signature: string, model: ModelSettings) {
+    if (!this.snapshot) return;
+    await this.store.query(`UPDATE app_map_rankings SET reuses=reuses+1,last_reused_run_id=$5,last_reused_at=now()
+      WHERE scope_id=$1 AND signature=$2 AND provider=$3 AND model=$4`, [this.snapshot.scope_id, signature, model.provider, model.model, this.runId]);
   }
 
   // A bounded, labelled hint for the planning model. Absent when nothing is
