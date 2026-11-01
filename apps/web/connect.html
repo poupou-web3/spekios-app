@@ -6,12 +6,13 @@
   <title>Connect your agent · Spekios</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <script src="/assets/ui/theme-init.js"></script>
-  <link rel="stylesheet" href="/assets/ui/styles/tokens.css"><link rel="stylesheet" href="/assets/ui/styles/base.css"><link rel="stylesheet" href="/assets/ui/styles/components.css"><link rel="stylesheet" href="/assets/ui/styles/shell.css"><link rel="stylesheet" href="/assets/app/styles/pages.css"><link rel="stylesheet" href="/assets/app/styles/spekios.css"><script type="module" src="/assets/app/connect.js"></script>
+  <link rel="stylesheet" href="/assets/ui/styles/tokens.css"><link rel="stylesheet" href="/assets/ui/styles/base.css"><link rel="stylesheet" href="/assets/ui/styles/components.css"><link rel="stylesheet" href="/assets/ui/styles/shell.css"><link rel="stylesheet" href="/assets/app/styles/pages.css"><link rel="stylesheet" href="/assets/app/styles/spekios.css"><link rel="stylesheet" href="/assets/app/styles/websites.css"><script type="module" src="/assets/app/connect.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to main content</a>
-<main id="main-content" class="content connection-page">
-  <header class="connection-top"><a class="brand" href="/"><span class="mark"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/></svg></span>Spekios <small>QA FOR YOU & YOUR AGENT</small></a><div class="row"><div data-theme-slot></div><a class="button quiet" href="/">← Your workspace</a></div></header>
+<div class="app website-app"><div class="website-sidebar-slot" data-workspace-sidebar></div>
+<main id="main-content" class="main content connection-page">
+  <header class="connection-top"><a class="brand" href="/"><span class="mark"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/></svg></span>Spekios <small>QA FOR YOU & YOUR AGENT</small></a><div class="row"><div data-theme-slot></div></div></header>
   <div class="connection-heading"><p class="eyebrow">YOUR WORKSPACE. YOUR AGENT.</p><h1 id="connection-title">Bring your agent to Spekios.</h1><p id="connection-description">Connect once. Ask your agent to test a URL, follow the run and bring back findings with evidence.</p></div>
   <div id="connection-status" class="connection-status" role="status" aria-live="polite"></div>
   <section id="manager-login" class="panel connection-signin" hidden>
@@ -58,5 +59,5 @@
     </div>
     <section class="connection-management" aria-labelledby="connected-title"><div class="connection-list-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h2 id="connected-title">Your connected agents</h2></div><button id="refresh-agents" class="button">Check connection</button></div><p class="small muted">Disconnecting prevents further access. Tests already queued continue until you stop them in the workspace.</p><div id="agent-list"></div></section>
   </section>
-</main>
+</main><footer class="website-mobile-nav"><a href="/connect">Connect your agent</a><a href="/#/settings">Settings</a></footer></div>
 </body></html>

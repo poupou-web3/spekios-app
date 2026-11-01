@@ -1318,7 +1318,8 @@ pub async fn list(ScopedState(state): ScopedState) -> Response {
         },
         None => json!({"revision":0,"settings":{}}),
     };
-    match query(&state,"SELECT jsonb_build_object('jobs',COALESCE((SELECT jsonb_agg(to_jsonb(j) ORDER BY created_at DESC) FROM (SELECT * FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50) j),'[]'::jsonb),'workers',COALESCE((SELECT jsonb_agg(to_jsonb(w)||jsonb_build_object('available',status='online' AND heartbeat_at>now()-interval '20 seconds') ORDER BY started_at DESC) FROM (SELECT * FROM browser_workers WHERE workspace_id=$1 OR workspace_id='00000000-0000-4000-8000-000000000001'::uuid ORDER BY started_at DESC LIMIT 10) w),'[]'::jsonb))",&[&state.principal.workspace_id,&state.principal.user_id]).await {
+    // Active jobs stay visible even when fifty newer results have finished.
+    match query(&state,"SELECT jsonb_build_object('jobs',COALESCE((SELECT jsonb_agg(to_jsonb(j) ORDER BY created_at DESC) FROM (SELECT * FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND status IN ('queued','running') UNION ALL (SELECT * FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND status NOT IN ('queued','running') ORDER BY created_at DESC LIMIT 50)) j),'[]'::jsonb),'workers',COALESCE((SELECT jsonb_agg(to_jsonb(w)||jsonb_build_object('available',status='online' AND heartbeat_at>now()-interval '20 seconds') ORDER BY started_at DESC) FROM (SELECT * FROM browser_workers WHERE workspace_id=$1 OR workspace_id='00000000-0000-4000-8000-000000000001'::uuid ORDER BY started_at DESC LIMIT 10) w),'[]'::jsonb))",&[&state.principal.workspace_id,&state.principal.user_id]).await {
         Ok(Some(mut value))=>{value["settings"]=effective["settings"].clone();value["settings_revision"]=effective["revision"].clone();Json(value).into_response()},
         Ok(None)=>Json(json!({})).into_response(),Err(r)=>r,
     }

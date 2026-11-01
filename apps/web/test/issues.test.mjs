@@ -25,7 +25,7 @@ const text=node=>[node.textContent,...node.children.map(c=>typeof c==='string'?c
 test('issue page renders untrusted expectations and app titles as text, with separate original and candidate evidence',async()=>{
   const u=setup();await u.ui.ready();assert.ok(text(u.get('#issue-original')).includes('<img src=x onerror=bad()>'));assert.ok(text(u.get('#issue-original')).includes('Saved is visible'));assert.ok(text(u.get('#candidate-evidence')).includes('Offline'));assert.ok(text(u.get('#verification-list')).includes('Inconclusive'));assert.equal(text(u.get('#verification-list')).includes('Resolved on candidate'),false);
   assert.ok(u.requests.some(r=>r.path==='/v1/captures/'+capture+'/image'&&r.options.headers.Authorization==='Bearer fixture-manager'));assert.equal(u.requests.some(r=>r.path.includes('fixture-manager')),false);
-  const source=appSource('issues.js');assert.doesNotMatch(source,/\.innerHTML|eval\(/);
+  const source=appSource('issues.js').split('// apps/web/src/issues.js').at(-1);assert.doesNotMatch(source,/\.innerHTML|eval\(/);
 });
 test('a loaded issue starts no model or browser work and copies stable IDs for the coding agent',async()=>{
   const u=setup();await u.ui.ready();assert.equal(u.requests.some(r=>r.options.method==='POST'),false);await u.ui.copyHandoff();assert.match(u.copied[0],new RegExp(issue));assert.match(u.copied[0],/scout_verify_fix/);assert.match(u.copied[0],/Expected: Saved is visible/);assert.match(u.copied[0],/Actual: Ready remains/);assert.doesNotMatch(u.copied[0],/fixture-manager/);

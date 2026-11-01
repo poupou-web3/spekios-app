@@ -1,0 +1,137 @@
+/* Website-first customer navigation. Operator console styles stay independent. */
+.website-app { grid-template-columns: 240px minmax(0, 1fr); }
+.website-app .project-sidebar { z-index: 6; overflow: visible; }
+.project-navigation { margin-top: 28px; }
+.website-switcher { position: relative; margin-bottom: 22px; }
+.website-switcher > summary { display: flex; align-items: center; gap: 9px; padding: 11px 10px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); list-style: none; cursor: pointer; }
+.website-switcher > summary::-webkit-details-marker { display: none; }
+.website-switcher > summary > svg { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.website-choice { flex: 1; min-width: 0; }
+.website-choice strong { display: block; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.website-choice small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.website-favicon { position: relative; display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted); }
+.website-favicon svg { width: 17px; height: 17px; }
+.website-favicon img { position: absolute; width: 20px; height: 20px; object-fit: contain; background: var(--surface); }
+.website-menu { position: absolute; z-index: 8; top: calc(100% + 7px); left: 0; width: 320px; max-width: calc(100vw - 40px); padding: 7px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-lg); }
+.website-menu > .eyebrow { margin: 5px 9px 8px; color: var(--muted); }
+.website-options { max-height: min(340px, 40dvh); overflow-y: auto; overscroll-behavior: contain; }
+.website-options > p { padding: 8px; }
+.website-option { display: flex; align-items: center; gap: 9px; padding: 9px; border-radius: var(--r-md); }
+.website-option:hover, .website-option.selected { background: var(--surface-2); }
+.website-option > span:not(.website-favicon) { min-width: 0; flex: 1; font-size: 12px; overflow-wrap: anywhere; }
+.website-option small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.website-option > svg { width: 14px; height: 14px; color: var(--brand-text); }
+.website-new { margin: 7px 4px 3px; padding: 15px 5px 4px; border-top: 1px solid var(--border); }
+.website-new > label { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 500; }
+.website-new > div { display: flex; align-items: center; gap: 7px; }
+.website-new input { min-width: 0; width: 100%; padding: 10px; font-size: 12px; }
+.website-new .button { flex: none; padding: 10px; }
+.website-new > p { margin-top: 9px; font-size: 10px; }
+.website-new .error { color: var(--red-text); }
+.website-shortcuts { margin-top: 28px; padding-top: 0; border-top: 0; }
+.website-shortcuts .recent-item { align-items: center; padding-block: 9px; font-size: 12px; }
+.website-shortcuts .recent-item > svg { flex: none; width: 15px; height: 15px; color: var(--muted); }
+.website-shortcuts .recent-item > span { white-space: normal; overflow-wrap: anywhere; }
+.website-shortcuts small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.project-sidebar .side-bottom { gap: 12px; padding-top: 15px; border-top: 1px solid var(--border); }
+.project-sidebar .environment { border: 0; padding: 5px 10px; font-size: 11px; }
+.project-sidebar .environment .small { font-size: 10px; }
+.website-mobile-nav { display: none; }
+.website-overview { max-width: 1120px; }
+.website-overview .landing { max-width: none; margin-bottom: 28px; padding: 42px 0 0; }
+.website-overview .landing::before { display: none; }
+.website-overview .landing .eyebrow { margin-bottom: 16px; color: var(--brand-text); }
+.website-overview .landing h1 { font-size: clamp(36px, 4vw, 52px); line-height: 1.1; overflow-wrap: anywhere; }
+.website-overview .landing-lead { max-width: 620px; margin-top: 15px; font-size: 14px; }
+.website-overview .landing-form { max-width: none; margin-top: 27px; padding: 7px; box-shadow: none; border-color: var(--border); }
+.website-overview .landing-options, .website-overview .landing-status { max-width: none; }
+.website-recent { margin-top: 34px; padding-top: 23px; border-top: 1px solid var(--border); }
+.website-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.website-section-heading h2 { font-size: 16px; font-weight: 500; }
+.website-section-heading .button { font-size: 12px; }
+.website-test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.website-test-card { position: relative; min-width: 0; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+.website-test-card:hover { background: var(--row-hover); }
+.website-test-link { display: block; height: 100%; padding: 20px; }
+.website-test-link header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 24px; }
+.website-test-link header .small { font-size: 11px; }
+.website-test-link h3 { font-size: 14px; font-weight: 500; }
+.website-test-link > p { margin-top: 5px; overflow-wrap: anywhere; font-size: 12px; }
+.website-test-link footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 23px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.website-test-link footer svg { flex: none; width: 15px; height: 15px; }
+.website-test-actions { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 6px; }
+.website-test-actions:empty { display: none; }
+.website-test-actions .button { background: var(--surface); }
+.website-test-card:has(> .website-test-actions:not(:empty)) footer { padding-right: 80px; }
+.website-pagination { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.website-app .issue-page, .website-app .connection-page { max-width: 1400px; }
+.website-app .connection-top { justify-content: flex-end; margin-bottom: 24px; }
+.website-app .connection-top > .brand { display: none; }
+.website-app .issue-heading { margin-block: 18px 28px; }
+.website-scope { margin-top: 12px; color: var(--brand-text); font-size: 12px; overflow-wrap: anywhere; }
+@media (min-width: 701px) and (max-width: 960px) {
+  .website-app { display: grid; grid-template-columns: 216px minmax(0, 1fr); }
+  .website-app .project-sidebar { position: sticky; top: 0; height: 100dvh; flex-direction: column; align-items: stretch; gap: 0; padding: 24px 12px 16px; border-right: 1px solid var(--border); border-bottom: 0; }
+  .website-app .side-bottom { display: grid; }
+  .website-app .recent { display: block; }
+  .website-app .topbar { height: 56px; }
+  .website-overview { padding-top: 0; }
+  .website-test-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .website-app { display: flex; flex-direction: column; }
+  .website-app .project-sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px; }
+  .website-app .project-sidebar .brand { font-size: 25px; }
+  .project-navigation { display: contents; margin-top: 0; }
+  .website-switcher { flex: 1; min-width: 130px; margin: 0; }
+  .website-switcher > summary { padding: 8px; }
+  .website-choice strong { font-size: 11px; }
+  .website-choice small { font-size: 9px; }
+  .website-switcher > summary .website-favicon { width: 24px; height: 24px; }
+  .website-menu { left: auto; right: 0; max-width: calc(100vw - 32px); }
+  .project-navigation > nav { display: flex; flex: 1 0 100%; flex-wrap: wrap; gap: 4px; }
+  .project-navigation .nav-item { padding: 8px; font-size: 12px; }
+  .project-sidebar .recent, .project-sidebar .side-bottom { display: none; }
+  .website-app > .main { flex: 1; }
+  .website-mobile-nav { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px 16px; margin-top: auto; border-top: 1px solid var(--border); background: var(--sidebar); }
+  .website-mobile-nav a { display: flex; gap: 7px; align-items: center; color: var(--muted); font-size: 12px; }
+  .website-mobile-nav svg { width: 15px; height: 15px; }
+  .website-overview .landing { padding-top: 24px; }
+  .website-overview .landing h1 { font-size: 38px; }
+  .website-overview .landing-lead { font-size: 13px; }
+  .website-test-grid { grid-template-columns: 1fr; }
+  .website-section-heading { gap: 4px; }
+  .website-new input { font-size: 16px; }
+}
+
+.website-sidebar-slot { display: contents; }
+.website-app:has(.website-sidebar-slot:empty) { display: block; }
+.website-app:has(.website-sidebar-slot:empty) .connection-top > .brand { display: flex; }
+
+/* Global activity is opened deliberately, away from the selected report. */
+.activity-trigger { width: 100%; text-align: left; }
+.activity-count { margin-left: auto; min-width: 21px; padding: 1px 6px; border-radius: 20px; background: var(--surface-3); color: var(--text); font-size: 11px; text-align: center; }
+.activity-count.attention { color: var(--brand-text); background: var(--brand-soft); }
+.drawer.activity-drawer { width: min(520px, 100vw); }
+.activity-intro { margin: 0 0 24px; }
+.activity-section + .activity-section { margin-top: 28px; }
+.activity-drawer .activity-section > h3 { justify-content: space-between; margin: 0 0 12px; font-size: 13px; }
+.activity-card { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.activity-card + .activity-card { margin-top: 10px; }
+.activity-card p { margin: 0; }
+.activity-card-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.activity-card-heading > div { flex: 1; min-width: 0; }
+.activity-card-heading strong { font-size: 13px; overflow-wrap: anywhere; }
+.activity-card-heading .pill { flex-shrink: 0; font-size: 10px; }
+.activity-card-heading > svg { width: 18px; height: 18px; color: var(--muted); flex-shrink: 0; }
+.activity-target, .activity-error { overflow-wrap: anywhere; }
+.activity-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.activity-actions:empty { display: none; }
+.activity-actions .button { min-height: 32px; padding: 6px 10px; font-size: 12px; }
+.activity-idle { padding: 16px 0; }
+@media (max-width: 700px) {
+  .website-mobile-nav:has(.activity-trigger) { position: sticky; bottom: 0; z-index: 5; gap: 12px; padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }
+  .website-mobile-nav .activity-trigger { width: auto; padding: 6px 0; min-height: 32px; gap: 6px; font-size: 12px; }
+  .drawer-backdrop:has(.activity-drawer) { align-items: flex-end; }
+  .drawer.activity-drawer { width: 100%; height: 85dvh; border: 1px solid var(--border); border-radius: 16px 16px 0 0; }
+}

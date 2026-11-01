@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessBanner,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessNotifications,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{
@@ -101,7 +101,7 @@ test('an unchanged open run keeps the loaded report',async()=>{
   const ui=view({AbortSignal,fetch:async(path,options)=>{
     calls.push([path,options?.headers?.['If-None-Match']||'']);
     if(path==='/v1/runs/run'&&options?.headers?.['If-None-Match'])return {ok:false,status:304,headers:{get(){return null;}},json:async()=>({})};
-    const body=path==='/v1/runs/run'?report:path==='/v1/runs'?{runs:[]}:path==='/v1/browser-jobs'?{jobs:[],workers:[],settings:{}}:path==='/v1/model-providers'?{providers:[]}:{requests:[],sessions:[]};
+    const body=path==='/v1/runs/run'?report:path.split('?')[0]==='/v1/runs'?{runs:[]}:path==='/v1/browser-jobs'?{jobs:[],workers:[],settings:{}}:path==='/v1/model-providers'?{providers:[]}:{requests:[],sessions:[]};
     return {ok:true,status:200,headers:{get(name){return name==='etag'&&path==='/v1/runs/run'?'"abc"':null;}},json:async()=>body};
   }});
   ui.state.token='private-workspace-token';ui.state.connected=true;ui.state.runId='run';
@@ -124,9 +124,9 @@ test('login prompts escape target data and saved sessions are scoped to the sele
   assert.ok(ui.authOptions().includes('value="right"'));
   assert.ok(!ui.authOptions().includes('value="wrong-app"'));
   assert.ok(!ui.authOptions().includes('value="wrong-mode"'));
-  assert.match(ui.accessBanner(),/Skip sign-in for this run/);
-  assert.ok(!ui.accessBanner().includes('<script>'));
-  assert.match(ui.accessBanner(),/Cancel run/);
+  assert.match(ui.accessNotifications(),/Skip sign-in for this run/);
+  assert.ok(!ui.accessNotifications().includes('<script>'));
+  assert.match(ui.accessNotifications(),/Cancel run/);
   assert.match(ui.savedSessions(),/Remove session/);
   assert.doesNotMatch(ui.savedSessions(),/fixture-only-password|scout_app_session/);
 });
@@ -134,11 +134,11 @@ test('every waiting login prompt can skip sign-in for this run',()=>{
   const ui=view();
   for(const reason of ['login_available','login_required','session_expired','user_requested']){
     ui.state.access={requests:[{access_id:'request',origin:'https://app.test',reason,status:'waiting'}],sessions:[]};
-    assert.match(ui.accessBanner(),/data-action="skip-login"[^>]*data-id="request"[^>]*>.*Skip sign-in for this run/);
-    assert.match(ui.accessBanner(),/data-action="create-account"[^>]*data-id="request"[^>]*>.*Try creating an account/);
+    assert.match(ui.accessNotifications(),/data-action="skip-login"[^>]*data-id="request"[^>]*>.*Skip sign-in for this run/);
+    assert.match(ui.accessNotifications(),/data-action="create-account"[^>]*data-id="request"[^>]*>.*Try creating an account/);
     ui.state.access.requests[0].status='active';
-    assert.doesNotMatch(ui.accessBanner(),/data-action="skip-login"/);
-    assert.doesNotMatch(ui.accessBanner(),/data-action="create-account"/);
+    assert.doesNotMatch(ui.accessNotifications(),/data-action="skip-login"/);
+    assert.doesNotMatch(ui.accessNotifications(),/data-action="create-account"/);
   }
 });
 test('disconnected providers cannot imply readiness and settings show availability without credentials',()=>{
@@ -168,7 +168,7 @@ function reviewReport(){
 function connectReview(ui,report=reviewReport()){
   ui.state.connected=true;ui.state.token='private-workspace-token';ui.state.runId='run';ui.state.report=report;ui.state.actionId='candidate';return report;
 }
-function reviewFetch(report){return async path=>({ok:true,status:200,json:async()=>path==='/v1/runs/run'?report:path==='/v1/runs'?{runs:[]}:path==='/v1/browser-jobs'?{jobs:[],workers:[],settings:{}}:path==='/v1/model-providers'?{providers:[]}:path==='/v1/browser-access'?{requests:[],sessions:[]}: {}});}
+function reviewFetch(report){return async path=>({ok:true,status:200,json:async()=>path==='/v1/runs/run'?report:path.split('?')[0]==='/v1/runs'?{runs:[]}:path==='/v1/browser-jobs'?{jobs:[],workers:[],settings:{}}:path==='/v1/model-providers'?{providers:[]}:path==='/v1/browser-access'?{requests:[],sessions:[]}: {}});}
 
 test('human review status uses the latest revision and dismissed candidates leave the pending findings view',()=>{
   const ui=view(),report=connectReview(ui);
@@ -411,5 +411,5 @@ test('runs show input, output and total tokens with a cost estimated from model 
   const row=ui.runUsage(usage);assert.match(row,/1,250,340/);assert.match(row,/1,000,300 in · 250,040 out/);assert.match(row,/\$1\.00 estimated/);
   assert.match(ui.runUsage({attempts:0}),/No model calls/);assert.match(ui.runUsage(undefined),/—/);
   ui.state.runs=[{run_id:'11111111-1111-4111-8111-111111111111',target_url:'https://a.test',lifecycle:'completed',config:{},model_usage:usage,summary:{actions:3}}];
-  assert.match(ui.home(),/<th>Model usage<\/th>[\s\S]*1,250,340/);
+  ui.state.websitePage='tests';assert.match(ui.home(),/<th>Model usage<\/th>[\s\S]*1,250,340/);
 });

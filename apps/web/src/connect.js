@@ -1,9 +1,11 @@
+import {mountWebsitePage} from './website-page.js';
 import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
 const $=selector=>document.querySelector(selector);
 // The header theme control is the only shared widget on this page.
 const themeSlot=$('[data-theme-slot]');if(themeSlot)mountThemeSwitch(themeSlot);
 const status=$('#connection-status');
+let connectionWebsitePage=null;
 let token=sessionStorage.getItem('scout.workspace-token')||'',development=false,spekios=false,identity=null,busy=false;
 let approvalTarget=null,reviewVersion=0,pendingFragment=false;
 let setupInfo=null,selectedClient='desktop',refreshTimer;
@@ -37,7 +39,7 @@ async function api(path,body){
   }
 }
 function element(tag,text,className){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}
-function date(value){return new Date(value).toLocaleDateString();}
+function connectionDate(value){return new Date(value).toLocaleDateString();}
 async function list(){
   const data=await api('/v1/agents');const root=$('#agent-list');root.replaceChildren();
   if(!data.agents.length){root.append(element('p','Your first agent will appear here after you approve its connection.','connection-empty'));return;}
@@ -46,7 +48,7 @@ async function list(){
     const revoked=!!agent.revoked_at,expired=new Date(agent.expires_at).getTime()<=Date.now();
     const state=revoked?'Disconnected':expired?'Expired':agent.last_used_at?'Connected':'Approved · waiting for first use';
     const head=element('div',undefined,'connection-agent-heading');head.append(element('h3',agent.name),element('span',state,`pill ${!revoked&&!expired&&agent.last_used_at?'green':''}`));
-    const info=element('p',`${agent.connection_kind==='browser_oauth'?'Browser connection':'Native connector'} · ${revoked?'Access revoked':'Reconnect after '+date(agent.expires_at)} · ${agent.last_used_at?'Last used '+new Date(agent.last_used_at).toLocaleString():'Not used yet'}`,'small muted');
+    const info=element('p',`${agent.connection_kind==='browser_oauth'?'Browser connection':'Native connector'} · ${revoked?'Access revoked':'Reconnect after '+connectionDate(agent.expires_at)} · ${agent.last_used_at?'Last used '+new Date(agent.last_used_at).toLocaleString():'Not used yet'}`,'small muted');
     const detail=element('details',undefined,'small connection-agent-details');detail.append(element('summary','Permissions & connection ID'),element('p',(agent.scopes||[]).map(scope=>labels[scope]||scope).join(' · ')),element('code',agent.agent_id));
     row.append(head,info,detail);
     if(!revoked&&!expired){const button=element('button','Disconnect','button');button.addEventListener('click',async()=>{button.disabled=true;try{await api(`/v1/agents/${encodeURIComponent(agent.agent_id)}/revoke`,{});message('Agent disconnected. Its recorded tests are still available.');await list();}catch(e){message(e.message);button.disabled=false;}});row.append(button);}
@@ -84,7 +86,7 @@ function showApproval(connection,kind){
   message('Review the app, workspace and permissions. Access is granted only when you allow this connection.');
 }
 async function ready(){
-  try{identity=await api('/v1/identity');if(identity.principal_kind!=='workspace_manager')throw new Error('Open this page with your workspace access to approve an agent.');
+  try{identity=await api('/v1/identity');if(!connectionWebsitePage)connectionWebsitePage=await mountWebsitePage({page:'connect',request:api});if(identity.principal_kind!=='workspace_manager')throw new Error('Open this page with your workspace access to approve an agent.');
     $('#workspace-label').textContent=`${identity.workspace_name||'Your workspace'} · Runs and evidence stay private to this workspace.`;
     $('#manager-login').hidden=true;$('#connections').hidden=false;await list();
     if(authorizationId||initial){await reviewPending();}else{message('Choose your agent to get started.');}

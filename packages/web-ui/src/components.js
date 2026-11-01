@@ -6,6 +6,7 @@ export const icon = key => `<svg aria-hidden="true" viewBox="0 0 24 24">${{
   grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   pulse:'<path d="M2 12h5l3-8 4 16 3-8h5"/>',search:'<circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/>',
   arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',chevron:'<path d="m9 5 7 7-7 7"/>',
+  home:'<path d="m3 10 9-7 9 7v11h-7v-7h-4v7H3Z"/>',switch:'<path d="m8 9 4-4 4 4m-8 6 4 4 4-4"/>',report:'<path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8m-8 4h6"/>',
   globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18"/>',
   play:'<path d="m8 4 12 8-12 8Z"/>',bug:'<path d="M9 7V5l-2-2m8 4V5l2-2M4 10h3m10 0h3M4 17l3-2m10 0 3 2M12 8v12"/><rect x="7" y="7" width="10" height="13" rx="5"/>',
   image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 4 4 3-3 5 5"/>',

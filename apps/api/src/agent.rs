@@ -631,7 +631,7 @@ async fn dispatch_inner(
             }) {
                 return Err(invalid("Invalid lifecycle."));
             }
-            decode(crate::runs::list(ScopedState(state.clone())).await).await.map(|data|{
+            decode(crate::runs::list(ScopedState(state.clone()), Query(crate::runs::RunFilters::default())).await).await.map(|data|{
                 let matched:Vec<_>=list(&data["runs"]).iter().filter(|r|a.lifecycle.as_deref().is_none_or(|s|r["lifecycle"]==s)).collect();
                 json!({"runs":matched.iter().take(limit).map(|r|fields(r,&["run_id","target_url","lifecycle","summary","created_at","finished_at","error"])).collect::<Vec<_>>(),"scope":"latest_50_owned_runs","returned":matched.len().min(limit),"matched_in_recent_list":matched.len(),"has_more_in_recent_list":matched.len()>limit})
             })

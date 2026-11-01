@@ -9,16 +9,70 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,continueRequest};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,continueRequest,selectWebsite,workspaceWebsites};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});
-const payloads=(jobs=[])=>({'/v1/runs':{runs:[]},'/v1/browser-jobs':{jobs,workers:[],settings:{}},'/v1/model-providers':{providers:[]},'/v1/browser-access':{requests:[],sessions:[]}});
+const payloads=(jobs=[])=>new Proxy({'/v1/runs':{runs:[]},'/v1/browser-jobs':{jobs,workers:[],settings:{}},'/v1/model-providers':{providers:[]},'/v1/browser-access':{requests:[],sessions:[]}},{get:(data,path)=>data[String(path).split('?')[0]]});
 const connect=ui=>Object.assign(ui.state,{connected:true,token:'local-test-token'});
 const response=value=>({ok:true,status:200,json:async()=>value});
 
+test('website selection scopes history and keeps the overview focused on the selected website',()=>{
+  const ui=workspace();ui.state.runs=[run('a',{target_url:'https://a.test/signup'}),run('a2',{target_url:'https://a.test/pricing'}),run('b')];
+  ui.selectWebsite('https://a.test',{prefill:true});
+  assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['a','a2']);
+  assert.match(ui.home(),/A fresh look at/);assert.match(ui.home(),/website-test-card/);assert.doesNotMatch(ui.home(),/b\.test|run-search/);
+  assert.match(ui.shell(ui.home()),/Test a new URL/);assert.doesNotMatch(ui.shell(ui.home()),/>Recent tests<\/div>/);
+  ui.state.websitePage='tests';assert.match(ui.home(),/id="run-search"/);
+});
+test('activity collects queued work and private sign-in across websites',()=>{
+  const ui=workspace();ui.state.jobs=[{job_id:'a',status:'queued',request:{kind:'explore',target_url:'https://a.test/checkout'}},{job_id:'b',status:'running',request:{kind:'explore',target_url:'https://b.test/private'}}];
+  ui.state.access.requests=[{status:'waiting',origin:'https://a.test',access_id:'a-access'},{status:'waiting',origin:'https://b.test',access_id:'b-access'}];
+  ui.selectWebsite('https://a.test');const html=ui.activityView();assert.match(html,/a\.test/);assert.match(html,/b\.test/);assert.match(html,/b-access/);assert.doesNotMatch(ui.home(),/b-access|In progress/);assert.match(ui.activityButton(),/2 running, 2 notifications/);
+  assert.equal(ui.workspaceWebsites().filter(s=>s.origin==='https://a.test').length,1);
+});
+test('a scoped URL restores the website and requests its history without dropping the complete website catalog',async()=>{
+  const paths=[],catalog=[{origin:'https://old.test',run_count:120,target_url:'https://old.test/editor'},{origin:'https://new.test',run_count:5,target_url:'https://new.test'}];
+  const ui=workspace({fetch:async path=>{paths.push(path);return response(path.startsWith('/v1/runs?')?{runs:[run('older',{target_url:'https://old.test/editor'})],websites:catalog,total:120,next_offset:50}:payloads()[path]);}});connect(ui);
+  ui.location.hash='#/website/https%3A%2F%2Fold.test/tests';await ui.route();
+  assert.equal(ui.state.websiteOrigin,'https://old.test');assert.equal(ui.state.websitePage,'tests');assert.equal(ui.state.url,'https://old.test/');
+  assert.ok(paths.includes('/v1/runs?origin=https%3A%2F%2Fold.test&offset=0'));assert.equal(ui.state.runNextOffset,50);
+  assert.equal(ui.workspaceWebsites().length,2);assert.match(ui.shell(ui.home()),/120 tests/);assert.match(ui.home(),/data-action="runs-page"/);
+});
+test('the switcher validates new URLs and launches once through the normal job admission flow',async()=>{
+  const posted=[],job={job_id:'00000000-0000-4000-8000-000000000088',status:'queued',request:{kind:'explore',target_url:'https://a.test/pricing'}},data=payloads([job]);
+  class SwitcherFormData extends Map{constructor(form){super(form.fields);}}
+  const ui=workspace({FormData:SwitcherFormData,fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job});}return response(data[path]);}});connect(ui);ready(ui);
+  const submit=url=>ui.handlers.submit[0]({preventDefault(){},target:{id:'website-launch-form',fields:[['url',url]]}});
+  await submit('javascript:alert(1)');assert.equal(posted.length,0);assert.match(ui.state.websiteLaunchError,/web address/);
+  await submit('a.test/pricing');assert.equal(posted.length,1);assert.equal(posted[0].target_url,'https://a.test/pricing');assert.equal(posted[0].auth_mode,'auto');
+  assert.equal(ui.state.websiteOrigin,'https://a.test');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.pending-job'),undefined);
+  assert.equal(ui.workspaceWebsites().filter(s=>s.origin==='https://a.test').length,1);
+});
+test('switching websites during a refresh rejects the old page and immediately fetches the new selection',async()=>{
+  let release,entered;const firstStarted=new Promise(resolve=>entered=resolve),oldPage=new Promise(resolve=>release=resolve),paths=[];
+  const ui=workspace({fetch:async path=>{
+    paths.push(path);
+    if(path.startsWith('/v1/runs?origin=https%3A%2F%2Fa.test')){entered();return oldPage;}
+    return response(path.startsWith('/v1/runs?')?{runs:[run('b')],websites:[{origin:'https://b.test',target_url:'https://b.test'}],total:1}:payloads()[path]);
+  }});connect(ui);ui.selectWebsite('https://a.test');const pending=ui.refresh();await firstStarted;
+  ui.selectWebsite('https://b.test',{prefill:true});await ui.refresh();release(response({runs:[run('a')],websites:[],total:1}));await pending;await new Promise(setImmediate);
+  assert.equal(ui.state.runs[0].target_url,'https://b.test');assert.equal(ui.state.websiteOrigin,'https://b.test');assert.ok(paths.some(path=>path.startsWith('/v1/runs?origin=https%3A%2F%2Fb.test')));
+});
+test('switcher launches from settings return to the website while manual navigation wins a late admission',async()=>{
+  const data=payloads(),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job:{job_id:'new'}}:data[path])});connect(ui);ui.state.view='settings';ui.location.hash='#/settings/models';
+  await ui.submitJob({kind:'explore',target_url:'https://new.test'},{fromSwitcher:true});
+  assert.equal(ui.state.view,'workspace');assert.equal(ui.state.websiteOrigin,'https://new.test');assert.equal(ui.location.hash,'#/workspace');
+  let release,entered;const started=new Promise(resolve=>entered=resolve),other=workspace({fetch:async(path,options)=>{
+    if(options.method==='POST'){entered();return new Promise(resolve=>release=()=>resolve(response({job:{job_id:'late'}})));}return response(data[path]);
+  }});connect(other);other.selectWebsite('https://a.test');
+  const pending=other.submitJob({kind:'explore',target_url:'https://a.test/pricing'},{fromSwitcher:true});await started;
+  other.selectWebsite('https://b.test');other.location.hash='#/website/https%3A%2F%2Fb.test';release();await pending;
+  assert.equal(other.state.websiteOrigin,'https://b.test');assert.equal(other.state.trackedJobId,null);assert.equal(other.location.hash,'#/website/https%3A%2F%2Fb.test');
+});
+
 test('workspace filters combine URL/model search, review status and live/test mode',()=>{
-  const ui=workspace();ui.state.runs=[run('pending'),run('done',{summary:{actions:3,pending_findings:0,confirmed_findings:1}}),run('fixture',{config:{training_status:'excluded_fixture',execution_mode:'protocol_fixture'}}),run('broken',{lifecycle:'failed'}),run('replay',{config:{replay_of:{source_run_id:'pending'},execution_mode:'live'}})];
+  const ui=workspace();ui.state.websitePage='tests';ui.state.runs=[run('pending'),run('done',{summary:{actions:3,pending_findings:0,confirmed_findings:1}}),run('fixture',{config:{training_status:'excluded_fixture',execution_mode:'protocol_fixture'}}),run('broken',{lifecycle:'failed'}),run('replay',{config:{replay_of:{source_run_id:'pending'},execution_mode:'live'}})];
   ui.state.runFilter='needs_review';assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['pending','fixture','broken']);
   ui.state.runMode='live';assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['pending','broken']);
   ui.state.runFilter='attention';assert.equal(ui.workspaceRuns()[0].run_id,'broken');
@@ -26,7 +80,7 @@ test('workspace filters combine URL/model search, review status and live/test mo
   ui.state.search='';ui.state.runFilter='all';ui.state.runMode='test';assert.equal(ui.workspaceRuns()[0].run_id,'fixture');
 });
 test('review totals count original runs and state the latest-fifty scope',()=>{
-  const ui=workspace();ui.state.runs=[run('source'),run('replay',{config:{replay_of:{source_run_id:'source'}},summary:{pending_findings:900,confirmed_findings:900}})];
+  const ui=workspace();ui.state.websitePage='tests';ui.state.runs=[run('source'),run('replay',{config:{replay_of:{source_run_id:'source'}},summary:{pending_findings:900,confirmed_findings:900}})];
   const html=ui.home();assert.match(html,/latest 50 runs/);assert.doesNotMatch(html,/>900<|>901</);assert.match(html,/See source finding/);
   ui.state.runs=[run('legacy',{summary:undefined})];assert.match(ui.home(),/Not loaded/);assert.doesNotMatch(ui.home(),/undefined|NaN/);
 });
@@ -40,7 +94,7 @@ test('new jobs stay in Workspace, follow exactly one linked run, and retain dura
   const data=payloads([job]),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job,reused:false}:data[path])});connect(ui);
   await ui.submitJob({kind:'explore',target_url:'https://test.app'});
   assert.equal(ui.location.hash,'#/workspace');assert.equal(ui.state.view,'workspace');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.tracked-job'),job.job_id);
-  assert.match(ui.jobBanner(),/Your test will open here/);assert.equal(ui.followSubmittedJob(),false);
+  assert.match(ui.activityView(),/Your test will open here/);assert.equal(ui.followSubmittedJob(),false);
   job.run_id='00000000-0000-4000-8000-000000000099';assert.equal(ui.followSubmittedJob(),true);assert.equal(ui.location.hash,'#/workspace/'+job.run_id);assert.equal(ui.state.trackedJobId,null);assert.equal(ui.followSubmittedJob(),false);
 });
 test('manual navigation cancels automatic follow intent and late admission does not hijack settings',async()=>{
@@ -59,8 +113,8 @@ test('an origin outside the public web is explained on the launch field',async()
 });
 test('failed or cancelled admission without a run remains visible to its user',()=>{
   const ui=workspace();ui.state.trackedJobId='job';ui.state.jobs=[{job_id:'job',status:'failed',run_id:null,error:'<script>target failure</script>'}];
-  assert.match(ui.jobBanner(),/Your test could not start/);assert.match(ui.jobBanner(),/Job job/);assert.doesNotMatch(ui.jobBanner(),/#\/operations|back office/i);assert.doesNotMatch(ui.jobBanner(),/<script>/);
-  ui.state.jobs[0].status='cancelled';assert.match(ui.jobBanner(),/cancelled before launch/);assert.equal(ui.followSubmittedJob(),false);
+  assert.match(ui.activityView(),/Your test could not start/);assert.match(ui.activityView(),/Job job/);assert.doesNotMatch(ui.activityView(),/#\/operations|back office/i);assert.doesNotMatch(ui.activityView(),/<script>/);
+  ui.state.jobs[0].status='cancelled';assert.match(ui.activityView(),/cancelled before launch/);assert.equal(ui.followSubmittedJob(),false);
 });
 const ready=ui=>Object.assign(ui.state,{settings:{provider:'openrouter',model:'model'},providers:{gateway_ready:true,providers:[{provider:'openrouter',configured:true}]},workers:[{available:true}]});
 const click=(ui,action,id)=>ui.handlers.click[0]({target:{closest:selector=>selector==='[data-action]'?{dataset:{action,id},tagName:'BUTTON'}:null}});
@@ -122,7 +176,7 @@ test('a run page and an unstarted job offer one restart each',async()=>{
   assert.match(ui.runView(),/data-action="restart-run" data-id="stopped" >.*Run again/);
   ui.state.report.run.lifecycle='completed';assert.doesNotMatch(ui.runView(),/restart-run/);
   Object.assign(ui.state,{report:null,runId:null,trackedJobId:'job',jobs:[{job_id:'job',status:'failed',run_id:null,request:{kind:'reproduce',source_action_id:'suspect'}}]});
-  assert.match(ui.jobBanner(),/data-action="restart-job" data-id="job" >.*Try again/);
+  assert.match(ui.activityView(),/data-action="restart-job" data-id="job" >.*Try again/);
   await click(ui,'restart-job','job');assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'reproduce',source_action_id:'suspect'});
 });
 test('resumed, queued, older and verification runs restart only where it is safe',()=>{
@@ -158,7 +212,7 @@ test('an unfinished number stays on screen while it is being typed',()=>{
   ui.render();assert.equal(ui.node.innerHTML,'kept');
 });
 test('IME input is captured before the deferred composition-end refresh',()=>{
-  const ui=workspace();connect(ui);ui.state.runs=[{run_id:'run',target_url:'https://example.test',lifecycle:'completed',config:{}}];const target={id:'run-search',value:'日本語',dataset:{}};
+  const ui=workspace();connect(ui);ui.state.websitePage='tests';ui.state.runs=[{run_id:'run',target_url:'https://example.test',lifecycle:'completed',config:{}}];const target={id:'run-search',value:'日本語',dataset:{}};
   ui.handlers.compositionstart[0]({target});ui.handlers.input[0]({target});const before=ui.node.innerHTML;
   ui.handlers.compositionend[0]({target});assert.equal(ui.state.search,'日本語');assert.equal(ui.node.innerHTML,before);
   target.value='日本語入力';ui.handlers.input[0]({target});assert.equal(ui.state.search,'日本語入力');assert.match(ui.node.innerHTML,/日本語入力/);
@@ -185,9 +239,9 @@ test('closing a drawer restores focus by stable identity after its opener was re
   ui.document.activeElement=old;ui.state.drawer={title:'Evidence',raw:{}};ui.render();assert.equal(focused,'close');
   ui.state.drawer=null;ui.render();assert.equal(focused,'new opener');
 });
-test('run pages show only one private login prompt',()=>{
+test('private login prompts appear once in Activity and stay out of session content',()=>{
   const ui=workspace();ui.state.runId='run';ui.state.access={requests:[{access_id:'access',run_id:'run',status:'waiting',reason:'login_required',origin:'https://test.app'}],sessions:[]};
-  const html=ui.shell(ui.jobBanner());assert.equal((html.match(/Open private login/g)||[]).length,1);
+  assert.doesNotMatch(ui.shell('Recorded session'),/Open private login/);ui.state.drawer={activity:true,title:'Activity'};const html=ui.shell('Recorded session');assert.equal((html.match(/Open private login/g)||[]).length,1);
 });
 test('development mode opens the workspace without sending or retaining a bearer token',async()=>{
   const requests=[],data=payloads(),ui=workspace({fetch:async(path,options)=>{requests.push({path,options});return response(path==='/v1/auth-mode'?{mode:'local_development'}:data[path]);}});
@@ -259,4 +313,86 @@ test('a price link routes to Settings → Models, moves to the model’s price a
   assert.equal(ui.state.view,'settings');assert.equal(ui.state.settingsSection,'models');
   assert.deepEqual(replaced,['#/settings/models']);assert.deepEqual(focused,['saved-0-input_usd_per_million']);assert.equal(ui.state.priceTarget,null);
   ui.location.hash='#/settings/models/price/%E0%A4%A';await ui.route();assert.equal(ui.state.priceTarget,null,'A malformed target is ignored.');
+});
+
+test('background activity and notifications never enter the selected report or open by themselves',async()=>{
+  const report={run:run('selected'),actions:[],captures:[]};
+  const data=payloads([{job_id:'other-job',status:'running',run_id:'other-run',request:{kind:'explore',target_url:'https://unrelated.test/private'}}]);
+  const ui=workspace({fetch:async path=>response(path==='/v1/runs/selected'?report:data[path])});connect(ui);
+  Object.assign(ui.state,{runId:'selected',report,websiteOrigin:'https://selected.test',tab:'flow',trackedJobId:'other-job'});
+  await ui.refresh();
+  assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');assert.equal(ui.location.hash,'#/workspace');
+  const selected=ui.shell(ui.runView());assert.doesNotMatch(selected,/https:\/\/unrelated.test\/private|View run|Stop run|activity-card/);
+  ui.state.error='<script>refresh failure</script>';assert.doesNotMatch(ui.shell(ui.runView()),/refresh failure|Showing the last available data/);
+  await click(ui,'open-activity');
+  assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');
+  const open=ui.drawer();assert.match(open,/role="dialog"/);assert.match(open,/Across all websites/);assert.match(open,/https:\/\/unrelated.test\/private/);assert.match(open,/data-action="cancel-job" data-id="other-job"/);assert.match(open,/#\/workspace\/other-run/);assert.match(open,/refresh failure/);assert.doesNotMatch(open,/<script>/);
+  await click(ui,'close-drawer');assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');
+});
+test('Activity stays live while open and evidence drawers keep their polling pause',async()=>{
+  let poll,requests=0;const data=payloads([{job_id:'job',status:'running',request:{kind:'explore',target_url:'https://other.test'}}]);
+  const ui=workspace({setInterval(fn,ms){if(ms===5000)poll=fn;},fetch:async path=>{requests++;return response(data[path]);}});connect(ui);ui.selectWebsite('https://selected.test');
+  await click(ui,'open-activity');poll();await new Promise(setImmediate);
+  assert.equal(requests,4);assert.equal(ui.state.drawer.activity,true);assert.match(ui.drawer(),/other.test/);
+  data['/v1/browser-jobs'].jobs[0].status='completed';poll();await new Promise(setImmediate);
+  assert.equal(requests,8);assert.match(ui.activityButton(),/0 running/);assert.match(ui.drawer(),/Completed/);assert.equal(ui.state.websiteOrigin,'https://selected.test');
+  ui.state.drawer={title:'Evidence',raw:{}};poll();await new Promise(setImmediate);assert.equal(requests,8);
+});
+test('Activity shows recent results once and keeps an older failed admission available',()=>{
+  const ui=workspace();ui.state.trackedJobId='failed';ui.state.jobs=[{job_id:'failed',status:'failed',error:'worker unavailable',request:{kind:'explore',target_url:'https://old.test'}}];
+  for(let i=0;i<12;i++)ui.state.jobs.push({job_id:'job-'+i,status:'completed',run_id:'run-'+i,finished_at:'2026-11-01T12:'+String(i).padStart(2,'0')+':00Z',request:{kind:'explore',target_url:'https://done.test'}});
+  const html=ui.activityView();assert.equal((html.match(/class="activity-card"/g)||[]).length,11);assert.equal((html.match(/Your test could not start/g)||[]).length,1);assert.match(html,/#\/workspace\/run-11/);assert.doesNotMatch(html,/#\/workspace\/run-0"/);
+  assert.match(ui.activityButton(),/0 running, 1 notifications/);
+});
+
+test('desktop and mobile Activity controls have distinct focus identities',()=>{
+  const ui=workspace(),html=ui.shell('Recorded session');assert.equal((html.match(/id="activity-trigger"/g)||[]).length,1);assert.equal((html.match(/id="activity-trigger-mobile"/g)||[]).length,1);
+});
+
+test('viewing the current run from Activity closes the panel without resetting its tab',async()=>{
+  const ui=workspace();connect(ui);Object.assign(ui.state,{runId:'current',report:{run:run('current'),actions:[],captures:[]},tab:'flow',drawer:{activity:true,title:'Activity'}});
+  await click(ui,'activity-view-run','current');assert.equal(ui.state.drawer,null);assert.equal(ui.state.tab,'flow');assert.equal(ui.state.runId,'current');
+  ui.state.drawer={activity:true,title:'Activity'};await click(ui,'activity-view-run','other');assert.equal(ui.state.drawer,null);assert.equal(ui.location.hash,'#/workspace/other');
+});
+
+
+test('the workspace switcher uses Docker hostname handling and updates guidance without replacing the input',async()=>{
+  const posts=[],data=payloads(),hint={textContent:'',className:'',removeAttribute(){}},input={invalid:true,removeAttribute(){this.invalid=false;}};
+  class LocalUrlForm extends Map{constructor(form){super(form.fields);}}
+  const ui=workspace({FormData:LocalUrlForm,fetch:async(path,options)=>{if(options.method==='POST'){posts.push(JSON.parse(options.body));return response({job:{job_id:'queued'}});}return response(data[path]);}});connect(ui);ready(ui);
+  ui.node.querySelector=selector=>selector==='#website-url'?input:selector==='#website-launch-error'?hint:null;
+  let html=ui.node.innerHTML;
+  ui.handlers.input[0]({target:{id:'website-url',value:'localhost:4100',dataset:{}}});assert.match(hint.textContent,/host.docker.internal:4100/);assert.equal(ui.node.innerHTML,html);assert.equal(input.invalid,false);
+  ui.handlers.input[0]({target:{id:'website-url',value:'larchwood:8084/shop',dataset:{}}});assert.doesNotMatch(hint.textContent,/where localhost/);
+  await ui.handlers.submit[0]({target:{id:'website-launch-form',fields:[['url','larchwood:8084/shop']]},preventDefault(){}});
+  assert.equal(posts[0].target_url,'http://larchwood:8084/shop');assert.equal(ui.state.websiteOrigin,'http://larchwood:8084');
+});
+
+test('price links from a website wait for an ongoing refresh before targeting the saved model',async()=>{
+  let release,entered;const started=new Promise(resolve=>entered=resolve),settings={provider:'meta',model:'muse-spark-1.3',savedModels:[{provider:'meta',model:'muse-spark-1.3'}]},data=payloads();
+  data['/v1/browser-jobs']={jobs:[],workers:[],settings,settings_revision:2};let delay=true;
+  const ui=workspace({fetch:async path=>{if(path==='/v1/browser-jobs'&&delay){delay=false;entered();return new Promise(resolve=>release=()=>resolve(response(data[path])));}return response(data[path]);}});connect(ui);ui.selectWebsite('https://app.test');
+  const focused=[];ui.document.getElementById=id=>id==='saved-0-input_usd_per_million'?{focus:()=>focused.push(id),scrollIntoView(){}}:null;
+  const pending=ui.refresh();await started;ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';const routed=ui.route();await new Promise(setImmediate);
+  assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3','Keep the price target until the saved list has loaded.');release();await pending;await routed;await new Promise(setImmediate);
+  assert.equal(ui.state.websiteOrigin,'https://app.test');assert.equal(ui.state.priceTarget,null);assert.deepEqual(focused,['saved-0-input_usd_per_million']);
+});
+
+
+test('manual navigation cancels a deferred price target before a late refresh completes',async()=>{
+  let release,entered;const started=new Promise(resolve=>entered=resolve),data=payloads();let delay=true;
+  const ui=workspace({fetch:async path=>{if(path==='/v1/browser-jobs'&&delay){delay=false;entered();return new Promise(resolve=>release=()=>resolve(response(data[path])));}return response(data[path]);}});connect(ui);
+  const pending=ui.refresh();await started;ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3');
+  ui.location.hash='#/settings/data';await ui.route();assert.equal(ui.state.priceTarget,null);release();await pending;await new Promise(setImmediate);
+  assert.equal(ui.state.settingsSection,'data');assert.equal(ui.state.priceTarget,null);
+});
+
+
+test('Continue exploration remains available in the website overview and scoped history',async()=>{
+  const posts=[],data=payloads(),ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posts.push(JSON.parse(options.body));return response({job:{job_id:'new-continuation'}});}return response(data[path]);}});connect(ui);ready(ui);
+  const stopped=run('stopped',{lifecycle:'failed',target_url:'http://larchwood:8084/shop'}),other=run('other',{lifecycle:'failed'});
+  ui.state.runs=[stopped,other];ui.selectWebsite('http://larchwood:8084');
+  let html=ui.home();assert.match(html,/class="website-test-actions"/);assert.match(html,/data-action="continue-run" data-id="stopped"/);assert.doesNotMatch(html,/data-action="continue-run" data-id="other"/);
+  ui.state.websitePage='tests';assert.match(ui.home(),/data-action="continue-run" data-id="stopped"/);
+  await click(ui,'continue-run','stopped');assert.equal(posts[0].continue_from_run_id,'stopped');assert.equal(posts[0].target_url,'http://larchwood:8084/shop');assert.equal(ui.state.websiteOrigin,'http://larchwood:8084');
 });

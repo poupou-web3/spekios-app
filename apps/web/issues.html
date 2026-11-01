@@ -6,13 +6,14 @@
   <title>Issues & fix verification · Spekios</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <script src="/assets/ui/theme-init.js"></script>
-  <link rel="stylesheet" href="/assets/ui/styles/tokens.css"><link rel="stylesheet" href="/assets/ui/styles/base.css"><link rel="stylesheet" href="/assets/ui/styles/components.css"><link rel="stylesheet" href="/assets/ui/styles/shell.css"><link rel="stylesheet" href="/assets/app/styles/pages.css"><link rel="stylesheet" href="/assets/app/styles/spekios.css"><script type="module" src="/assets/app/issues.js"></script>
+  <link rel="stylesheet" href="/assets/ui/styles/tokens.css"><link rel="stylesheet" href="/assets/ui/styles/base.css"><link rel="stylesheet" href="/assets/ui/styles/components.css"><link rel="stylesheet" href="/assets/ui/styles/shell.css"><link rel="stylesheet" href="/assets/app/styles/pages.css"><link rel="stylesheet" href="/assets/app/styles/spekios.css"><link rel="stylesheet" href="/assets/app/styles/websites.css"><script type="module" src="/assets/app/issues.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to main content</a>
-<main id="main-content" class="content issue-page" tabindex="-1">
-  <header class="connection-top"><a class="brand" href="/"><span class="mark"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/></svg></span>Spekios <small>ISSUES & FIX VERIFICATION</small></a><div class="row"><div data-theme-slot></div><a class="button quiet" href="/connect">Connect your agent</a><a class="button" href="/">← Workspace</a></div></header>
-  <div class="issue-heading"><p class="eyebrow">FROM FINDING TO VERIFIED BEHAVIOR</p><h1>Follow the fix.</h1><p>One issue ID. The original expectation. Every candidate check, with its own evidence.</p></div>
+<div class="app website-app"><div class="website-sidebar-slot" data-workspace-sidebar></div>
+<main id="main-content" class="main content issue-page" tabindex="-1">
+  <header class="connection-top"><a class="brand" href="/"><span class="mark"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/></svg></span>Spekios <small>ISSUES & FIX VERIFICATION</small></a><div class="row"><div data-theme-slot></div></div></header>
+  <div class="issue-heading"><p class="eyebrow">FROM FINDING TO VERIFIED BEHAVIOR</p><h1>Issues & fixes</h1><div class="website-scope" data-website-scope></div><p>One issue ID. The original expectation. Every candidate check, with its own evidence.</p></div>
   <p id="issue-status" role="status" aria-live="polite"></p>
   <section id="issue-login" class="panel connection-signin" hidden><h2>Sign in</h2><form id="issue-login-form" class="login-card"><label for="issue-email">Email</label><input id="issue-email" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="254" placeholder="admin"><label for="issue-password">Password</label><input id="issue-password" type="password" autocomplete="current-password" required minlength="32" maxlength="256"><button class="button primary">Sign in</button></form></section>
   <div id="issue-workspace" class="issue-layout" hidden>
@@ -38,5 +39,5 @@
       </div>
     </div>
   </div>
-</main>
+</main><footer class="website-mobile-nav"><a href="/connect">Connect your agent</a><a href="/#/settings">Settings</a></footer></div>
 </body></html>
