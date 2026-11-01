@@ -413,6 +413,8 @@ pub fn permitted(p: &Principal, method: &str, path: &str) -> bool {
             || path.starts_with("/v1/captures/")
             || path.starts_with("/v1/artifacts/")
             || path.starts_with("/v1/browser-jobs")
+            || path == "/v1/projects"
+            || path.starts_with("/v1/projects/")
             || path == "/v1/browser-access"
             || path.starts_with("/v1/history")
             || path.starts_with("/v1/issues")
@@ -448,6 +450,9 @@ mod tests {
         };
         assert!(permitted(&p, "GET", "/v1/runs/abc/report"));
         assert!(permitted(&p, "GET", "/v1/runs/abc/steering"));
+        assert!(permitted(&p, "GET", "/v1/projects"));
+        assert!(permitted(&p, "GET", "/v1/projects/abc"));
+        assert!(!permitted(&p, "POST", "/v1/projects"));
         assert!(!permitted(&p, "POST", "/v1/runs/abc/steering"));
         let mut writer = p.clone();
         writer.scopes.push("runs:write".into());

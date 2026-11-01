@@ -8,7 +8,7 @@ const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
   const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
-  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,addCatalogModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,addCatalogModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel,editProjectModels};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
@@ -124,7 +124,7 @@ test('an old acknowledgement cannot discard a new draft after reconnecting with 
 });
 test('configuration text is escaped, exposes no secret input and clearly separates immutable environment policy',()=>{
   const ui=workspace();ui.updateConfiguration('model','<script>bad()</script>');const html=ui.configurationView();assert.doesNotMatch(html,/<script>|type="password"/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Queued and running jobs keep their original settings/);assert.match(html,/Saving does not call a model/);
-  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','navigation_model','reuse_rankings','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','provider','saved_models','stop_after_idle_actions','viewport_profile'].sort());
+  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','navigation_model','reuse_rankings','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','project_models','provider','saved_models','stop_after_idle_actions','viewport_profile'].sort());
 });
 test('previous and next follow the visible list, preserve comparison, and reject stale targets',()=>{
   const ui=workspace();ui.state.report={run:{},actions:[{action_id:'one'},{action_id:'two'},{action_id:'three'}],events:[]};ui.state.actionId='one';ui.state.image='compare';ui.state.frameId='old';
@@ -252,4 +252,39 @@ test('a listed model is added with its name and standard price, including OpenRo
   await ui.saveConfiguration();
   assert.deepEqual(sent.saved_models.find(m=>m.model==='muse-spark-1.3'),{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark 1.3',input_usd_per_million:1.25,output_usd_per_million:4.25});
   assert.deepEqual(sent.saved_models.find(m=>m.model==='deepseek/deepseek-v4.1-flash-1017'),{provider:'openrouter',model:'deepseek/deepseek-v4.1-flash-1017',label:'DeepSeek V4.1 Flash 1017',input_usd_per_million:0.15,output_usd_per_million:0.6});
+});
+
+test('each project can have its own model, picked from the saved list and sent with free-only kept unless a paid OpenRouter model is chosen',async()=>{
+  let sent;const ui=workspace(async(path,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}},201);});
+  const project='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222';
+  ui.state.settings={...defaults,freeOnly:false,savedModels:[{provider:'anthropic',model:'claude-sonnet-5-5',label:'Sonnet'},{provider:'openrouter',model:'vendor/paid'}],
+    projectModels:[{projectId:project,label:'Shop',provider:'anthropic',model:'claude-sonnet-5-5',freeOnly:true,navigationModel:null}]};
+  const d=ui.configurationDraft();
+  assert.deepEqual(plain(d.values.project_models),[{project_id:project,label:'Shop',choice:'anthropic|claude-sonnet-5-5',navigation:'none'}]);
+  assert.match(ui.configurationView('models'),/Project models[\s\S]*<legend>Shop<\/legend>[\s\S]*value="anthropic\|claude-sonnet-5-5" selected/);
+  const sonnet=d.values.saved_models.findIndex(m=>m.model==='claude-sonnet-5-5');
+  assert.equal(ui.removeSavedModel(sonnet),false,'A project model stays listed.');
+  ui.editProjectModels(true);
+  assert.deepEqual(plain(d.values.project_models[1]),{project_id:'',label:'',choice:'openrouter|openrouter/free',navigation:'inherit'},'A new row starts on the default model.');
+  assert.equal(ui.updateConfiguration('project.1.choice',''),false,'A project always picks a listed model.');
+  d.values.project_models[1].choice='';
+  assert.match(ui.configurationError(d.values),/Project model 2: the project ID must be a UUID/);
+  assert.equal(ui.updateConfiguration('project.1.project_id',project),true);
+  assert.match(ui.configurationError(d.values),/another row already sets this project/);
+  ui.updateConfiguration('project.1.project_id',other);
+  assert.match(ui.configurationError(d.values),/choose a model from your list/);
+  assert.equal(ui.updateConfiguration('project.1.choice','openai|unlisted'),false,'Only listed models can be chosen.');
+  assert.equal(ui.updateConfiguration('project.1.choice','openrouter|vendor/paid'),true);
+  assert.equal(ui.configurationError(d.values),'');
+  assert.equal(ui.updateConfiguration('project.1.label','x'.repeat(61)),true);assert.match(ui.configurationError(d.values),/60 characters/);
+  ui.updateConfiguration('project.1.label','  Blog ');
+  assert.deepEqual(plain(ui.changedSections()),['models']);
+  await ui.saveConfiguration();
+  assert.deepEqual(sent.project_models,[
+    {project_id:project,label:'Shop',provider:'anthropic',model:'claude-sonnet-5-5',free_only:true,navigation_model:null},
+    {project_id:other,label:'Blog',provider:'openrouter',model:'vendor/paid',free_only:false},
+  ],'A paid OpenRouter choice turns free-only off; inherit omits the navigation model.');
+  const restricted=workspace();restricted.state.settings={...defaults,savedModels:[{provider:'openrouter',model:'vendor/paid'}]};
+  const r=restricted.configurationDraft();r.values.project_models.push({project_id:other,label:'',choice:'openrouter|vendor/paid',navigation:'inherit'});
+  assert.match(restricted.configurationError(r.values),/free-only is on/);
 });

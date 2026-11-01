@@ -191,6 +191,13 @@ export function openapi(catalog) {
     requestBody: body(ref('SettingsSubmission')),
     responses: { '201': response('New defaults revision saved.'), '200': response('Original save reused.'), ...errors },
   });
+  add('/v1/projects', 'get', 'listProjects', 'Settings', 'List known projects with the model and limits a new run in each would use', {
+    description: 'Projects this user has started jobs in (up to 200, most recently used first) followed by projects only named in settings. Each entry has the label, job and run counts, last_job_at, the resolved model with model.source (project or default), resolved limits and the overrides applied. A project is any UUID sent as project_id. No model call.',
+  });
+  add('/v1/projects/{project_id}', 'get', 'getProject', 'Settings', 'Read the model and limits a new run in one project would use', {
+    parameters: [pathParameter('project_id')],
+    description: 'Works for a project with no jobs yet: it resolves to the defaults until settings name it. No model call.',
+  });
   add('/v1/model-providers', 'get', 'getProviders', 'Models', 'Read provider availability without keys');
   add('/v1/usage', 'get', 'getUsage', 'Models', 'Read nullable provider-reported token/cost totals', {
     description: 'known_input_tokens, known_output_tokens and known_total_tokens count only what providers reported; null means unknown, not zero. by_model has the same counts and reported cost for each provider and model, and by_agent for each agent. Run reports (model_usage) and the run list use the same fields for one run.',
@@ -220,17 +227,28 @@ export function openapi(catalog) {
     description: 'Private frames, leases, input controls, saved-session material and human review mutations are outside this contract. Agent tools expose only handoff metadata.',
   });
 
+  const providerChoice = choice('openai','anthropic','openrouter','meta');
+  const modelId = { type: 'string', minLength: 1, maxLength: 200, description: 'Trimmed model ID with ASCII letters, digits and / : . _ - only.' };
+  const navigationChoice = { ...strict({ provider: providerChoice, model: modelId }, ['provider','model']), type: ['object','null'] };
+  const modelChoiceFields = {
+    provider: providerChoice, model: modelId,
+    free_only: { type: 'boolean', default: true, description: 'Keep OpenRouter on openrouter/free or :free model IDs, for this model and its navigation model. Ignored by other providers.' },
+    navigation_model: { ...navigationChoice, description: 'Omitted: inherit the navigation model. null: one model for everything.' },
+  };
+  const runModel = { ...strict(modelChoiceFields, ['provider','model']),
+    description: 'This run\'s model instead of its project\'s model or the saved default. The provider must be configured. Part of the retry identity. The job records settings.modelSource: run, project or default.' };
+  const projectIdField = { ...uuid, description: 'Opaque project UUID. Selects the project\'s model and limit overrides from settings; list known projects with GET /v1/projects. A new UUID starts a new project.' };
   const jobExplore = strict({
-    project_id:uuid,task_id:uuid,job_id: uuid, kind: { const: 'explore', type: 'string' },
+    project_id:projectIdField,task_id:uuid,job_id: uuid, kind: { const: 'explore', type: 'string' }, model: runModel,
     target_url: { type: 'string', maxLength: 2048, description: 'At most 2048 UTF-8 bytes. HTTP(S), no embedded credentials.' },
     viewport_profile: choice('desktop', 'tablet', 'mobile'),
     auth_mode: choice('auto', 'sign_in', 'public'), session_id: uuid, auto_reproduce: bool,
     app_memory: { type: 'boolean', description: 'Override the saved memory default for this run. False explores without reading or recording cross-run memory.' },
     continue_from_run_id: { ...uuid, description: 'Resume this failed, interrupted or cancelled exploration. The new job uses current settings, plans from the pages that run recorded, and does not repeat a dispatched action. The target URL and viewport must match the run.' },
   }, ['job_id', 'kind', 'target_url']);
-  const jobReproduce = strict({ project_id:uuid,task_id:uuid,job_id: uuid, kind: { const: 'reproduce', type: 'string' }, source_action_id: uuid }, ['job_id', 'kind', 'source_action_id']);
+  const jobReproduce = strict({ project_id:projectIdField,task_id:uuid,job_id: uuid, kind: { const: 'reproduce', type: 'string' }, source_action_id: uuid, model: runModel }, ['job_id', 'kind', 'source_action_id']);
   const verificationFields={candidate_url:{type:'string',maxLength:2048,format:'uri'},deployment_ref:{type:'string',minLength:1,maxLength:200},auth_mode:choice('auto','public'),session_id:uuid,project_id:uuid,task_id:uuid};
-  const jobVerify=strict({job_id:uuid,kind:{type:'string',const:'verify_fix'},issue_id:uuid,target_url:verificationFields.candidate_url,...Object.fromEntries(Object.entries(verificationFields).filter(([key])=>key!=='candidate_url'))},['job_id','kind','issue_id','target_url']);
+  const jobVerify=strict({job_id:uuid,kind:{type:'string',const:'verify_fix'},issue_id:uuid,model:runModel,target_url:verificationFields.candidate_url,...Object.fromEntries(Object.entries(verificationFields).filter(([key])=>key!=='candidate_url'))},['job_id','kind','issue_id','target_url']);
   return {
     openapi: '3.1.0',
     info: {
@@ -291,6 +309,8 @@ export function openapi(catalog) {
           auto_reproduce: bool, max_auto_reproductions: bounded(1,3), max_auto_replay_actions: bounded(1,100),
           app_memory: { type: 'boolean', default: true, description: 'Remember explored pages and controls across runs of the same app, viewport and sign-in state.' },
           reuse_rankings: { type: 'boolean', default: true, description: 'Reuse what the model ranked on a screen in an earlier run when its address pattern, title, text (numbers and times normalized) and control states are unchanged and the model is the same. Needs app memory. Skips the planning request; recorded as a plan decision with status reused. A ranking is reused at most 10 times; rankings that type text and runs with a testing focus are always ranked afresh.' },
+          project_models: { type: 'array', maxItems: 50, default: [], items: strict({ project_id: uuid, label: { type: 'string', maxLength: 60, description: 'Optional project name, trimmed; no control characters.' }, ...modelChoiceFields }, ['project_id','provider','model']),
+            description: 'The model for each project, one entry per project UUID. A job with that project_id uses it unless the job sets its own model; limit overrides then match the resolved model. Jobs keep the resolved model, not this list. Omitted: every project uses the default.' },
           navigation_model: { ...strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 } }, ['provider','model']), type: ['object','null'],
             description: 'A cheaper model that predicts and assesses navigation actions: opening a URL, following a link and scrolling. Any result other than a clean no_issue_observed, or one with browser errors or failed requests, is reassessed by the exploration model. Free-only applies to an OpenRouter navigation model. Omitted or null: one model for everything.' },
           saved_models: { type: 'array', maxItems: 30, default: [], items: strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 }, label: { type: 'string', maxLength: 60, description: 'Optional display name, trimmed; no control characters.' },

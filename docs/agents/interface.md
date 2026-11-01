@@ -79,6 +79,8 @@ The endpoint uses the official [Rust MCP SDK](https://github.com/modelcontextpro
 | Tool | Purpose |
 | --- | --- |
 | scout_new_request_id | Allocate a job UUID if the client cannot generate one |
+| scout_list_projects | List known project IDs with labels, job/run counts and the model and limits a new run in each would use |
+| scout_get_project | Read one project's resolved model and limits, including a project with no runs yet |
 | scout_status | Read readiness, capabilities, provider availability, defaults and operations |
 | scout_list_runs | Filter a bounded slice of the latest 50 owned runs |
 | scout_start_exploration | Queue exploration from url with a stable job_id |
@@ -106,7 +108,7 @@ Schemas reject unknown fields. Commands that start browser/model work advertise 
 
 1. Call scout_status. Check ready, provider availability and allowed origins. API readiness does not imply that a provider key is configured.
 2. Generate a non-nil UUID locally or call scout_new_request_id. Store it before submitting work.
-3. Call scout_start_exploration with job_id and url. Optional inputs are viewport_profile (desktop/tablet/mobile), auth_mode (auto/sign_in/public), saved session_id and auto_reproduce. Omitted settings follow the GUI defaults.
+3. Call scout_start_exploration with job_id and url. Optional inputs are viewport_profile (desktop/tablet/mobile), auth_mode (auto/sign_in/public), saved session_id, auto_reproduce, project_id and model. The model is the run's own `model` ({provider, model, free_only?, navigation_model?}) if given, else the project's model for project_id (find IDs and their models with scout_list_projects), else the saved default; the job's settings record which in `modelSource`. Omitted settings follow the GUI defaults.
 4. Use scout_get_progress while doing other work, then scout_get_report for the coding handoff. scout_get_job remains available for raw queue detail. Identical UUID/input retries reuse the original admission; conflicting input returns 409.
 5. Call scout_read_evidence with run_id and exactly one capture_id or artifact_id.
 6. Request scout_reproduce_candidate with a new job_id and source_action_id. A reproduced suspicion remains separate from a human-confirmed finding.

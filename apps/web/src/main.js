@@ -14,7 +14,7 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {addCatalogModel,addSavedModel,editOverrides,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel} from './views/settings.js';
+import {addCatalogModel,addSavedModel,editOverrides,editProjectModels,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 import {rememberWorkspacePage} from './website-state.js';
 import {bindWebsiteFavicons,clearWebsiteNavigation,launchUrlError,updateWebsiteLaunchHint,websiteHref} from './websites.js';
@@ -50,7 +50,7 @@ function captureInput(target){
   return !!field;
 }
 root.addEventListener('input',e=>{if(captureInput(e.target))render();});
-root.addEventListener('change',e=>{if(e.target.id==='auto-reproduce'){state.autoReproduce=e.target.checked;sessionStorage.setItem('scout.auto-reproduce',String(state.autoReproduce));render();}if(e.target.dataset.reviewField){updateReviewDraft(e.target.dataset.reviewAction,e.target.dataset.reviewField,e.target.value);if(e.target.dataset.reviewField==='disposition')render();}if(e.target.id==='auth-mode'){state.authMode=e.target.value;if(state.authMode==='public')state.sessionId='';render();}if(e.target.id==='app-session')state.sessionId=e.target.value;if(e.target.id==='viewport-profile'){state.viewportProfile=e.target.value;render();}});
+root.addEventListener('change',e=>{if(e.target.id==='auto-reproduce'){state.autoReproduce=e.target.checked;sessionStorage.setItem('scout.auto-reproduce',String(state.autoReproduce));render();}if(e.target.dataset.reviewField){updateReviewDraft(e.target.dataset.reviewAction,e.target.dataset.reviewField,e.target.value);if(e.target.dataset.reviewField==='disposition')render();}if(e.target.id==='auth-mode'){state.authMode=e.target.value;if(state.authMode==='public')state.sessionId='';render();}if(e.target.id==='app-session')state.sessionId=e.target.value;if(e.target.id==='viewport-profile'){state.viewportProfile=e.target.value;render();}if(e.target.id==='launch-project'){state.launchProject=e.target.value;render();}if(e.target.id==='launch-model'){state.launchModel=e.target.value;render();}});
 root.addEventListener('change',e=>{
   if(e.target.dataset.configurationField||e.target.dataset.newModelField){if(captureInput(e.target))render();return;}
   const field={'run-mode':'runMode'}[e.target.id];
@@ -83,6 +83,7 @@ root.addEventListener('click',async e=>{
   if(action==='logout'){closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
+  if(action==='add-project-model'||action==='remove-project-model'){editProjectModels(action==='add-project-model',Number(el.dataset.index));render();}
   // After adding, the model ID field is ready for the next one (or for fixing this one).
   if(action==='add-catalog-model'){addCatalogModel(el.dataset.provider,el.dataset.model);render();}
   if(action==='add-saved-model')addModelAndRefocus();

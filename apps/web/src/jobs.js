@@ -13,7 +13,8 @@ export const STOPPED=['failed','interrupted','blocked','cancelled'];
 // an exploration carries on: each continuation starts from the whole graph explored so far.
 const CONTINUABLE=['failed','interrupted','cancelled'];
 // The request that launched a stopped run or a job that never started.
-// The new job takes the current settings; the earlier run and its evidence stay as they are.
+// The new job takes the current settings, keeping its project and any model chosen for that run;
+// the earlier run and its evidence stay as they are.
 // Fix verifications start again from their issue page.
 function relaunch(kind,item){
   if(kind==='run'&&(!STOPPED.includes(item.lifecycle)||item.config?.runtime_version!=='explorer-v1'||item.config.fix_verification))return null;
@@ -23,12 +24,12 @@ function relaunch(kind,item){
   // Only recent finished jobs are loaded. An older run records enough to start it again, including the saved sign-in it started with.
   const launchSession=item.config?.auth_contexts?.find(c=>c.verification==='saved_session_reused')?.session_id;
   const source=job?.request??(kind==='job'?null:item.config.replay_of?{kind:'reproduce',source_action_id:item.config.replay_of.source_action_id}:{kind:'explore',target_url:item.target_url,auth_mode:item.config.auth_mode,session_id:launchSession,auto_reproduce:item.config.automatic_reproduction_policy?.enabled});
-  if(source?.kind==='reproduce')return {kind:'reproduce',source_action_id:source.source_action_id};
+  if(source?.kind==='reproduce')return {kind:'reproduce',source_action_id:source.source_action_id,...(source.model?{model:source.model}:{})};
   if(source?.kind!=='explore')return null;
-  const {target_url,auth_mode,session_id,auto_reproduce,app_memory}=source;
+  const {target_url,auth_mode,session_id,auto_reproduce,app_memory,model}=source;
   // An expired or removed saved sign-in would refuse the job. Without it, the new run asks for sign-in.
   const session=(state.access.sessions||[]).some(s=>s.session_id===session_id&&!s.revoked_at&&new Date(s.expires_at)>new Date());
-  return {kind:'explore',target_url,viewport_profile:job?.settings?.viewportProfile??source.viewport_profile??item.config?.viewport_profile,auth_mode,auto_reproduce,app_memory,...(session?{session_id}:{}),...(job?.project_id?{project_id:job.project_id}:{})};
+  return {kind:'explore',target_url,viewport_profile:job?.settings?.viewportProfile??source.viewport_profile??item.config?.viewport_profile,auth_mode,auto_reproduce,app_memory,...(session?{session_id}:{}),...(job?.project_id?{project_id:job.project_id}:{}),...(model?{model}:{})};
 }
 function sameTestQueued(request){
   // A continuation of this URL is a different test from a fresh start, so it does not hide Run again.

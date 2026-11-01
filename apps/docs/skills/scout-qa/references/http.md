@@ -23,5 +23,6 @@ Ordinary REST alternatives:
 - **POST /v1/browser-jobs** uses **kind: explore** and **target_url** instead of the tool's **url**; new admission is 202 and an identical retry is 200.
 - **GET /v1/browser-jobs/{job_id}/progress** reads lightweight progress.
 - **GET /v1/browser-jobs/{job_id}/report** reads the report with pagination query parameters.
+- **GET /v1/projects** (or **scout_list_projects**) lists known project IDs with the model and limits a new run in each would use; **GET /v1/projects/{project_id}** reads one. Send **project_id** with a job to use its project's model, or **model** to choose one for that run only.
 
 Request bodies are capped at 64 KiB and structured tool replies at 128 KiB. Reduce page size after an oversized result. Use the live schemas for additional options instead of guessing arguments.

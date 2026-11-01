@@ -25,6 +25,13 @@ fn tool(
 }
 pub fn tools() -> Vec<Tool> {
     let run = || schema(json!({"run_id":id_schema()}), &["run_id"]);
+    // A run's own model. Omitted: the project's model, else the saved default.
+    let model = || {
+        json!({"type":"object","description":"This run's model instead of the project's or the default. free_only (default true) keeps OpenRouter on free model IDs. navigation_model: omit to inherit, null for none.",
+            "properties":{"provider":choice(&["openai","anthropic","openrouter","meta"]),"model":{"type":"string","minLength":1,"maxLength":200},"free_only":{"type":"boolean"},
+                "navigation_model":{"type":["object","null"],"properties":{"provider":choice(&["openai","anthropic","openrouter","meta"]),"model":{"type":"string","minLength":1,"maxLength":200}},"required":["provider","model"],"additionalProperties":false}},
+            "required":["provider","model"],"additionalProperties":false})
+    };
     let history_schema = || {
         schema(
             json!({"domain":{"type":"string","maxLength":253},"url":{"type":"string","maxLength":2048},"project_id":id_schema(),"task_id":id_schema(),"agent_id":id_schema(),"offset":{"type":"integer","minimum":0,"maximum":100000},"limit":{"type":"integer","minimum":1,"maximum":50}}),
@@ -188,6 +195,24 @@ pub fn tools() -> Vec<Tool> {
             false,
         ),
         tool(
+            "scout_list_projects",
+            "List the project IDs this user has started jobs in or configured in settings, most recently used first, with each project's label, job and run counts, and the model and limits a new run in it would use (model.source is project or default). A project is any UUID passed as project_id; to start a new one, use a new UUID (scout_new_request_id can allocate one). No model call.",
+            schema(json!({}), &[]),
+            true,
+            false,
+            true,
+            false,
+        ),
+        tool(
+            "scout_get_project",
+            "Read what a new run in one project would use: its model (with model.source project or default), navigation model and resolved limits, plus its job and run counts. Works for a project with no runs yet. No model call.",
+            schema(json!({"project_id":id_schema()}), &["project_id"]),
+            true,
+            false,
+            true,
+            false,
+        ),
+        tool(
             "scout_new_request_id",
             "Allocate a command UUID when the client cannot generate one. Save and reuse it for command retries.",
             schema(json!({}), &[]),
@@ -219,9 +244,9 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_start_exploration",
-            "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default. continue_from_run_id carries on from a failed, interrupted or cancelled exploration instead of starting again at the entry page.",
+            "Queue URL-only exploration. Can interact with and change data on the target site and may incur model usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. The model is model if given, else the project's model for project_id (see scout_list_projects / scout_get_project), else the saved default; the job records which in settings.modelSource. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default. continue_from_run_id carries on from a failed, interrupted or cancelled exploration instead of starting again at the entry page.",
             schema(
-                json!({"job_id":id_schema(),"project_id":id_schema(),"task_id":id_schema(),"url":{"type":"string","maxLength":2048},"viewport_profile":choice(&["desktop","tablet","mobile"]),"auth_mode":choice(&["auto","sign_in","public"]),"session_id":id_schema(),"auto_reproduce":{"type":"boolean"},"app_memory":{"type":"boolean"},"continue_from_run_id":id_schema()}),
+                json!({"job_id":id_schema(),"project_id":id_schema(),"task_id":id_schema(),"url":{"type":"string","maxLength":2048},"viewport_profile":choice(&["desktop","tablet","mobile"]),"auth_mode":choice(&["auto","sign_in","public"]),"session_id":id_schema(),"auto_reproduce":{"type":"boolean"},"app_memory":{"type":"boolean"},"continue_from_run_id":id_schema(),"model":model()}),
                 &["job_id", "url"],
             ),
             false,
@@ -339,9 +364,9 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_reproduce_candidate",
-            "Queue the existing fresh-browser suspect reproduction. Can change data on the target site and may consume configured model usage. Stable job_id required; server eligibility/deduplication rules still apply.",
+            "Queue the existing fresh-browser suspect reproduction. Can change data on the target site and may consume model usage. Stable job_id required; server eligibility/deduplication rules still apply. model optionally runs this reproduction on its own model.",
             schema(
-                json!({"job_id":id_schema(),"source_action_id":id_schema()}),
+                json!({"job_id":id_schema(),"source_action_id":id_schema(),"model":model()}),
                 &["job_id", "source_action_id"],
             ),
             false,

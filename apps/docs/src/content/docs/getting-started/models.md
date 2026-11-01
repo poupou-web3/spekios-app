@@ -41,6 +41,18 @@ In the workspace, open **Settings → Models**. Under **Your models**, pick a li
 
 Defaults are append-only revisions. A newly admitted job freezes its effective settings; retries preserve the original admission. Your model list is saved with the defaults, but jobs do not freeze it.
 
+## Choose a model per project or per run
+
+A run uses, in order of precedence:
+
+1. **The model chosen for that run.** In the workspace, open the options under the URL field and pick a **Model**. Agents and the API send `model` with the job: `{"provider": "anthropic", "model": "claude-sonnet-5-5"}`, optionally with `free_only` and `navigation_model`. Run again and Continue keep a run's own choice.
+2. **Its project's model.** Under **Settings → Models → Project models**, give a project ID (the UUID agents send as `project_id`) a name, an exploration model and a navigation model from your list. A test started in the workspace can pick that project under its options.
+3. **The exploration model** in **Models in use**.
+
+The job records where its model came from in `settings.modelSource` (`run`, `project` or `default`), and the run page says so next to the model. Limit overrides for a model match the model the run ends up using. **GET /v1/projects**, **scout_list_projects** and **scout_get_project** show the model and limits a new run in each project would use, so agents can look up project IDs before starting work.
+
+Free-only stays on for a project or run choice unless it picks a paid OpenRouter model, and when **Restrict OpenRouter to free model IDs** is on the workspace only offers free OpenRouter models there. A free-only choice never inherits a paid OpenRouter navigation model; the run uses one model instead.
+
 Provider keys and allowed origins remain environment-level configuration. Saving a GUI preference does not alter either.
 
 ## OpenRouter free-only mode

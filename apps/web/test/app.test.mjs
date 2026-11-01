@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,flowView,continuedNotice,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessNotifications,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,flowView,continuedNotice,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessNotifications,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic,launchModel,launchChoices,canStart};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{
@@ -428,4 +428,43 @@ test('runs show input, output and total tokens with a cost estimated from model 
   assert.match(ui.runUsage({attempts:0}),/No model calls/);assert.match(ui.runUsage(undefined),/—/);
   ui.state.runs=[{run_id:'11111111-1111-4111-8111-111111111111',target_url:'https://a.test',lifecycle:'completed',config:{},model_usage:usage,summary:{actions:3}}];
   ui.state.websitePage='tests';assert.match(ui.home(),/<th>Model usage<\/th>[\s\S]*1,250,340/);
+});
+
+test('a test can run under a project and on its own model; readiness follows the model it will use',()=>{
+  const ui=view(),project='11111111-1111-4111-8111-111111111111',fields=new Map([['url','app.test'],['viewport_profile','desktop']]);
+  Object.assign(ui.state,{lastUpdatedAt:new Date(),workers:[{available:true}],providers:{gateway_ready:true,providers:[{provider:'openrouter',configured:true},{provider:'anthropic',configured:true},{provider:'openai',configured:false}]},
+    settings:{provider:'openrouter',model:'openrouter/free',freeOnly:true,savedModels:[{provider:'anthropic',model:'claude-sonnet-5-5',label:'Sonnet'},{provider:'openai',model:'gpt-6.1-sol'},{provider:'openrouter',model:'vendor/paid'}],
+      projectModels:[{projectId:project,label:'Shop <b>',provider:'anthropic',model:'claude-sonnet-5-5',freeOnly:true}],limitOverrides:[{projectId:'22222222-2222-4222-8222-222222222222',limits:{maxActions:5}}]}});
+  let request=ui.explorationRequest(fields);
+  assert.equal(request.project_id,undefined);assert.equal(request.model,undefined,'Defaults stay omitted.');
+  const html=ui.launchChoices();
+  assert.match(html,/id="launch-project"[\s\S]*Shop &lt;b&gt; · claude-sonnet-5-5[\s\S]*22222222/);
+  assert.match(html,/id="launch-model"[\s\S]*openrouter\/free \(default\)/);
+  assert.doesNotMatch(html,/vendor\/paid/,'Free-only hides paid OpenRouter models.');
+  ui.state.launchProject=project;
+  assert.deepEqual({...ui.launchModel()},{provider:'anthropic',model:'claude-sonnet-5-5',label:'claude-sonnet-5-5',source:'project'});
+  assert.match(ui.launchChoices(),/claude-sonnet-5-5 \(project\)/);
+  assert.match(ui.launchStatus(),/claude-sonnet-5-5 \(project model\)/);
+  request=ui.explorationRequest(fields);assert.equal(request.project_id,project);assert.equal(request.model,undefined,'The server resolves the project model.');
+  ui.state.launchModel='openai|gpt-6.1-sol';
+  assert.equal(ui.canStart(),false,'An unconfigured provider for this test blocks the start.');
+  assert.match(ui.launchStatus(),/OpenAI is not configured[\s\S]*under the options below/);
+  ui.state.launchModel='anthropic|claude-sonnet-5-5';assert.equal(ui.canStart(),true);
+  request=ui.explorationRequest(fields);
+  assert.deepEqual({...request.model},{provider:'anthropic',model:'claude-sonnet-5-5',free_only:true});
+  ui.state.launchProject='33333333-3333-4333-8333-333333333333';ui.state.launchModel='openrouter|vendor/paid';
+  request=ui.explorationRequest(fields);
+  assert.equal(request.project_id,undefined,'A project no longer in settings is not sent.');
+  assert.equal(request.model,undefined,'A model hidden by free-only is not sent.');
+  ui.state.settings={...ui.state.settings,freeOnly:false};
+  assert.deepEqual({...ui.explorationRequest(fields).model},{provider:'openrouter',model:'vendor/paid',free_only:false},'A paid OpenRouter pick turns free-only off for this test.');
+  ui.state.settings={provider:'openrouter',model:'openrouter/free'};
+  assert.equal(ui.launchChoices(),'','Nothing to choose without saved models or projects.');
+});
+
+test('the run summary says when its model came from the project or was chosen for the run',()=>{
+  const ui=view(),report=source=>({run:{run_id:'r',target_url:'https://app.test',lifecycle:'completed',created_at:'2026-11-01T00:00:00Z',config:{runtime_version:'explorer-v1',model_connection:{model:'claude-sonnet-5-5',...(source?{modelSource:source}:{})}}},actions:[],captures:[],reproductions:[]});
+  for(const [source,text] of [['project','claude-sonnet-5-5 · project model'],['run','claude-sonnet-5-5 · chosen for this run'],['default','claude-sonnet-5-5</span>'],[undefined,'claude-sonnet-5-5</span>']]){
+    Object.assign(ui.state,{report:report(source),runId:'r'});assert.ok(ui.runView().includes(text),String(source));
+  }
 });

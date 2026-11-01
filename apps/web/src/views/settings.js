@@ -27,16 +27,28 @@ export const STRATEGY=[['breadth','New territory'],['depth','Deep journeys'],['r
 export const SETTINGS_SECTIONS=[['models','Models','bolt','Which models explore, and the list you pick them from'],['exploration','Exploration','flow','Screen size, strategy and automatic rechecks'],
   ['limits','Limits','clock','When explorations stop, per project or model'],['data','Memory & sessions','database','What runs remember and saved app sign-ins'],['appearance','Appearance','image','Light or dark theme in this browser']];
 // The draft fields each form section edits, for its unsaved-changes mark and error links.
-const SECTION_FIELDS={models:['provider','model','navigation_model','saved_models','free_only','reuse_rankings'],exploration:['viewport_profile','exploration_strategy','auto_reproduce','max_auto_reproductions','max_auto_replay_actions'],
+const SECTION_FIELDS={models:['provider','model','navigation_model','saved_models','project_models','free_only','reuse_rankings'],exploration:['viewport_profile','exploration_strategy','auto_reproduce','max_auto_reproductions','max_auto_replay_actions'],
   limits:[...LIMITS.map(([key])=>key),'limit_overrides'],data:['app_memory']};
 export function settingsSection(){return SETTINGS_SECTIONS.some(([key])=>key===state.settingsSection)?state.settingsSection:SETTINGS_SECTIONS[0][0];}
 export function settingsSectionTitle(){return SETTINGS_SECTIONS.find(([key])=>key===settingsSection())[1];}
-const MAX_OVERRIDES=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,MODEL_ID=/^[A-Za-z0-9/:._-]{1,200}$/,CONTROL=/[\x00-\x1f\x7f-\x9f]/;
+const MAX_OVERRIDES=50,MAX_PROJECT_MODELS=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,MODEL_ID=/^[A-Za-z0-9/:._-]{1,200}$/,CONTROL=/[\x00-\x1f\x7f-\x9f]/;
 // Model IDs never contain "|", so a provider and model ID make one option value.
 const modelChoice=(provider,model)=>`${provider}|${model}`;
 // A link to Settings → Models that opens at one model's prices (see focusPriceTarget).
 export function priceLink(provider,model){return `#/settings/models/price/${encodeURIComponent(modelChoice(provider,model))}`;}
-const freeModel=model=>model==='openrouter/free'||model.endsWith(':free');
+export const freeModel=model=>model==='openrouter/free'||String(model).endsWith(':free');
+const splitChoice=value=>{const [provider,...rest]=String(value).split('|');return [provider,rest.join('|')];};
+const paidOpenRouter=(provider,model)=>provider==='openrouter'&&!freeModel(String(model).trim());
+// A project's model row. navigation is 'inherit' (the default navigation model), 'none' (the project's model does everything) or a listed model.
+const projectRow=(p={})=>({project_id:p.projectId||'',label:p.label||'',choice:p.provider&&p.model?modelChoice(p.provider,p.model):'',
+  navigation:!p||!Object.hasOwn(p,'navigationModel')?'inherit':p.navigationModel?modelChoice(p.navigationModel.provider,p.navigationModel.model):'none'});
+// Free-only stays on unless the project deliberately uses a paid OpenRouter model.
+export function projectPayload(row){
+  const [provider,model]=splitChoice(row.choice),navigation=['inherit','none'].includes(row.navigation)?null:splitChoice(row.navigation);
+  const item={project_id:row.project_id.trim(),...(row.label.trim()?{label:row.label.trim()}:{}),provider,model,free_only:!(paidOpenRouter(provider,model)||navigation&&paidOpenRouter(...navigation))};
+  if(row.navigation!=='inherit')item.navigation_model=navigation?{provider:navigation[0],model:navigation[1]}:null;
+  return item;
+}
 // The saved model list, plus the models in use so they stay available after switching away.
 function modelList(saved,inUse){
   const list=[],seen=new Set();
@@ -45,10 +57,13 @@ function modelList(saved,inUse){
   for(const [provider,model] of inUse)add(provider,model,'');
   return list;
 }
-const inUseModels=values=>[[values.provider,values.model],[values.navigation_model.provider,values.navigation_model.model]];
+// Models project rows use: each project's model and any listed navigation model.
+const projectChoices=rows=>rows.flatMap(row=>[row.choice,row.navigation]).filter(value=>value&&!['inherit','none'].includes(value)).map(splitChoice);
+const inUseModels=values=>[[values.provider,values.model],[values.navigation_model.provider,values.navigation_model.model],...projectChoices(values.project_models)];
 export function modelRoles(values,m){
   const nav=values.navigation_model;
-  return [...(values.provider===m.provider&&values.model.trim()===m.model?['Exploration']:[]),...(nav.provider===m.provider&&nav.model.trim()===m.model?['Navigation']:[])];
+  return [...(values.provider===m.provider&&values.model.trim()===m.model?['Exploration']:[]),...(nav.provider===m.provider&&nav.model.trim()===m.model?['Navigation']:[]),
+    ...(projectChoices(values.project_models).some(([provider,model])=>provider===m.provider&&model===m.model)?['Project']:[])];
 }
 // True, false, or null while provider status is unknown.
 function providerReady(provider){const p=(state.providers.providers||[]).find(x=>x.provider===provider);return p?p.configured===true:null;}
@@ -60,10 +75,10 @@ export function overridePayload(row){
   return item;
 }
 export function configurationValues(settings=state.settings){
-  const provider=settings.provider||'openrouter',navigation_model={provider:settings.navigationModel?.provider||'',model:settings.navigationModel?.model||''};
+  const provider=settings.provider||'openrouter',navigation_model={provider:settings.navigationModel?.provider||'',model:settings.navigationModel?.model||''},project_models=(Array.isArray(settings.projectModels)?settings.projectModels:[]).map(projectRow);
   return {provider,model:settings.model||'',...Object.fromEntries(LIMITS.map(([key,camel])=>[key,settings[camel]??null])),
     stop_after_idle_actions:settings.stopAfterIdleActions===undefined?50:settings.stopAfterIdleActions,limit_overrides:(settings.limitOverrides||[]).map(overrideRow),exploration_strategy:{...DEFAULT_STRATEGY,...settings.explorationStrategy},reuse_rankings:settings.reuseRankings!==false,navigation_model,
-    saved_models:modelList((Array.isArray(settings.savedModels)?settings.savedModels:[]).map(m=>({...m,...Object.fromEntries(PRICE_FIELDS.map(([key,camel])=>[key,m?.[camel]??null]))})),[[provider,settings.model],[navigation_model.provider,navigation_model.model]]),viewport_profile:settings.viewportProfile||'desktop',free_only:settings.provider==='openrouter'&&settings.freeOnly===true,auto_reproduce:settings.autoReproduce===true,max_auto_reproductions:settings.maxAutoReproductions??2,max_auto_replay_actions:settings.maxAutoReplayActions??12,app_memory:settings.appMemory!==false};
+    saved_models:modelList((Array.isArray(settings.savedModels)?settings.savedModels:[]).map(m=>({...m,...Object.fromEntries(PRICE_FIELDS.map(([key,camel])=>[key,m?.[camel]??null]))})),[[provider,settings.model],[navigation_model.provider,navigation_model.model],...projectChoices(project_models)]),project_models,viewport_profile:settings.viewportProfile||'desktop',free_only:settings.provider==='openrouter'&&settings.freeOnly===true,auto_reproduce:settings.autoReproduce===true,max_auto_reproductions:settings.maxAutoReproductions??2,max_auto_replay_actions:settings.maxAutoReplayActions??12,app_memory:settings.appMemory!==false};
 }
 // The add-a-model fields start on the first provider this server can use.
 const newModel=(provider=MODEL_PROVIDERS.find(p=>providerReady(p))||MODEL_PROVIDERS[0])=>({provider,model:'',label:'',input_usd_per_million:null,output_usd_per_million:null});
@@ -88,6 +103,19 @@ export function configurationIssue(values){
     if(nav.provider==='openrouter'&&values.free_only&&!freeModel(nav.model.trim()))return ['models','Free-only also applies to the navigation model: use openrouter/free or a model ID ending in :free.'];
   }
   if(values.saved_models.length>MAX_SAVED_MODELS)return ['models',`Keep at most ${MAX_SAVED_MODELS} models in your list.`];
+  if(values.project_models.length>MAX_PROJECT_MODELS)return ['models',`Set models for at most ${MAX_PROJECT_MODELS} projects.`];
+  const projects=new Set();
+  for(const [index,row] of values.project_models.entries()){
+    const label=`Project model ${index+1}: `,id=row.project_id.trim().toLowerCase();
+    if(!UUID.test(id))return ['models',label+'the project ID must be a UUID.'];
+    if(id==='00000000-0000-0000-0000-000000000000')return ['models',label+'the project ID cannot be all zeros.'];
+    if(projects.has(id))return ['models',label+'another row already sets this project.'];projects.add(id);
+    if(CONTROL.test(row.label)||[...row.label.trim()].length>MAX_MODEL_LABEL)return ['models',label+`keep the name to ${MAX_MODEL_LABEL} characters on one line.`];
+    const [provider,model]=splitChoice(row.choice);
+    if(!MODEL_PROVIDERS.includes(provider)||!MODEL_ID.test(model))return ['models',label+'choose a model from your list.'];
+    const navigation=['inherit','none'].includes(row.navigation)?null:splitChoice(row.navigation);
+    if(values.free_only&&(paidOpenRouter(provider,model)||navigation&&paidOpenRouter(...navigation)))return ['models',label+'free-only is on, so OpenRouter models must be openrouter/free or end in :free.'];
+  }
   const listed=new Set();
   for(const m of values.saved_models){
     if(!MODEL_PROVIDERS.includes(m.provider)||CONTROL.test(m.model)||!MODEL_ID.test(m.model.trim())||CONTROL.test(m.label)||[...m.label.trim()].length>MAX_MODEL_LABEL)return ['models',`Your model list has an entry that cannot be saved: ${m.model}. Remove it.`];
@@ -129,6 +157,14 @@ export function updateConfiguration(field,value){
   // A saved model's prices are edited in its row.
   const saved=/^saved\.(\d+)\.(input_usd_per_million|output_usd_per_million)$/.exec(field);
   if(saved){const m=draft.values.saved_models[Number(saved[1])];if(!m)return false;m[saved[2]]=value;draft.added='';return touched(draft);}
+  // A project row: its ID and name are typed; its models are picked from the saved list.
+  const project=/^project\.(\d+)\.(project_id|label|choice|navigation)$/.exec(field);
+  if(project){
+    const row=draft.values.project_models[Number(project[1])],key=project[2];if(!row)return false;
+    const listed=draft.values.saved_models.some(m=>modelChoice(m.provider,m.model)===value);
+    if(key==='choice'&&!listed||key==='navigation'&&!['inherit','none'].includes(value)&&!listed)return false;
+    row[key]=value;return touched(draft);
+  }
   const override=/^override\.(\d+)\.(\w+)$/.exec(field);
   const nested=override?draft.values.limit_overrides[Number(override[1])]:/^strategy\.\w+$/.test(field)?draft.values.exploration_strategy:/^navigation\.\w+$/.test(field)?draft.values.navigation_model:null,key=override?override[2]:field.slice(field.indexOf('.')+1);
   if(override||nested){if(!nested||!Object.hasOwn(nested,key))return false;nested[key]=value;return touched(draft);}
@@ -208,6 +244,12 @@ export function editOverrides(add,index){
   if(add){if(draft.values.limit_overrides.length<MAX_OVERRIDES)draft.values.limit_overrides.push(overrideRow());}else draft.values.limit_overrides.splice(index,1);
   touched(draft);
 }
+export function editProjectModels(add,index){
+  const draft=configurationDraft();if(draft.saving)return;
+  if(add){if(draft.values.project_models.length<MAX_PROJECT_MODELS)draft.values.project_models.push({...projectRow(),choice:draft.values.model.trim()?modelChoice(draft.values.provider,draft.values.model.trim()):''});}
+  else draft.values.project_models.splice(index,1);
+  touched(draft);
+}
 export function rebaseConfiguration(discard=false){
   const draft=configurationDraft();if(draft.saving)return;
   if(discard){state.configurationDraft=null;configurationDraft();return;}
@@ -227,7 +269,7 @@ export async function saveConfiguration(){
   const numbers=Object.fromEntries([...LIMITS.map(([key])=>[key,commitNumber(draft.values[key])]),['max_auto_reproductions',commitNumber(draft.values.max_auto_reproductions)],['max_auto_replay_actions',commitNumber(draft.values.max_auto_replay_actions)]]);
   const exploration_strategy={...draft.values.exploration_strategy};for(const [key] of STRATEGY)exploration_strategy[key]=commitNumber(exploration_strategy[key]);
   const saved_models=modelList(draft.values.saved_models,inUseModels(draft.values)).map(m=>({provider:m.provider,model:m.model,...(m.label?{label:m.label}:{}),...Object.fromEntries(PRICE_FIELDS.map(([key])=>[key,commitNumber(m[key])]).filter(([,price])=>price!==null))}));
-  const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,...numbers,exploration_strategy,saved_models,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),
+  const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,...numbers,exploration_strategy,saved_models,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),project_models:draft.values.project_models.map(projectPayload),
     navigation_model:draft.values.navigation_model.provider?{provider:draft.values.navigation_model.provider,model:draft.values.navigation_model.model.trim()}:null};
   try{
     const saved=await (await api('/v1/exploration-settings',body)).json();if(!sameSession()||state.configurationDraft!==draft)return;
@@ -288,10 +330,18 @@ function modelsSection(v){
   const draft=configurationDraft(),a=draft.adding;
   const add=`<div class="model-add" role="group" aria-labelledby="model-add-title"><h4 id="model-add-title">Add a model</h4><div class="model-add-fields"><label for="new-model-provider"><span>Provider</span><select id="new-model-provider" data-new-model-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${a.provider===p?'selected':''}>${providerName(p)}${providerReady(p)===false?' (not configured)':''}</option>`).join('')}</select></label><label for="new-model-model"><span>Model ID</span><input id="new-model-model" data-new-model-field="model" value="${esc(a.model)}" maxlength="200" autocomplete="off" spellcheck="false" placeholder="${esc(PLACEHOLDERS[a.provider]||'The ID your provider uses')}" list="new-model-suggestions"${draft.addError?' aria-invalid="true" aria-describedby="new-model-error"':''}><datalist id="new-model-suggestions">${catalogModels(a.provider).filter(entry=>!v.saved_models.some(m=>m.provider===a.provider&&m.model===entry.model)).map(entry=>`<option value="${esc(entry.model)}">${esc(entry.label)}</option>`).join('')}</datalist></label><label for="new-model-label"><span>Name <small class="small">optional</small></span><input id="new-model-label" data-new-model-field="label" value="${esc(a.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in model menus"></label>${prices('new-model','data-new-model-field','',a,knownPrice(a.provider,String(a.model).trim()))}<button type="button" class="button" data-action="add-saved-model" ${v.saved_models.length>=MAX_SAVED_MODELS?'disabled':''}>${icon('plus')}Add model</button></div>${catalogPicker(a.provider,v.saved_models,v.saved_models.length>=MAX_SAVED_MODELS)}${draft.addError?`<p id="new-model-error" class="settings-feedback error" role="alert">${esc(draft.addError)}</p>`:draft.added?`<p class="small muted model-add-status" role="status">${esc(draft.added)}</p>`:''}</div>`;
   const providers=(state.providers.providers||[]).map(p=>`<li><span>${esc(providerName(p.provider))}</span><span class="pill ${p.configured?'green':''}">${p.configured?'Available':'Not configured'}</span></li>`).join('');
-  return card('models-in-use','Models in use','New explorations use these. Queued and running jobs keep the models they started with.',inUse)
+  return card('models-in-use','Models in use','New explorations use these unless their project or the run chooses another. Queued and running jobs keep the models they started with.',inUse)
+    +projectModelsCard(v)
     +card('models-list','Your models',`Add the model IDs you want to switch between, up to ${MAX_SAVED_MODELS}. Listed models include a name and a standard price. Prices are US dollars per million input and output tokens; leave a price empty to use the known one. API keys stay in the server configuration.`,`${rows?`<ul class="model-list">${rows}</ul>`:'<p class="small muted">No models yet. Add one below.</p>'}${add}`,`<span class="small muted">${number(v.saved_models.length)} of ${MAX_SAVED_MODELS}</span>`)
     +card('models-cost','Cost controls','',`${toggle('free_only','Restrict OpenRouter to free model IDs',v.free_only,v.provider!=='openrouter')}<p class="small muted">${v.provider==='openrouter'?'Use openrouter/free or a model ending in :free, for exploration and navigation. Provider availability and rate limits still apply.':'Applies when the exploration model is on OpenRouter. Direct OpenAI, Anthropic and Meta AI calls use their own API billing.'}</p>${toggle('reuse_rankings','Reuse a screen’s ranking from earlier runs when it hasn’t changed',v.reuse_rankings)}<p class="small muted">Skips the planning request on a screen whose address pattern, text and controls match one an earlier run ranked with the same model. Needs app memory. A ranking is reused up to 10 times, then asked for again. Screens where the model chose to type text, and runs with a testing focus, always get a fresh ranking.</p>`)
     +card('models-providers','Provider access',`Your Spekios administrator manages provider credentials; they are never shown here.${state.providers.test_mode?' This server currently returns simulated model responses.':''}`,providers?`<ul class="provider-status">${providers}</ul>`:'<p class="small muted">No provider status is available yet. Refresh the workspace.</p>');
+}
+// One model per project. A run with that project ID uses it unless the run picks its own model.
+function projectModelsCard(v){
+  const rows=v.project_models.map((row,i)=>{const id=`project-${i}`,label=row.label.trim()||`Project ${i+1}`;
+    return `<fieldset class="configuration-override"><legend>${esc(label)}</legend><div class="configuration-grid"><label for="${id}-project_id"><span>Project ID</span><input id="${id}-project_id" data-configuration-field="project.${i}.project_id" value="${esc(row.project_id)}" maxlength="36" placeholder="UUID your agent sends as project_id" autocomplete="off" spellcheck="false"></label><label for="${id}-label"><span>Name <small class="small">optional</small></span><input id="${id}-label" data-configuration-field="project.${i}.label" value="${esc(row.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in project menus"></label><label for="${id}-choice"><span>Exploration model</span><select id="${id}-choice" data-configuration-field="project.${i}.choice">${row.choice?'':'<option value="" selected disabled>Choose a model</option>'}${modelOptions(v.saved_models,row.choice)}</select></label><label for="${id}-navigation"><span>Navigation model</span><select id="${id}-navigation" data-configuration-field="project.${i}.navigation"><option value="inherit" ${row.navigation==='inherit'?'selected':''}>Default navigation model</option><option value="none" ${row.navigation==='none'?'selected':''}>Same as this project’s model</option>${modelOptions(v.saved_models,['inherit','none'].includes(row.navigation)?'':row.navigation)}</select></label></div><button type="button" class="button quiet" data-action="remove-project-model" data-index="${i}">${icon('close')}Remove project model</button></fieldset>`;}).join('');
+  return card('models-projects','Project models',`Runs that carry a project ID use that project’s model instead of the exploration model above. Agents send the project ID with each run (they can list projects and the model each would use); a test started here can pick a project under its options. A single run can still choose its own model. Limit overrides follow whichever model a run ends up using.`,
+    `${rows||'<p class="small muted">No project models. Every project uses the models above.</p>'}<button type="button" class="button" data-action="add-project-model" ${v.project_models.length>=MAX_PROJECT_MODELS?'disabled':''}>${icon('plus')}Add project model</button>`,v.project_models.length?`<span class="small muted">${number(v.project_models.length)} of ${MAX_PROJECT_MODELS}</span>`:'');
 }
 function explorationSection(v){
   const split=v.exploration_strategy,total=STRATEGY.reduce((sum,[key])=>sum+(Number.isInteger(split[key])?split[key]:0),0);

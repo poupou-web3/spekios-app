@@ -210,6 +210,8 @@ pub fn router(state: AppState) -> Router {
             "/v1/exploration-settings",
             get(jobs::exploration_settings).post(jobs::save_exploration_settings),
         )
+        .route("/v1/projects", get(jobs::list_projects))
+        .route("/v1/projects/{project_id}", get(jobs::get_project))
         .route(
             "/v1/browser-jobs/{job_id}/cancel",
             axum::routing::post(jobs::cancel_job),
@@ -719,6 +721,7 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
         "suspect_reproduction":{"entrypoints":["recorder_cli","browser_jobs_api","workspace_ui"],"fresh_browser":true,"attempts_per_source_action":1,"automatic_confirmation":false},
         "automatic_reproduction":{"enabled":state.jobs.is_some(),"opt_in":true,"recursive":false,"automatic_confirmation":false,"max_cases":effective_settings["maxAutoReproductions"],"max_replay_actions":effective_settings["maxAutoReplayActions"],"durable_cancellation":true},
         "exploration_settings":{"editable":state.jobs.is_some(),"revision":effective_settings["settingsRevision"],"origins_editable":false,"credentials_editable":false},
+        "model_selection":{"configurable_per":["user","project","run"],"precedence":["run","project","user"],"run_field":"model","project_key":"project_id","projects":"/v1/projects","project":"/v1/projects/{project_id}","job_records":"settings.modelSource"},
         "finding_review":{"enabled":state.reviews.is_some(),"append_only":true,"optimistic_concurrency":true,"confirmation_requires_reproduction":true,"training_approval":false},
         "workspace_ui":true,"browser_job_submission":state.jobs.is_some(),
         "agent_interface":{"version":1,"mcp_endpoint":"/mcp","http_catalog":"/v1/agent/tools","stdio_bridge":true,"coding_agent_report":true,"asynchronous_progress":true,"human_review_write":false,"external_browser_driver":false},

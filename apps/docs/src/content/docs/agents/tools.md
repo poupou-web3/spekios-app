@@ -1,8 +1,8 @@
 ---
 {
   "title": "MCP and HTTP tool reference",
-  "description": "Browse the thirty-two ScoutQA tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
-  "reviewed": "2026-10-31",
+  "description": "Browse the thirty-four ScoutQA tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
+  "reviewed": "2026-11-01",
   "sidebar": {
     "order": 5
   }
@@ -16,6 +16,8 @@ The [downloadable catalog](../../mcp-tools.json) is a build-time snapshot. A run
 
 - [scout_status](../reference/scout_status/) — Inspect readiness and defaults.
 - [scout_new_request_id](../reference/scout_new_request_id/) — Allocate a command UUID.
+- [scout_list_projects](../reference/scout_list_projects/) — Project IDs and the model each would use.
+- [scout_get_project](../reference/scout_get_project/) — One project's model and limits, even before its first run.
 - [scout_start_exploration](../reference/scout_start_exploration/) — Submit a URL.
 - [scout_reproduce_candidate](../reference/scout_reproduce_candidate/) — Request a fresh suspect replay.
 - [scout_cancel_work](../reference/scout_cancel_work/) — Request durable cancellation.

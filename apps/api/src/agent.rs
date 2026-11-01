@@ -167,12 +167,20 @@ struct StartArgs {
     auto_reproduce: Option<bool>,
     app_memory: Option<bool>,
     continue_from_run_id: Option<Uuid>,
+    /// Validated by job admission, like the HTTP request's model field.
+    model: Option<Value>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReproduceArgs {
     job_id: Uuid,
     source_action_id: Uuid,
+    model: Option<Value>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectArgs {
+    project_id: Uuid,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -653,6 +661,7 @@ async fn dispatch_inner(
                 ("auto_reproduce", json!(a.auto_reproduce)),
                 ("app_memory", json!(a.app_memory)),
                 ("continue_from_run_id", json!(a.continue_from_run_id)),
+                ("model", json!(a.model)),
             ] {
                 if !v.is_null() {
                     data[k] = v;
@@ -757,11 +766,25 @@ async fn dispatch_inner(
             let a: ReproduceArgs = args(input)?;
             checked(a.job_id)?;
             checked(a.source_action_id)?;
-            let submission = serde_json::from_value(
-                json!({"job_id":a.job_id,"kind":"reproduce","source_action_id":a.source_action_id}),
-            )
-            .expect("typed submission");
+            let mut data =
+                json!({"job_id":a.job_id,"kind":"reproduce","source_action_id":a.source_action_id});
+            if let Some(model) = a.model {
+                data["model"] = model;
+            }
+            let submission =
+                serde_json::from_value(data).map_err(|_| invalid("Invalid model choice."))?;
             decode(jobs::submit(ScopedState(state.clone()), Ok(Json(submission))).await).await
+        }
+        "scout_list_projects" => {
+            let _: Empty = args(input)?;
+            decode(jobs::list_projects(ScopedState(state.clone())).await).await
+        }
+        "scout_get_project" => {
+            let a: ProjectArgs = args(input)?;
+            decode(
+                jobs::get_project(ScopedState(state.clone()), Path(checked(a.project_id)?)).await,
+            )
+            .await
         }
         "scout_cancel_work" => {
             let a: CancelArgs = args(input)?;
@@ -1035,7 +1058,18 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let value = body(response).await;
         let catalog = list(&value["result"]["tools"]);
-        assert_eq!(catalog.len(), 32);
+        assert_eq!(catalog.len(), 34);
+        for name in ["scout_list_projects", "scout_get_project"] {
+            let t = catalog.iter().find(|t| t["name"] == name).unwrap();
+            assert_eq!(t["annotations"]["readOnlyHint"], true);
+        }
+        for name in ["scout_start_exploration", "scout_reproduce_candidate"] {
+            let t = catalog.iter().find(|t| t["name"] == name).unwrap();
+            assert_eq!(
+                t["inputSchema"]["properties"]["model"]["required"],
+                json!(["provider", "model"])
+            );
+        }
         assert!(
             catalog
                 .iter()

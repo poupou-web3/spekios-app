@@ -416,3 +416,15 @@ test('Continue exploration remains available in the website overview and scoped 
   ui.state.websitePage='tests';assert.match(ui.home(),/data-action="continue-run" data-id="stopped"/);
   await click(ui,'continue-run','stopped');assert.equal(posts[0].continue_from_run_id,'stopped');assert.equal(posts[0].target_url,'http://larchwood:8084/shop');assert.equal(ui.state.websiteOrigin,'http://larchwood:8084');
 });
+
+test('run again and continue keep the project and the model chosen for that run',()=>{
+  const ui=workspace(),model={provider:'anthropic',model:'claude-sonnet-5-5',free_only:true};
+  ui.state.jobs=[{job_id:'j',status:'cancelled',run_id:'stopped',project_id:'p',settings:{viewportProfile:'desktop'},request:{kind:'explore',target_url:'https://stopped.test',model}},
+    {job_id:'r',status:'failed',request:{kind:'reproduce',source_action_id:'a',model}}];
+  const stopped=run('stopped',{lifecycle:'cancelled',target_url:'https://stopped.test'});
+  assert.deepEqual({...ui.restartRequest('run',stopped).model},model);assert.equal(ui.restartRequest('run',stopped).project_id,'p');
+  assert.deepEqual({...ui.continueRequest(stopped).model},model);
+  assert.deepEqual({...ui.restartRequest('job',ui.state.jobs[1]).model},model);
+  ui.state.jobs[0].request={kind:'explore',target_url:'https://stopped.test'};
+  assert.equal(ui.restartRequest('run',stopped).model,undefined,'Without a run choice the new job resolves its model again.');
+});

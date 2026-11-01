@@ -19,7 +19,7 @@ The same loop is available from the [workspace](../platform/workspace.md) at **h
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `SCOUT_EXPLORER_PROVIDER` | `openrouter` | `openai`, `anthropic`, `openrouter`, or `meta` |
+| `SCOUT_EXPLORER_PROVIDER` | `openrouter` | `openai`, `anthropic`, `openrouter`, or `meta`. The initial default only: Settings can replace it per user, per project and per run |
 | `SCOUT_EXPLORER_MODEL` | `openrouter/free` | Model ID. OpenRouter defaults to `openrouter/free`; Meta defaults to `muse-wonder-1.0` |
 | `SCOUT_EXPLORER_FREE_ONLY` | `true` | OpenRouter free-route constraint; not applicable to direct OpenAI, Claude, or Meta billing |
 | `SCOUT_EXPLORER_MAX_ACTIONS` | empty | Server default for users without saved limits; empty means no limit. Integer 1–10000; includes navigation, returns and resumes |

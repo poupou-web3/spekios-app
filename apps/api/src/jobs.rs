@@ -149,6 +149,178 @@ impl NavigationModel {
         Ok(json!({"provider":self.provider,"model":model}))
     }
 }
+fn free_model(model: &str) -> bool {
+    model == "openrouter/free" || model.ends_with(":free")
+}
+/// One exploration model choice, shared by project models and per-run
+/// choices. Free-only applies to OpenRouter and is on unless turned off. The
+/// navigation model is optional: absent inherits, null means none.
+fn model_choice(
+    provider: &str,
+    model: &str,
+    free_only: Option<bool>,
+    navigation_model: &Option<Option<NavigationModel>>,
+    invalid: &'static str,
+) -> Result<Value, &'static str> {
+    let trimmed = model.trim();
+    if !valid_provider(provider) || model.chars().any(char::is_control) || !valid_model(trimmed) {
+        return Err(invalid);
+    }
+    let free_only = free_only.unwrap_or(true);
+    if free_only && provider == "openrouter" && !free_model(trimmed) {
+        return Err("free_only_requires_free_model");
+    }
+    let mut value = json!({"provider":provider,"model":trimmed,"free_only":free_only});
+    if let Some(navigation) = navigation_model {
+        value["navigation_model"] = match navigation {
+            Some(navigation) => navigation.normalize(free_only)?,
+            None => Value::Null,
+        };
+    }
+    Ok(value)
+}
+
+/// The model one run uses instead of its project's or the user's default.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelChoice {
+    provider: String,
+    model: String,
+    #[serde(default)]
+    free_only: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    navigation_model: Option<Option<NavigationModel>>,
+}
+impl ModelChoice {
+    /// The request form, kept in the job request so a retry must match it.
+    fn normalize(&self) -> Result<Value, &'static str> {
+        model_choice(
+            &self.provider,
+            &self.model,
+            self.free_only,
+            &self.navigation_model,
+            "invalid_model_choice",
+        )
+    }
+}
+
+/// The model every run of one project uses unless the run chooses its own.
+/// Project IDs are the opaque UUIDs agents send with a job; the optional
+/// label only names the project in lists.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectModel {
+    project_id: Uuid,
+    #[serde(default)]
+    label: Option<String>,
+    provider: String,
+    model: String,
+    #[serde(default)]
+    free_only: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    navigation_model: Option<Option<NavigationModel>>,
+}
+const MAX_PROJECT_MODELS: usize = 50;
+impl ProjectModel {
+    fn normalize(&self) -> Result<Value, &'static str> {
+        let invalid = "invalid_project_model";
+        let label = self.label.as_deref().unwrap_or("").trim();
+        if self.project_id.is_nil()
+            || label.chars().any(char::is_control)
+            || label.chars().count() > MAX_MODEL_LABEL_CHARS
+        {
+            return Err(invalid);
+        }
+        let choice = model_choice(
+            &self.provider,
+            &self.model,
+            self.free_only,
+            &self.navigation_model,
+            invalid,
+        )?;
+        let mut value = json!({"projectId":self.project_id,"provider":choice["provider"],"model":choice["model"],"freeOnly":choice["free_only"]});
+        if let Some(navigation) = choice.get("navigation_model") {
+            value["navigationModel"] = navigation.clone();
+        }
+        if !label.is_empty() {
+            value["label"] = json!(label);
+        }
+        Ok(value)
+    }
+}
+
+/// Puts one choice, in request (snake_case) or settings (camelCase) form,
+/// onto job settings. Free-only only constrains OpenRouter.
+fn apply_model(settings: &mut Value, choice: &Value) {
+    let field = |snake: &str, camel: &str| choice.get(snake).or_else(|| choice.get(camel));
+    let provider = choice["provider"].clone();
+    settings["freeOnly"] =
+        json!(provider == "openrouter" && field("free_only", "freeOnly") == Some(&json!(true)));
+    settings["provider"] = provider;
+    settings["model"] = choice["model"].clone();
+    if let Some(navigation) = field("navigation_model", "navigationModel") {
+        settings["navigationModel"] = navigation.clone();
+    }
+}
+
+/// The model a job uses, least specific first: the user's default, the
+/// project's model, then the one chosen for this run. The job keeps the
+/// result and where it came from, never the project list.
+fn resolve_model(settings: &mut Value, project_id: Option<Uuid>, run: Option<&Value>) {
+    let project = project_id.and_then(|id| {
+        settings["projectModels"]
+            .as_array()?
+            .iter()
+            .find(|p| p["projectId"] == json!(id))
+            .cloned()
+    });
+    let mut source = "default";
+    if let Some(project) = &project {
+        apply_model(settings, project);
+        source = "project";
+    }
+    if let Some(choice) = run {
+        apply_model(settings, choice);
+        source = "run";
+    }
+    // A free-only choice can inherit a paid OpenRouter navigation model from
+    // the defaults. Free-only never runs a paid model: use one model instead.
+    let navigation = &settings["navigationModel"];
+    if settings["freeOnly"] == true
+        && navigation["provider"] == "openrouter"
+        && !navigation["model"].as_str().is_some_and(free_model)
+    {
+        settings["navigationModel"] = Value::Null;
+    }
+    if let Some(object) = settings.as_object_mut() {
+        object.remove("projectModels");
+        object.insert("modelSource".into(), json!(source));
+    }
+}
+
+/// What a run in one project would use now: its model and resolved limits.
+/// A project with no runs or settings yet resolves to the defaults.
+fn project_settings(defaults: &Value, project_id: Uuid) -> Value {
+    let label = defaults["projectModels"].as_array().and_then(|list| {
+        list.iter()
+            .find(|p| p["projectId"] == json!(project_id))
+            .and_then(|p| p.get("label").cloned())
+    });
+    let mut settings = defaults.clone();
+    resolve_model(&mut settings, Some(project_id), None);
+    resolve_limits(&mut settings, Some(project_id));
+    let limits: serde_json::Map<String, Value> = LIMIT_KEYS
+        .iter()
+        .map(|key| ((*key).to_owned(), settings[*key].clone()))
+        .collect();
+    json!({
+        "project_id":project_id,"label":label,
+        "model":{"provider":settings["provider"],"model":settings["model"],"free_only":settings["freeOnly"],
+            "navigation_model":settings["navigationModel"],"source":settings["modelSource"]},
+        "limits":limits,"limit_overrides_applied":settings["limitOverridesApplied"]
+    })
+}
+
 pub fn default_strategy() -> Value {
     json!({"breadth":50,"depth":30,"rewalk":20,"adaptive":true})
 }
@@ -346,6 +518,9 @@ pub struct SettingsSubmission {
     /// Models to choose from on the settings page. Absent: an empty list.
     #[serde(default)]
     saved_models: Vec<SavedModel>,
+    /// The model for each project. Absent: every project uses the default.
+    #[serde(default)]
+    project_models: Vec<ProjectModel>,
     viewport_profile: String,
     free_only: bool,
     auto_reproduce: bool,
@@ -427,6 +602,22 @@ impl SettingsSubmission {
         {
             return Err("duplicate_saved_model");
         }
+        if self.project_models.len() > MAX_PROJECT_MODELS {
+            return Err("invalid_project_model");
+        }
+        let project_models = self
+            .project_models
+            .iter()
+            .map(ProjectModel::normalize)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut projects = std::collections::HashSet::new();
+        if !self
+            .project_models
+            .iter()
+            .all(|p| projects.insert(p.project_id))
+        {
+            return Err("duplicate_project_model");
+        }
         if !(1..=3).contains(&self.max_auto_reproductions)
             || !(1..=MAX_AUTO_REPLAY_ACTIONS).contains(&self.max_auto_replay_actions)
         {
@@ -452,7 +643,8 @@ impl SettingsSubmission {
                     "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
                     "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory,
                     "explorationStrategy":strategy,"reuseRankings":self.reuse_rankings,
-                    "navigationModel":navigation_model,"savedModels":saved_models
+                    "navigationModel":navigation_model,"savedModels":saved_models,
+                    "projectModels":project_models
                 });
                 settings.as_object_mut().unwrap().extend(limits);
                 settings
@@ -474,6 +666,7 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
             "maxCostUsd",
             "stopAfterIdleActions",
             "limitOverrides",
+            "projectModels",
             "explorationStrategy",
             "reuseRankings",
             "navigationModel",
@@ -556,6 +749,9 @@ pub struct Submission {
     issue_id: Option<Uuid>,
     #[serde(default)]
     deployment_ref: Option<String>,
+    /// This run's model. Absent: the project's model, else the default.
+    #[serde(default)]
+    model: Option<ModelChoice>,
     /// Never deserialized: only a recheck admits more than the ordinary queue.
     #[serde(skip)]
     queue_limit: Option<i64>,
@@ -586,6 +782,7 @@ impl Submission {
             continue_from_run_id: None,
             issue_id: Some(issue_id),
             deployment_ref,
+            model: None,
             queue_limit: Some(queue_limit),
         }
     }
@@ -746,6 +943,12 @@ fn prepare_submission(
     ) {
         return Err("invalid_viewport_profile");
     }
+    // Every kind of job can run on its own model. Omitted stays omitted in
+    // the idempotency request, like the other per-run choices.
+    if let Some(choice) = &input.model {
+        request["model"] = choice.normalize()?;
+    }
+    resolve_model(&mut settings, input.project_id, request.get("model"));
     Ok((request, settings))
 }
 
@@ -831,6 +1034,71 @@ impl Queue {
         Ok(
             json!({"revision":revision,"settings":settings_view(&self.settings,settings.as_ref(),revision)}),
         )
+    }
+
+    /// Every project this user has started jobs in or configured, most
+    /// recently used first, each with what a new run in it would use. With
+    /// an ID, that one project, even before its first run.
+    pub async fn projects(&self, only: Option<Uuid>) -> Result<Value, &'static str> {
+        let db = self.db.write().await?;
+        let saved = db.query_opt("SELECT revision,settings FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2 ORDER BY revision DESC LIMIT 1",&[&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?;
+        let (revision, saved) = saved
+            .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
+            .unwrap_or((0, None));
+        let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
+        let used: Value = db.query_one("SELECT COALESCE(jsonb_agg(jsonb_build_object('project_id',project_id,'jobs',jobs,'runs',runs,'last_job_at',last_job_at) ORDER BY last_job_at DESC,project_id),'[]'::jsonb) FROM (SELECT project_id,count(*) AS jobs,count(DISTINCT run_id) AS runs,max(created_at) AS last_job_at FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND project_id IS NOT NULL AND ($3::uuid IS NULL OR project_id=$3) GROUP BY project_id ORDER BY max(created_at) DESC LIMIT 200) p",&[&self.principal.workspace_id,&self.principal.user_id,&only]).await.map_err(|_|"database_unavailable")?.get(0);
+        let mut ids: Vec<Uuid> = used
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["project_id"].as_str()?.parse().ok())
+            .collect();
+        let configured = |key: &str| -> Vec<Uuid> {
+            defaults[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|p| p["projectId"].as_str()?.parse().ok())
+                .collect()
+        };
+        let models = configured("projectModels");
+        let overrides = configured("limitOverrides");
+        match only {
+            Some(id) => ids = vec![id],
+            None => {
+                for id in models.iter().chain(&overrides) {
+                    if !ids.contains(id) {
+                        ids.push(*id);
+                    }
+                }
+            }
+        }
+        let projects: Vec<Value> = ids
+            .into_iter()
+            .map(|id| {
+                let mut project = project_settings(&defaults, id);
+                let usage = used
+                    .as_array()
+                    .and_then(|list| list.iter().find(|p| p["project_id"] == json!(id)));
+                project["jobs"] = usage.map_or(json!(0), |u| u["jobs"].clone());
+                project["runs"] = usage.map_or(json!(0), |u| u["runs"].clone());
+                project["last_job_at"] = usage.map_or(Value::Null, |u| u["last_job_at"].clone());
+                project["has_project_model"] = json!(models.contains(&id));
+                project["limit_override_count"] =
+                    json!(overrides.iter().filter(|o| **o == id).count());
+                project
+            })
+            .collect();
+        let default_model = json!({"provider":defaults["provider"],"model":defaults["model"],"free_only":defaults["freeOnly"],"navigation_model":defaults["navigationModel"]});
+        Ok(match only {
+            Some(_) => {
+                json!({"project":projects[0],"default_model":default_model,"settings_revision":revision})
+            }
+            None => {
+                json!({"projects":projects,"default_model":default_model,"settings_revision":revision,
+                "scope":"projects_with_jobs_or_settings","max_projects_with_jobs":200})
+            }
+        })
     }
 
     async fn save_settings(&self, input: SettingsSubmission) -> Result<Value, &'static str> {
@@ -1037,7 +1305,7 @@ impl Queue {
                 "maxMinutes":optional_setting("SCOUT_EXPLORER_MAX_MINUTES",MAX_EXPLORATION_MINUTES),
                 "maxTokens":null,"maxCostUsd":null,"stopAfterIdleActions":DEFAULT_IDLE_ACTIONS,"limitOverrides":[],
                 "explorationStrategy":default_strategy(),
-                "reuseRankings":env::var("SCOUT_EXPLORER_REUSE_RANKINGS").as_deref()!=Ok("false"),"navigationModel":null,
+                "reuseRankings":env::var("SCOUT_EXPLORER_REUSE_RANKINGS").as_deref()!=Ok("false"),"navigationModel":null,"projectModels":[],
                 "appMemory":env::var("SCOUT_EXPLORER_APP_MEMORY").as_deref()!=Ok("false"),
                 "autoReproduce":env::var("SCOUT_AUTO_REPRODUCE").as_deref()==Ok("true"),
                 "maxAutoReproductions":bounded_setting("SCOUT_AUTO_REPRODUCE_MAX_CASES",2,3),
@@ -1090,7 +1358,8 @@ impl Queue {
             .unwrap_or((0, None));
         let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
         let (request, mut settings) = prepare_submission(&input, &defaults)?;
-        // The job keeps the limits resolved now; later setting changes never alter it.
+        // The job keeps the model and limits resolved now; later setting
+        // changes never alter it. Limits match the model resolved above.
         resolve_limits(&mut settings, input.project_id);
         let verification_source = if let Some(issue_id) = input.issue_id {
             let row=tx.query_opt("SELECT to_jsonb(i),r.lifecycle,r.config,scout_issue_path(a.run_id,a.ordinal),a.state,a.assessment,a.tool_error FROM issues i JOIN runtime_runs r ON r.run_id=i.source_run_id JOIN runtime_actions a ON a.action_id=i.source_action_id AND a.run_id=r.run_id WHERE i.issue_id=$1 AND i.workspace_id=$2 AND i.user_id=$3",&[&issue_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.ok_or("issue_not_found")?;
@@ -1234,9 +1503,9 @@ pub async fn submit(
             match code {
                 "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
                 "issue_not_found" | "continuation_run_not_found" => StatusCode::NOT_FOUND,
-                "job_id_conflict"
-                | "provider_not_configured"
-                | "browser_queue_full" => StatusCode::CONFLICT,
+                "job_id_conflict" | "provider_not_configured" | "browser_queue_full" => {
+                    StatusCode::CONFLICT
+                }
                 _ => StatusCode::BAD_REQUEST,
             },
             code,
@@ -1267,6 +1536,25 @@ pub async fn exploration_settings(ScopedState(state): ScopedState) -> Response {
         Ok(value) => Json(value).into_response(),
         Err(code) => error(StatusCode::SERVICE_UNAVAILABLE, code),
     }
+}
+
+async fn projects_response(state: AppState, only: Option<Uuid>) -> Response {
+    let Some(queue) = &state.jobs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "browser_queue_unavailable");
+    };
+    if only.is_some_and(|id| id.is_nil()) {
+        return error(StatusCode::BAD_REQUEST, "invalid_project_id");
+    }
+    match queue.projects(only).await {
+        Ok(value) => Json(value).into_response(),
+        Err(code) => error(StatusCode::SERVICE_UNAVAILABLE, code),
+    }
+}
+pub async fn list_projects(ScopedState(state): ScopedState) -> Response {
+    projects_response(state, None).await
+}
+pub async fn get_project(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
+    projects_response(state, Some(id)).await
 }
 
 pub async fn get_job(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> Response {
@@ -1725,6 +2013,277 @@ mod tests {
         );
         input["free_only"] = json!(false);
         assert!(normalize_settings(input).is_ok());
+    }
+
+    #[test]
+    fn project_models_are_validated_and_unique_per_project() {
+        let project = Uuid::new_v4();
+        let mut input = settings_input();
+        input["project_models"] = json!([
+            {"project_id":project,"label":"  Checkout  ","provider":"anthropic","model":" claude-sonnet-5-5 ","navigation_model":{"provider":"openrouter","model":"openrouter/free"}},
+            {"project_id":Uuid::new_v4(),"provider":"openrouter","model":"vendor/paid","free_only":false,"navigation_model":null}
+        ]);
+        let settings = normalize_settings(input).unwrap().settings;
+        assert_eq!(
+            settings["projectModels"][0],
+            json!({"projectId":project,"label":"Checkout","provider":"anthropic","model":"claude-sonnet-5-5","freeOnly":true,"navigationModel":{"provider":"openrouter","model":"openrouter/free"}})
+        );
+        assert_eq!(settings["projectModels"][1]["navigationModel"], Value::Null);
+        assert_eq!(settings["projectModels"][1]["freeOnly"], false);
+        assert_eq!(
+            normalize_settings(settings_input()).unwrap().settings["projectModels"],
+            json!([]),
+            "Absent: every project uses the default"
+        );
+        for (entries, code) in [
+            (
+                json!([{"project_id":Uuid::nil(),"provider":"openai","model":"m"}]),
+                "invalid_project_model",
+            ),
+            (
+                json!([{"project_id":project,"provider":"other","model":"m"}]),
+                "invalid_project_model",
+            ),
+            (
+                json!([{"project_id":project,"provider":"openai","model":"a b"}]),
+                "invalid_project_model",
+            ),
+            (
+                json!([{"project_id":project,"provider":"openai","model":"m","label":"x".repeat(61)}]),
+                "invalid_project_model",
+            ),
+            (
+                json!([{"project_id":project,"provider":"openrouter","model":"vendor/paid"}]),
+                "free_only_requires_free_model",
+            ),
+            (
+                json!([{"project_id":project,"provider":"openai","model":"m","navigation_model":{"provider":"openrouter","model":"vendor/paid"}}]),
+                "free_only_requires_free_model",
+            ),
+            (
+                json!([{"project_id":project,"provider":"openai","model":"a"},{"project_id":project,"provider":"openai","model":"b"}]),
+                "duplicate_project_model",
+            ),
+        ] {
+            let mut input = settings_input();
+            input["project_models"] = entries.clone();
+            assert_eq!(normalize_settings(input).unwrap_err(), code, "{entries}");
+        }
+        let mut unknown = settings_input();
+        unknown["project_models"] =
+            json!([{"project_id":project,"provider":"openai","model":"m","api_key":"no"}]);
+        assert!(normalize_settings(unknown).is_err());
+        let mut many = settings_input();
+        many["project_models"] = json!(
+            (0..=MAX_PROJECT_MODELS)
+                .map(|_| json!({"project_id":Uuid::new_v4(),"provider":"openai","model":"m"}))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            normalize_settings(many).unwrap_err(),
+            "invalid_project_model"
+        );
+    }
+
+    #[test]
+    fn a_run_model_beats_the_project_model_which_beats_the_default() {
+        let project = Uuid::new_v4();
+        let mut input = settings_input();
+        input["navigation_model"] = json!({"provider":"openrouter","model":"nav:free"});
+        input["project_models"] =
+            json!([{"project_id":project,"provider":"anthropic","model":"project-model"}]);
+        input["limit_overrides"] = json!([
+            {"provider":"anthropic","model":"project-model","limits":{"max_actions":30}},
+            {"provider":"openai","model":"run-model","limits":{"max_actions":40}}
+        ]);
+        let defaults = settings_snapshot(
+            &json!({"viewportProfile":"desktop","allowedOrigins":[]}),
+            Some(&normalize_settings(input).unwrap().settings),
+            1,
+        );
+        let explore = |project_id: Option<Uuid>, model: Option<Value>| {
+            let mut value =
+                json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/"});
+            if let Some(id) = project_id {
+                value["project_id"] = json!(id);
+            }
+            if let Some(model) = model {
+                value["model"] = model;
+            }
+            let input = submission(value);
+            let (request, mut settings) = prepare_submission(&input, &defaults).unwrap();
+            resolve_limits(&mut settings, input.project_id);
+            (request, settings)
+        };
+
+        let (request, settings) = explore(None, None);
+        assert!(request.get("model").is_none());
+        assert_eq!(
+            (
+                &settings["provider"],
+                &settings["model"],
+                &settings["modelSource"]
+            ),
+            (
+                &json!("openrouter"),
+                &json!("openrouter/free"),
+                &json!("default")
+            )
+        );
+        assert_eq!(settings["freeOnly"], true);
+        assert_eq!(settings["maxActions"], 6);
+        assert!(
+            settings.get("projectModels").is_none(),
+            "Jobs never keep the project list"
+        );
+
+        let (_, settings) = explore(Some(Uuid::new_v4()), None);
+        assert_eq!(
+            settings["modelSource"], "default",
+            "Other projects use the default"
+        );
+
+        let (_, settings) = explore(Some(project), None);
+        assert_eq!(
+            (
+                &settings["provider"],
+                &settings["model"],
+                &settings["modelSource"]
+            ),
+            (
+                &json!("anthropic"),
+                &json!("project-model"),
+                &json!("project")
+            )
+        );
+        assert_eq!(
+            settings["freeOnly"], false,
+            "Free-only only constrains OpenRouter"
+        );
+        assert_eq!(
+            settings["navigationModel"],
+            json!({"provider":"openrouter","model":"nav:free"}),
+            "A project model without a navigation model inherits it"
+        );
+        assert_eq!(
+            settings["maxActions"], 30,
+            "Limits follow the resolved model"
+        );
+
+        let (request, settings) = explore(
+            Some(project),
+            Some(json!({"provider":"openai","model":" run-model ","navigation_model":null})),
+        );
+        assert_eq!(
+            request["model"],
+            json!({"provider":"openai","model":"run-model","free_only":true,"navigation_model":null})
+        );
+        assert_eq!(
+            (
+                &settings["provider"],
+                &settings["model"],
+                &settings["modelSource"]
+            ),
+            (&json!("openai"), &json!("run-model"), &json!("run"))
+        );
+        assert_eq!(settings["navigationModel"], Value::Null);
+        assert_eq!(settings["maxActions"], 40);
+
+        let (_, settings) = explore(
+            None,
+            Some(json!({"provider":"openrouter","model":"vendor/paid","free_only":false})),
+        );
+        assert_eq!(settings["freeOnly"], false);
+        let (_, settings) = explore(
+            None,
+            Some(json!({"provider":"openrouter","model":"vendor/x:free"})),
+        );
+        assert_eq!(settings["freeOnly"], true);
+        assert_eq!(settings["navigationModel"]["model"], "nav:free");
+
+        // A paid navigation default is dropped, not run, under a free-only choice.
+        let mut paid = defaults.clone();
+        paid["navigationModel"] = json!({"provider":"openrouter","model":"vendor/paid"});
+        let input = submission(
+            json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/","model":{"provider":"openrouter","model":"vendor/x:free"}}),
+        );
+        let (_, settings) = prepare_submission(&input, &paid).unwrap();
+        assert_eq!(settings["navigationModel"], Value::Null);
+        let input = submission(
+            json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/","model":{"provider":"anthropic","model":"m"}}),
+        );
+        let (_, settings) = prepare_submission(&input, &paid).unwrap();
+        assert_eq!(settings["navigationModel"]["model"], "vendor/paid");
+
+        // Replays take a model too; the run's choice is part of the retry identity.
+        let reproduce = json!({"job_id":Uuid::new_v4(),"kind":"reproduce","source_action_id":Uuid::new_v4(),"model":{"provider":"meta","model":"muse-spark-1.3"}});
+        let (request, settings) = prepare_submission(&submission(reproduce), &defaults).unwrap();
+        assert_eq!(request["model"]["provider"], "meta");
+        assert_eq!(settings["model"], "muse-spark-1.3");
+        let (retry, _) = prepare_submission(
+            &submission(json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/","model":{"provider":"openai","model":"run-model"}})),
+            &settings,
+        )
+        .unwrap();
+        assert_ne!(retry["model"], request["model"]);
+
+        for (model, code) in [
+            (
+                json!({"provider":"other","model":"m"}),
+                "invalid_model_choice",
+            ),
+            (
+                json!({"provider":"openai","model":""}),
+                "invalid_model_choice",
+            ),
+            (
+                json!({"provider":"openrouter","model":"vendor/paid"}),
+                "free_only_requires_free_model",
+            ),
+            (
+                json!({"provider":"openai","model":"m","navigation_model":{"provider":"other","model":"m"}}),
+                "invalid_navigation_model",
+            ),
+        ] {
+            let input = submission(
+                json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/","model":model}),
+            );
+            assert_eq!(prepare_submission(&input, &defaults).unwrap_err(), code);
+        }
+        for extra in [
+            json!({"provider":"openai","model":"m","api_key":"no"}),
+            json!("openai/m"),
+        ] {
+            assert!(
+                serde_json::from_value::<Submission>(json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/","model":extra})).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn a_project_view_shows_what_its_next_run_would_use() {
+        let project = Uuid::new_v4();
+        let mut input = settings_input();
+        input["project_models"] = json!([{"project_id":project,"label":"Shop","provider":"anthropic","model":"project-model"}]);
+        input["limit_overrides"] = json!([{"project_id":project,"limits":{"max_minutes":15}}]);
+        let defaults = settings_snapshot(
+            &json!({"viewportProfile":"desktop"}),
+            Some(&normalize_settings(input).unwrap().settings),
+            2,
+        );
+        let view = project_settings(&defaults, project);
+        assert_eq!(view["label"], "Shop");
+        assert_eq!(
+            view["model"],
+            json!({"provider":"anthropic","model":"project-model","free_only":false,"navigation_model":null,"source":"project"})
+        );
+        assert_eq!(view["limits"]["maxMinutes"], 15);
+        assert_eq!(view["limits"]["maxActions"], 6);
+        let unseen = project_settings(&defaults, Uuid::new_v4());
+        assert_eq!(unseen["label"], Value::Null);
+        assert_eq!(unseen["model"]["source"], "default");
+        assert_eq!(unseen["model"]["model"], "openrouter/free");
+        assert_eq!(unseen["limits"]["maxMinutes"], Value::Null);
     }
 
     #[test]

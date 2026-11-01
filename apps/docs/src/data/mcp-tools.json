@@ -603,6 +603,52 @@
     {
       "annotations": {
         "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List the project IDs this user has started jobs in or configured in settings, most recently used first, with each project's label, job and run counts, and the model and limits a new run in it would use (model.source is project or default). A project is any UUID passed as project_id; to start a new one, use a new UUID (scout_new_request_id can allocate one). No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "scout_list_projects",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Read what a new run in one project would use: its model (with model.source project or default), navigation model and resolved limits, plus its job and run counts. Works for a project with no runs yet. No model call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "scout_get_project",
+      "outputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": true
@@ -681,7 +727,7 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default. continue_from_run_id carries on from a failed, interrupted or cancelled exploration instead of starting again at the entry page.",
+      "description": "Queue URL-only exploration. Can interact with and change data on the target site and may incur model usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. The model is model if given, else the project's model for project_id (see scout_list_projects / scout_get_project), else the saved default; the job records which in settings.modelSource. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default. continue_from_run_id carries on from a failed, interrupted or cancelled exploration instead of starting again at the entry page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -708,6 +754,61 @@
             "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
             "format": "uuid",
             "type": "string"
+          },
+          "model": {
+            "additionalProperties": false,
+            "description": "This run's model instead of the project's or the default. free_only (default true) keeps OpenRouter on free model IDs. navigation_model: omit to inherit, null for none.",
+            "properties": {
+              "free_only": {
+                "type": "boolean"
+              },
+              "model": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "navigation_model": {
+                "additionalProperties": false,
+                "properties": {
+                  "model": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "provider": {
+                    "enum": [
+                      "openai",
+                      "anthropic",
+                      "openrouter",
+                      "meta"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "provider": {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "openrouter",
+                  "meta"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "model"
+            ],
+            "type": "object"
           },
           "project_id": {
             "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
@@ -1147,7 +1248,7 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Queue the existing fresh-browser suspect reproduction. Can change data on the target site and may consume configured model usage. Stable job_id required; server eligibility/deduplication rules still apply.",
+      "description": "Queue the existing fresh-browser suspect reproduction. Can change data on the target site and may consume model usage. Stable job_id required; server eligibility/deduplication rules still apply. model optionally runs this reproduction on its own model.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1155,6 +1256,61 @@
             "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",
             "format": "uuid",
             "type": "string"
+          },
+          "model": {
+            "additionalProperties": false,
+            "description": "This run's model instead of the project's or the default. free_only (default true) keeps OpenRouter on free model IDs. navigation_model: omit to inherit, null for none.",
+            "properties": {
+              "free_only": {
+                "type": "boolean"
+              },
+              "model": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "navigation_model": {
+                "additionalProperties": false,
+                "properties": {
+                  "model": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "provider": {
+                    "enum": [
+                      "openai",
+                      "anthropic",
+                      "openrouter",
+                      "meta"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "provider": {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "openrouter",
+                  "meta"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "model"
+            ],
+            "type": "object"
           },
           "source_action_id": {
             "description": "A non-nil UUID. Reuse the same job UUID when retrying a command.",

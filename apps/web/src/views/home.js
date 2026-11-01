@@ -3,6 +3,7 @@ import {button,empty,icon,pill} from '/assets/ui/components.js';
 import {date,elapsed,esc,fixture,name,number,providerName,runStatus,short} from '/assets/ui/format.js';
 import {continueButton,restartButton,STOPPED} from '../jobs.js';
 import {state} from '../state.js';
+import {freeModel} from './settings.js';
 import {estimateCost,tokenSplit,tokenSum,usd} from '/assets/ui/usage.js';
 import {selectedWebsite,websiteRuns} from '../website-state.js';
 import {dockerAddress,normalizeTargetUrl,websiteHref,websiteLabel,websitePath} from '../websites.js';
@@ -13,26 +14,57 @@ export function runUsage(usage){
   const estimate=estimateCost(usage,state.settings.savedModels);
   return `${esc(tokenSum(usage))}<div class="table-sub">${esc(tokenSplit(usage))}</div><div class="table-sub">${estimate.usd==null?'No price yet':`${esc(usd(estimate.usd,estimate.partial))} estimated`}</div>`;
 }
-export function canStart(){return state.providers.gateway_ready===true&&state.workers.some(w=>w.available)&&state.providers.providers.some(p=>p.provider===state.settings.provider&&p.configured)&&!!state.settings.model;}
+// Projects a test can run under: those settings give a model or limits, named by their label when they have one.
+export function launchProjects(){
+  const projects=new Map();
+  for(const p of Array.isArray(state.settings.projectModels)?state.settings.projectModels:[])if(p?.projectId)projects.set(p.projectId,p);
+  for(const o of Array.isArray(state.settings.limitOverrides)?state.settings.limitOverrides:[])if(o?.projectId&&!projects.has(o.projectId))projects.set(o.projectId,{projectId:o.projectId});
+  return [...projects.values()];
+}
+// Models a single test can choose: the saved list. With free-only on, paid OpenRouter models are left out.
+export function launchModels(){
+  const restricted=state.settings.provider==='openrouter'&&state.settings.freeOnly===true;
+  return (Array.isArray(state.settings.savedModels)?state.settings.savedModels:[]).filter(m=>m?.provider&&m?.model&&!(restricted&&m.provider==='openrouter'&&!freeModel(m.model)));
+}
+const choiceOf=m=>`${m.provider}|${m.model}`;
+// The model the next test will use: chosen for this test, else its project's, else the default.
+export function launchModel(){
+  const chosen=launchModels().find(m=>choiceOf(m)===state.launchModel);
+  if(chosen)return {provider:chosen.provider,model:chosen.model,label:chosen.label||chosen.model,source:'run'};
+  const project=launchProjects().find(p=>p.projectId===state.launchProject);
+  if(project?.provider&&project?.model)return {provider:project.provider,model:project.model,label:project.model,source:'project'};
+  return {provider:state.settings.provider,model:state.settings.model,label:state.settings.model,source:'default'};
+}
+export function canStart(){const model=launchModel();return state.providers.gateway_ready===true&&state.workers.some(w=>w.available)&&state.providers.providers.some(p=>p.provider===model.provider&&p.configured)&&!!model.model;}
 const VIEWPORTS=[['desktop','Desktop'],['tablet','Tablet'],['mobile','Mobile']];
 const SIGN_IN=[['auto','Ask when sign-in is detected','Sign in when asked'],['sign_in','Sign in before testing','Sign in first'],['public','Public pages only','Public pages only']];
 export function launchStatus(){
   if(state.launchError)return `<p id="launch-status" class="landing-status error" role="alert">${icon('info')}<span>${esc(state.launchError)}</span></p>`;
   const docker=dockerAddress(state.url);
   if(docker)return `<p id="launch-status" class="landing-status" role="status"><i class="dot amber"></i><span>The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${esc(docker)}.</span></p>`;
-  const provider=state.providers.providers.find(p=>p.provider===state.settings.provider),settings='<a href="#/settings/models">Settings</a>',actions=Number(state.settings.maxActions);
+  const model=launchModel(),provider=state.providers.providers.find(p=>p.provider===model.provider),settings='<a href="#/settings/models">Settings</a>',actions=Number(state.settings.maxActions);
   const [tone,text]=!state.lastUpdatedAt?['',state.error?'Workspace status unavailable.':'Checking your workspace…']
-    :!state.settings.provider||!state.settings.model?['amber',`Choose a model in ${settings} to start testing.`]
-    :!provider?.configured?['amber',`${esc(providerName(state.settings.provider))} is not configured on this server. Choose another model in ${settings}.`]
+    :!model.provider||!model.model?['amber',`Choose a model in ${settings} to start testing.`]
+    :!provider?.configured?['amber',`${esc(providerName(model.provider))} is not configured on this server. Choose another model ${model.source==='run'?'under the options below':`in ${settings}`}.`]
     :!state.workers.some(w=>w.available)?['amber','Waiting for the browser worker. Your recorded tests are still available.']
     :state.providers.gateway_ready!==true?['amber','Waiting for the model gateway.']
-    :['green',['Ready',esc(providerName(state.settings.provider)),esc(state.settings.model),(actions>0?`up to ${number(actions)} actions`:'no action limit'),...(state.providers.test_mode?['simulated model']:[])].join(' · ')];
+    :['green',['Ready',esc(providerName(model.provider)),esc(model.model)+(model.source==='project'?' (project model)':model.source==='run'?' (this test)':''),(actions>0?`up to ${number(actions)} actions`:'no action limit'),...(state.providers.test_mode?['simulated model']:[])].join(' · ')];
   return `<p id="launch-status" class="landing-status" role="status"><i class="dot ${tone}"></i><span>${text}</span></p>`;
 }
 export function hero(){
   const viewport=state.viewportProfile||state.settings.viewportProfile||'desktop';
-  const summary=[VIEWPORTS.find(([value])=>value===viewport)?.[1]||'Desktop',SIGN_IN.find(([value])=>value===state.authMode)?.[2]||SIGN_IN[0][2],...(automaticEnabled()?['Rechecks on']:[])].join(' · ');
-  return `<section class="landing" aria-labelledby="landing-title"><p class="eyebrow"><span class="signal-dot" aria-hidden="true"></span>${state.websiteOrigin?'Website overview':'A fresh pair of eyes'}</p><h1 id="landing-title">${state.websiteOrigin?`A fresh look at<br><span>${esc(websiteLabel(state.websiteOrigin))}.</span>`:'What should we explore?'}</h1><p class="landing-lead">${state.websiteOrigin?'Explore a new journey, or return to a previous test.':'Let Spekios try your website and find what needs attention.'}</p><form id="run-form" class="landing-form" novalidate><label class="landing-field">${icon('globe')}<span class="sr-only">Application URL</span><input id="target-url" name="url" type="text" inputmode="url" required maxlength="2048" placeholder="your-app.example" autocomplete="url" autocapitalize="off" spellcheck="false" aria-describedby="launch-status"${state.launchError?' aria-invalid="true"':''} value="${esc(state.url)}"></label><button type="submit" class="button primary landing-start" ${!canStart()||state.submitting?'disabled':''}>${state.submitting?'Starting…':`Start testing${icon('arrow')}`}</button></form>${launchStatus()}<details class="landing-options" data-disclosure="launch-options"><summary>${icon('settings')}<span class="landing-options-summary">${esc(summary)}</span><span class="landing-options-change">Change</span></summary><div class="landing-options-body"><div class="landing-options-grid"><label>Screen size<select id="viewport-profile" name="viewport_profile" form="run-form">${VIEWPORTS.map(([value,label])=>`<option value="${value}" ${viewport===value?'selected':''}>${label}</option>`).join('')}</select></label>${authOptions()}</div>${automaticOptions()}<p class="small muted landing-options-note">You can sign in yourself when Spekios asks. Private login activity is excluded from screenshots, model inputs and training evidence. Google and other external identity providers are not supported in this local handoff yet.</p></div></details></section>`;
+  const project=launchProjects().find(p=>p.projectId===state.launchProject),model=launchModel();
+  const summary=[VIEWPORTS.find(([value])=>value===viewport)?.[1]||'Desktop',SIGN_IN.find(([value])=>value===state.authMode)?.[2]||SIGN_IN[0][2],...(project?[project.label||'Project '+short(project.projectId)]:[]),...(model.source==='run'?[model.label]:[]),...(automaticEnabled()?['Rechecks on']:[])].join(' · ');
+  return `<section class="landing" aria-labelledby="landing-title"><p class="eyebrow"><span class="signal-dot" aria-hidden="true"></span>${state.websiteOrigin?'Website overview':'A fresh pair of eyes'}</p><h1 id="landing-title">${state.websiteOrigin?`A fresh look at<br><span>${esc(websiteLabel(state.websiteOrigin))}.</span>`:'What should we explore?'}</h1><p class="landing-lead">${state.websiteOrigin?'Explore a new journey, or return to a previous test.':'Let Spekios try your website and find what needs attention.'}</p><form id="run-form" class="landing-form" novalidate><label class="landing-field">${icon('globe')}<span class="sr-only">Application URL</span><input id="target-url" name="url" type="text" inputmode="url" required maxlength="2048" placeholder="your-app.example" autocomplete="url" autocapitalize="off" spellcheck="false" aria-describedby="launch-status"${state.launchError?' aria-invalid="true"':''} value="${esc(state.url)}"></label><button type="submit" class="button primary landing-start" ${!canStart()||state.submitting?'disabled':''}>${state.submitting?'Starting…':`Start testing${icon('arrow')}`}</button></form>${launchStatus()}<details class="landing-options" data-disclosure="launch-options"><summary>${icon('settings')}<span class="landing-options-summary">${esc(summary)}</span><span class="landing-options-change">Change</span></summary><div class="landing-options-body"><div class="landing-options-grid"><label>Screen size<select id="viewport-profile" name="viewport_profile" form="run-form">${VIEWPORTS.map(([value,label])=>`<option value="${value}" ${viewport===value?'selected':''}>${label}</option>`).join('')}</select></label>${authOptions()}${launchChoices()}</div>${automaticOptions()}<p class="small muted landing-options-note">You can sign in yourself when Spekios asks. Private login activity is excluded from screenshots, model inputs and training evidence. Google and other external identity providers are not supported in this local handoff yet.</p></div></details></section>`;
+}
+// Project and model for this test. Hidden until settings name a project or list a model.
+export function launchChoices(){
+  const projects=launchProjects(),models=launchModels();
+  if(!projects.length&&!models.length)return '';
+  const project=projects.find(p=>p.projectId===state.launchProject),inherited=project?.model?`${project.model} (project)`:`${state.settings.model||'not chosen'} (default)`;
+  const projectSelect=projects.length?`<label>Project<select id="launch-project" name="project_id" form="run-form"><option value="">No project</option>${projects.map(p=>`<option value="${esc(p.projectId)}" ${p.projectId===state.launchProject?'selected':''}>${esc(p.label||short(p.projectId))}${p.model?` · ${esc(p.model)}`:''}</option>`).join('')}</select></label>`:'';
+  const modelSelect=models.length?`<label>Model<select id="launch-model" name="model" form="run-form"><option value="">${esc(inherited)}</option>${models.map(m=>`<option value="${esc(choiceOf(m))}" ${choiceOf(m)===state.launchModel?'selected':''}>${esc(m.label?`${m.label} (${m.model})`:m.model)} · ${esc(providerName(m.provider))}</option>`).join('')}</select></label>`:'';
+  return projectSelect+modelSelect;
 }
 export function automaticEnabled(){return state.autoReproduce ?? state.settings.autoReproduce===true;}
 export function automaticOptions(){
@@ -41,7 +73,10 @@ export function automaticOptions(){
 }
 export function explorationRequest(form){
   state.url=normalizeTargetUrl(form.get('url'));const session=form.get('session_id');
-  return {kind:'explore',target_url:state.url,viewport_profile:form.get('viewport_profile'),auth_mode:form.get('auth_mode')||'auto',auto_reproduce:automaticEnabled(),...(session?{session_id:session}:{})};
+  const model=launchModel(),project=launchProjects().some(p=>p.projectId===state.launchProject)?state.launchProject:'';
+  // Free-only stays on unless this test deliberately picks a paid OpenRouter model.
+  const choice=model.source==='run'?{model:{provider:model.provider,model:model.model,free_only:!(model.provider==='openrouter'&&!freeModel(model.model))}}:{};
+  return {kind:'explore',target_url:state.url,viewport_profile:form.get('viewport_profile'),auth_mode:form.get('auth_mode')||'auto',auto_reproduce:automaticEnabled(),...(session?{session_id:session}:{}),...(project?{project_id:project}:{}),...choice};
 }
 function targetOrigin(){try{return new URL(normalizeTargetUrl(state.url)).origin;}catch{return '';}}
 export function sessionChoices(){
