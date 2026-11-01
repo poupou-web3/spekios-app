@@ -140,7 +140,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
   const automaticPolicy=automaticReproductionPolicy({...options,autoReproduce:!replay&&options.autoReproduce===true});
   const client = options.client ?? new ModelClient(modelSettings());
   const profile = replay?.viewport_profile ?? viewportProfile(options.viewportProfile);
-  const viewport = viewportProfiles[profile];
+  const viewport = replay?.viewport ?? viewportProfiles[profile];
   let planner = new FrontierPlanner(targetUrl);
   const executionMode = await client.ready();
   // A navigation model must be ready in the same mode; otherwise the main model does everything.
@@ -189,7 +189,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     const memoryScopes: ReturnType<AppMemory['summary']>[] = [];
     const openMemory = async () => {
       if (!memoryEnabled) return;
-      const scope: MemoryScope = { origin, viewport_profile: profile, auth_scope: authContext ? 'signed_in' : 'public', execution_mode: executionMode };
+      const scope: MemoryScope = { origin, viewport_profile: profile, viewport, auth_scope: authContext ? 'signed_in' : 'public', execution_mode: executionMode };
       memory = await AppMemory.open(store, runId, scope);
       memoryScopes.push(memory.summary());
       await store.query("UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1", [runId, JSON.stringify({ app_memory: { version: MEMORY_VERSION, enabled: true, scopes: memoryScopes } })]);
@@ -216,7 +216,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       await store.event(runId, 'run.started', { target_url: targetUrl, worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId, max_actions: maxActions, execution_mode: executionMode });
       await openMemory();
       if (resume) {
-        resumed = await resumeSnapshot(store, resume.previousRunIds, { origin, viewport_profile: profile, auth_scope: authContext ? 'signed_in' : 'public', execution_mode: executionMode });
+        resumed = await resumeSnapshot(store, resume.previousRunIds, { origin, viewport_profile: profile, viewport, auth_scope: authContext ? 'signed_in' : 'public', execution_mode: executionMode });
         const focus = await carryFocus(store, resume.previousRunIds.at(-1)!, runId);
         await store.event(runId, 'run.resumed', { attempt: resume.attempt, previous_run_ids: resume.previousRunIds, remembered_pages: resumed.pages.size,
           withheld_controls: resumed.withheld?.size ?? 0, focus_carried: focus !== null });

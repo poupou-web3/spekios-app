@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Store } from './store.js';
 import { MAX_REPLAY_ORDINAL, MAX_REPLAY_STEPS, isUuid, type BrowserCommand, type Capture } from './contracts.js';
 import { sameObservedState, sameRegisteredSite, stateFingerprint } from './exploration-policy.js';
-import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
+import { recordedViewport, viewportProfile, type Viewport, type ViewportProfile } from './viewports.js';
 import { observedCommand } from './browser-interactions.js';
 import type { FixVerification } from './fix-verification.js';
 import type { AccessResult } from './access-handoff.js';
@@ -14,7 +14,7 @@ export type ReplayStep = {
   goal: string; expected_result: string; before: Capture; after: Capture;
 };
 export type Replay = { reproduction_id: string; source_run_id: string; source_action_id: string;
-  target_url: string; training_status: string; viewport_profile: ViewportProfile; steps: ReplayStep[]; auth_context?:AccessResult; fix_verification?:FixVerification };
+  target_url: string; training_status: string; viewport_profile: ViewportProfile; viewport: Viewport; steps: ReplayStep[]; auth_context?:AccessResult; fix_verification?:FixVerification };
 
 export async function readCapture(store: Store, row: Record<string, any>): Promise<Capture> {
   if (!row || row.status !== 'available' || row.observation?.observation_error) throw new Error('Replay requires complete source evidence.');
@@ -37,7 +37,8 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
       source.state !== 'completed' || source.assessment?.verdict !== 'suspect' || source.assessment.expectation_uncertain ||
       source.tool_error || source.ordinal < 1 || source.ordinal > MAX_REPLAY_ORDINAL) throw new Error('Replay requires a completed explorer suspect from a terminal source run.');
   const profile = viewportProfile(source.config.viewport_profile ?? 'desktop');
-  if (!isDeepStrictEqual(source.config.viewport, viewportProfiles[profile]) || source.config.device_scale !== 1) throw new Error('Unsupported source browser geometry.');
+  const viewport = recordedViewport(source.config.viewport);
+  if (!viewport || source.config.device_scale !== 1) throw new Error('Unsupported source browser geometry.');
   const origin = new URL(source.target_url).origin;
   const authContext=source.spec.auth_context_id?(source.config.auth_contexts??[]).find((c:NonNullable<AccessResult>)=>c.context_id===source.spec.auth_context_id):null;
   if(source.spec.auth_context_id&&!authContext?.session_id)throw new Error('This path needs its saved app session for reproduction. Sign in and save a new session for a new run.');
@@ -73,7 +74,7 @@ export async function loadReplay(store: Store, sourceActionId: string): Promise<
   }
   if (!steps.length || steps.length > MAX_REPLAY_STEPS || actions.length !== source.ordinal-startOrdinal+1) throw new Error('Source path has missing steps or exceeds the replay budget.');
   return { reproduction_id: randomUUID(), source_run_id: source.run_id, source_action_id: sourceActionId,
-    target_url: source.target_url, training_status: source.config.training_status, viewport_profile: profile, steps,auth_context:authContext };
+    target_url: source.target_url, training_status: source.config.training_status, viewport_profile: profile, viewport, steps,auth_context:authContext };
 }
 
 export function replaySnapshot(replay: Replay) {

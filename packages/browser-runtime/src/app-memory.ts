@@ -3,7 +3,7 @@ import type { Store } from './store.js';
 import type { BrowserCommand, Capture } from './contracts.js';
 import { pageTemplate, transitionKey, type MapState, type StoredProposal } from './app-map.js';
 import type { ModelSettings } from './model-client.js';
-import type { ViewportProfile } from './viewports.js';
+import type { Viewport, ViewportProfile } from './viewports.js';
 import { blockedReason, sameRegisteredSite, type Proposal } from './exploration-policy.js';
 import { actionRisk } from './interaction-contract.js';
 
@@ -18,7 +18,7 @@ const MAX_PAGES = 500, MAX_CONTROLS = 5000, MAX_MAP_STATES = 5000, MAX_MAP_TRANS
 export const MAX_RANKING_REUSES = 10;
 export type StoredRanking = { proposals: StoredProposal[]; source_run_id: string; source_request_id: string; source_decision_id: string; reuses: number; created_at: string };
 export type AuthScope = 'public' | 'signed_in';
-export type MemoryScope = { origin: string; viewport_profile: ViewportProfile; auth_scope: AuthScope; execution_mode: 'live' | 'protocol_fixture' };
+export type MemoryScope = { origin: string; viewport_profile: ViewportProfile; viewport: Viewport; auth_scope: AuthScope; execution_mode: 'live' | 'protocol_fixture' };
 export type RememberedPage = { url: string; title: string | null; visits: number; best_path_score: number | null;
   controls_truncated: boolean; last_run_id: string; last_action_id: string | null };
 export type RememberedControl = { url: string; control_id: string; role: string; name: string; href: string | null; attempts: number;
@@ -105,12 +105,13 @@ export class AppMemory {
   // Must run inside the caller's transaction. The snapshot is frozen when the
   // run (or a new sign-in context) starts, so it describes earlier runs only.
   static async open(store: Store, runId: string, scope: MemoryScope) {
-    const row = (await store.query(`INSERT INTO app_memory_scopes(scope_id,workspace_id,user_id,origin,viewport_profile,auth_scope,execution_mode,runs,last_run_id)
-      VALUES($1,$2,$3,$4,$5,$6,$7,1,$8)
-      ON CONFLICT(workspace_id,user_id,origin,viewport_profile,auth_scope,execution_mode) DO UPDATE SET
+    const row = (await store.query(`INSERT INTO app_memory_scopes(scope_id,workspace_id,user_id,origin,viewport_profile,viewport_width,viewport_height,auth_scope,execution_mode,runs,last_run_id)
+      VALUES($1,$2,$3,$4,$5,$9,$10,$6,$7,1,$8)
+      ON CONFLICT(workspace_id,user_id,origin,viewport_profile,viewport_width,viewport_height,auth_scope,execution_mode) DO UPDATE SET
         runs=app_memory_scopes.runs+CASE WHEN app_memory_scopes.last_run_id IS DISTINCT FROM EXCLUDED.last_run_id THEN 1 ELSE 0 END,
         last_run_id=EXCLUDED.last_run_id,updated_at=now()
-      RETURNING scope_id,runs`, [randomUUID(), store.workspaceId, store.userId, scope.origin, scope.viewport_profile, scope.auth_scope, scope.execution_mode, runId])).rows[0];
+      RETURNING scope_id,runs`, [randomUUID(), store.workspaceId, store.userId, scope.origin, scope.viewport_profile, scope.auth_scope, scope.execution_mode, runId,
+        scope.viewport.width, scope.viewport.height])).rows[0];
     const pageRows = (await store.query(`SELECT url,title,visits,best_path_score,controls_truncated,last_run_id,last_action_id FROM app_memory_pages
       WHERE scope_id=$1 ORDER BY last_seen_at DESC,url LIMIT $2`, [row.scope_id, MAX_PAGES + 1])).rows;
     const pages = new Map<string, RememberedPage>(pageRows.slice(0, MAX_PAGES).map(p => [p.url, { url: p.url, title: p.title, visits: p.visits,
