@@ -31,15 +31,28 @@ summary { cursor: pointer; }
   background-color: var(--surface); color: var(--text); font-size: 13px; line-height: 1.4;
 }
 :where(input, select, textarea):focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-ring); }
+/* Selects share one chrome in every context: the same border, radius, chevron,
+   hover, focus and disabled treatment. Only the height follows the context
+   (base, 40px beside form inputs, 34px compact in toolbars). */
 :where(select) {
-  appearance: none; padding-right: 32px;
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position: calc(100% - 17px) 52%, calc(100% - 12px) 52%; background-size: 5px 5px; background-repeat: no-repeat;
+  appearance: none; -webkit-appearance: none;
+  max-width: 100%; padding-right: 32px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a93a6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 11px center; background-size: 14px 14px; background-repeat: no-repeat;
+  cursor: pointer;
 }
+:where(select:hover:not(:disabled)) { background-color: var(--surface-2); }
+/* A leading empty option reads as a placeholder until a value is chosen. */
+:where(select:has(> option[value=""]:first-child:checked)) { color: var(--muted); }
+:where(select:has(> option[value=""]:first-child:checked)) option { color: var(--text); }
+option { background-color: var(--surface); color: var(--text); }
+optgroup { background-color: var(--surface); color: var(--muted); font-style: normal; }
 :where(textarea) { resize: vertical; line-height: 1.55; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-strong); }
 input:disabled, select:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
+select:disabled { background-color: var(--surface-2); border-color: var(--border); }
 @media (max-width: 520px) {
   :where(input:not([type="checkbox"], [type="radio"], [type="range"]), select, textarea) { font-size: 16px; }
 }
