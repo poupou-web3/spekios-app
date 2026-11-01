@@ -20,6 +20,7 @@ Internal design and operator notes for Scout QA. The published user guide is sep
 - [Private login](./exploration/private-login.md) — manual sign-in and saved sessions
 - [Finding reviews](./exploration/finding-reviews.md) — human confirmation, dismissal, and versioned labels
 - [Triage and rechecks](./exploration/triage.md) — bug, intended behavior and duplicate decisions, known behavior in later runs, deployment rechecks from CI
+- [Larchwood, a shop with known bugs](./exploration/bug-lab.md) — measure what an exploration finds, misses and wrongly flags
 
 ## Runtime and evidence
 

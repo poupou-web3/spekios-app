@@ -16,6 +16,8 @@ const VIEWPORTS=[['desktop','Desktop'],['tablet','Tablet'],['mobile','Mobile']];
 const SIGN_IN=[['auto','Ask when sign-in is detected','Sign in when asked'],['sign_in','Sign in before testing','Sign in first'],['public','Public pages only','Public pages only']];
 export function launchStatus(){
   if(state.launchError)return `<p id="launch-status" class="landing-status error" role="alert">${icon('info')}<span>${esc(state.launchError)}</span></p>`;
+  const docker=dockerAddress(state.url);
+  if(docker)return `<p id="launch-status" class="landing-status" role="status"><i class="dot amber"></i><span>The test browser runs in Docker, where localhost is not this computer. For an app running here, use ${esc(docker)}. Its origin must be listed in SCOUT_ALLOWED_ORIGINS.</span></p>`;
   const provider=state.providers.providers.find(p=>p.provider===state.settings.provider),settings='<a href="#/settings/models">Settings</a>',actions=Number(state.settings.maxActions);
   const [tone,text]=!state.lastUpdatedAt?['',state.error?'Workspace status unavailable.':'Checking your workspace…']
     :!state.settings.provider||!state.settings.model?['amber',`Choose a model in ${settings} to start testing.`]
@@ -39,11 +41,21 @@ export function explorationRequest(form){
   state.url=normalizeTargetUrl(form.get('url'));const session=form.get('session_id');
   return {kind:'explore',target_url:state.url,viewport_profile:form.get('viewport_profile'),auth_mode:form.get('auth_mode')||'auto',auto_reproduce:automaticEnabled(),...(session?{session_id:session}:{})};
 }
-// People paste bare hosts ("acme.dev/login"). Local addresses default to http, everything else to https.
+// People paste bare hosts ("acme.dev/login"). Local and Docker addresses (localhost, host.docker.internal,
+// a dot-less name with a port such as larchwood:8084) default to http, everything else to https.
 export function normalizeTargetUrl(value){
   const text=String(value??'').trim();
   if(!text||/^[a-z][a-z\d+.-]*:\/\//i.test(text))return text;
-  return (/^(?:localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(text)?'http://':'https://')+text;
+  return (/^(?:localhost|127\.|0\.0\.0\.0|\[::1\]|host\.docker\.internal(?:[:/?#]|$)|[a-z\d-]+:\d+(?:[/?#]|$))/i.test(text)?'http://':'https://')+text;
+}
+// The test browser runs in Docker, where localhost is the browser's own container. For a loopback
+// address this returns the origin that reaches the same port on this computer, otherwise ''.
+export function dockerAddress(value){
+  try{
+    const url=new URL(normalizeTargetUrl(value));
+    if(!/^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])$/i.test(url.hostname))return '';
+    url.hostname='host.docker.internal';return url.origin;
+  }catch{return '';}
 }
 export function launchUrlError(url){
   if(!url)return 'Paste the address of the app you want to test.';
@@ -59,8 +71,11 @@ export function sessionChoices(){
 // Typing a URL never redraws the page: a redraw replaces the form and swallows the click or Enter that submits it.
 // Only the saved sessions follow the URL, and only when its origin changes.
 export function updateTargetUrl(value){
-  const origin=targetOrigin();state.url=value;
-  if(state.launchError){state.launchError='';document.getElementById?.('target-url')?.removeAttribute('aria-invalid');const status=document.getElementById?.('launch-status');if(status)status.outerHTML=launchStatus();}
+  const origin=targetOrigin(),docker=dockerAddress(state.url);state.url=value;
+  if(state.launchError||dockerAddress(value)!==docker){
+    if(state.launchError){state.launchError='';document.getElementById?.('target-url')?.removeAttribute('aria-invalid');}
+    const status=document.getElementById?.('launch-status');if(status)status.outerHTML=launchStatus();
+  }
   if(targetOrigin()===origin)return;
   state.sessionId='';const select=document.getElementById?.('app-session');if(select)select.innerHTML=sessionChoices();
 }

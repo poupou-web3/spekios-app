@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,launchUrlError,accessBanner,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,dockerAddress,launchStatus,updateTargetUrl,launchUrlError,accessBanner,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{
@@ -349,6 +349,27 @@ test('a pasted bare host becomes a launchable address and malformed input is exp
   for(const url of [ui.normalizeTargetUrl('not a url'),'ftp://acme.dev','https://exa mple.com','javascript:alert(1)'])assert.match(ui.launchUrlError(url),/web address/,url);
   ui.state.launchError='Paste the address of the app you want to test.';
   assert.match(ui.home(),/role="alert"[^>]*>.*Paste the address/);assert.match(ui.home(),/aria-invalid="true"/);
+});
+test('Docker addresses default to http and a localhost address shows how to reach this computer',()=>{
+  const status={outerHTML:''};
+  const ui=view({document:{querySelector(){return {innerHTML:'',classList:{add(){},remove(){}},addEventListener(){},querySelectorAll(){return[];}};},addEventListener(){},
+    getElementById(id){return id==='launch-status'?status:null;}}});
+  assert.equal(ui.normalizeTargetUrl('host.docker.internal:4100'),'http://host.docker.internal:4100');
+  assert.equal(ui.normalizeTargetUrl('larchwood:8084/shop'),'http://larchwood:8084/shop');
+  assert.equal(ui.normalizeTargetUrl('acme.dev:8443/x'),'https://acme.dev:8443/x');
+  assert.equal(ui.normalizeTargetUrl('host.docker.internal.acme.dev'),'https://host.docker.internal.acme.dev');
+  assert.equal(ui.dockerAddress('localhost:4100/shop'),'http://host.docker.internal:4100');
+  assert.equal(ui.dockerAddress('http://127.0.0.1:3000'),'http://host.docker.internal:3000');
+  assert.equal(ui.dockerAddress('[::1]:8080'),'http://host.docker.internal:8080');
+  for(const url of ['acme.dev','http://host.docker.internal:4100','larchwood:8084',''])assert.equal(ui.dockerAddress(url),'',url);
+  ui.state.url='localhost:4100';
+  assert.match(ui.launchStatus(),/use http:\/\/host\.docker\.internal:4100\. Its origin must be listed in SCOUT_ALLOWED_ORIGINS/);
+  ui.state.url='acme.dev';
+  assert.doesNotMatch(ui.launchStatus(),/Docker/);
+  // Typing redraws the status line only when the suggestion changes.
+  ui.updateTargetUrl('localhost:4100');assert.match(status.outerHTML,/host\.docker\.internal:4100/);
+  status.outerHTML='';ui.updateTargetUrl('localhost:4100/shop');assert.equal(status.outerHTML,'');
+  ui.updateTargetUrl('acme.dev');assert.match(status.outerHTML,/id="launch-status"/);assert.doesNotMatch(status.outerHTML,/Docker/);
 });
 test('the run heading says whether earlier runs guided it and names reopened remembered pages',()=>{
   const ui=view(),report=connectReview(ui);

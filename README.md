@@ -28,6 +28,7 @@ Engineering notes are grouped in [docs/](./docs/README.md). The published user g
 
 - [Product](./docs/product/architecture.md) — architecture, requirements, and the exploratory QA reference
 - [Exploration](./docs/exploration/overview.md) — planner, browser actions, reproduction, cancellation, and sign-in
+- [Larchwood](./docs/exploration/bug-lab.md) — a shop with 14 known bugs: explore it, then `just bug-lab-score RUN_ID` shows what was found, missed or wrongly flagged
 - [Runtime and evidence](./docs/runtime/browser.md) — browser workers, training data, and report export
 - [Platform](./docs/platform/infrastructure.md) — local services, models, the gateway, deployment, and the workspace
 - [Agents](./docs/agents/interface.md) — MCP and HTTP control

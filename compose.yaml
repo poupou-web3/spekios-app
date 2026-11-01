@@ -42,7 +42,7 @@ services:
       SCOUT_AUTO_REPRODUCE: ${SCOUT_AUTO_REPRODUCE:-false}
       SCOUT_AUTO_REPRODUCE_MAX_CASES: ${SCOUT_AUTO_REPRODUCE_MAX_CASES:-2}
       SCOUT_AUTO_REPRODUCE_MAX_ACTIONS: ${SCOUT_AUTO_REPRODUCE_MAX_ACTIONS:-12}
-      SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082}
+      SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082,http://larchwood:8084,http://larchwood:8085}
       SCOUT_TEST_FORM_RULES: ${SCOUT_TEST_FORM_RULES:-[]}
     volumes:
       - gateway-spool:/data/gateway
@@ -178,6 +178,34 @@ services:
     mem_limit: 128m
     cpus: 1
 
+  # Larchwood, a small shop that ships with known bugs (apps/bug-lab/bugs.json),
+  # for measuring what an exploration finds. Scout's browser uses
+  # http://larchwood:8084 (bugs on) and http://larchwood:8085 (every bug fixed);
+  # on this machine they are 127.0.0.1:18084 and 127.0.0.1:18085.
+  larchwood:
+    profiles: [runtime]
+    image: scout-qa-recorder:local
+    build:
+      context: .
+      dockerfile: infra/recorder/Dockerfile
+    entrypoint: [node, /app/apps/bug-lab/server.mjs, --pair, --host, 0.0.0.0, --port, '8084']
+    networks:
+      browser: {}
+    ports:
+      - '127.0.0.1:18084:8084'
+      - '127.0.0.1:18085:8085'
+    healthcheck:
+      test: [CMD, node, -e, "Promise.all([8084,8085].map(p=>fetch('http://127.0.0.1:'+p+'/'))).then(r=>{if(!r.every(x=>x.ok))process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+
   recorder:
     profiles: [runtime]
     image: scout-qa-recorder:local
@@ -204,7 +232,7 @@ services:
       SCOUT_AUTO_REPRODUCE: ${SCOUT_AUTO_REPRODUCE:-false}
       SCOUT_AUTO_REPRODUCE_MAX_CASES: ${SCOUT_AUTO_REPRODUCE_MAX_CASES:-2}
       SCOUT_AUTO_REPRODUCE_MAX_ACTIONS: ${SCOUT_AUTO_REPRODUCE_MAX_ACTIONS:-12}
-      SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082}
+      SCOUT_ALLOWED_ORIGINS: ${SCOUT_ALLOWED_ORIGINS:-http://exploration-fixture:8082,http://larchwood:8084,http://larchwood:8085}
       SCOUT_BROWSER_SLOTS: ${SCOUT_BROWSER_SLOTS:-3}
       SCOUT_TEST_FORM_RULES: ${SCOUT_TEST_FORM_RULES:-[]}
     depends_on:

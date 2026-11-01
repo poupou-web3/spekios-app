@@ -238,6 +238,25 @@ auto-reproduction-test:
 fixture: build-recorder
     docker compose up -d --no-build --wait exploration-fixture
 
+# Larchwood, a shop with known bugs. Explore it, then score the run with bug-lab-score.
+bug-lab: build-recorder
+    docker compose up -d --no-build --wait larchwood
+    @echo "In Scout, explore http://larchwood:8084 (bugs on) or http://larchwood:8085 (every bug fixed)."
+    @echo "On this machine: http://127.0.0.1:18084 and http://127.0.0.1:18085"
+
+# The same shop on this computer, without Docker. Extra flags: --fixed, --bugs id,id, --pair.
+bug-lab-local port="4100" *flags:
+    node apps/bug-lab/server.mjs --port "$@"
+
+# Found, missed and never-tried bugs for one or more runs of the shop.
+bug-lab-score +run_ids:
+    node scripts/score-bug-lab.mjs "$@"
+
+# The shop's HTTP and scoring tests, then the Chromium check that every bug is real.
+bug-lab-test: build-recorder
+    node --test apps/bug-lab/test/*.test.mjs
+    docker compose run --rm --no-deps -e SCOUT_BROWSER_ENDPOINT= --entrypoint ./node_modules/.bin/tsx recorder --test test/bug-lab.test.ts
+
 graph run_id:
     node scripts/api-read.mjs "/v1/runs/$1/graph"
 

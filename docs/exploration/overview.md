@@ -26,7 +26,7 @@ The same loop is available from the [workspace](../platform/workspace.md) at **h
 | `SCOUT_EXPLORER_MAX_MINUTES` | empty | Server default wall-clock limit per exploration attempt; empty means no limit. Integer 1–10080 |
 | `SCOUT_EXPLORER_APP_MEMORY` | `true` | Default for remembering explored pages and controls across runs; see [memory across runs](./planner.md#memory-across-runs) |
 | `SCOUT_EXPLORER_VIEWPORT` | `desktop` | `desktop` (1920×1080), `tablet` (768×1024), or `mobile` (390×844) |
-| `SCOUT_ALLOWED_ORIGINS` | `http://exploration-fixture:8082` | Extra origins for private, HTTP and internal apps. Public https sites do not need an entry |
+| `SCOUT_ALLOWED_ORIGINS` | `http://exploration-fixture:8082,http://larchwood:8084,http://larchwood:8085` | Extra origins for private, HTTP and internal apps. Public https sites do not need an entry |
 | `SCOUT_CHROMIUM_SANDBOX` | `true` | Chromium's own sandbox inside the browser sandbox container. Set `false` only on hosts where Chromium cannot start it |
 
 ```sh

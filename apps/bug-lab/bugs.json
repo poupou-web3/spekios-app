@@ -1,0 +1,204 @@
+{
+  "app": "Larchwood",
+  "about": "Every bug the shop ships with, and four behaviours that look odd but are correct. 'match' tells the scorer which recorded actions trigger an entry. before and after are regular expressions on the page path and query before and after the action; role and control match the control Scout used; every: n means only every nth matching action in a run triggers it.",
+  "bugs": [
+    {
+      "id": "wishlist-dead",
+      "type": "easy",
+      "title": "Save to wishlist does nothing",
+      "page": "/product/*",
+      "viewport": "any",
+      "steps": ["Open any product", "Click \"Save to wishlist\""],
+      "expected": "The button changes to \"Saved to wishlist\" and a confirmation appears.",
+      "actual": "Nothing changes on screen and no request is sent.",
+      "evidence": ["screen"],
+      "match": { "before": "^/product/", "role": "button", "control": "^Save to wishlist$" }
+    },
+    {
+      "id": "returns-404",
+      "type": "easy",
+      "title": "Shipping & returns link leads to a 404",
+      "page": "footer, every page",
+      "viewport": "any",
+      "steps": ["Click \"Shipping & returns\" in the footer"],
+      "expected": "The shipping and returns policy page opens.",
+      "actual": "\"Page not found\" with HTTP 404.",
+      "evidence": ["screen", "network"],
+      "match": { "after": "^/shipping-returns" }
+    },
+    {
+      "id": "tracking-500",
+      "type": "easy",
+      "title": "Order tracking returns a server error",
+      "page": "/track",
+      "viewport": "any",
+      "steps": ["Open \"Track order\"", "Search any order number with \"Find my order\""],
+      "expected": "The order's status, or a message that no order has that number.",
+      "actual": "A bare \"Internal Server Error\" page with HTTP 500.",
+      "evidence": ["screen", "network"],
+      "match": { "after": "^/track/status" }
+    },
+    {
+      "id": "faq-crash",
+      "type": "easy",
+      "title": "One help question never opens",
+      "page": "/help",
+      "viewport": "any",
+      "steps": ["Open \"Help\"", "Click \"Can I exchange an item?\""],
+      "expected": "The answer opens below the question, like the other questions.",
+      "actual": "Nothing opens and the console shows an uncaught TypeError.",
+      "evidence": ["screen", "console"],
+      "match": { "before": "^/help", "role": "button", "control": "^Can I exchange an item\\?$" }
+    },
+    {
+      "id": "search-ignored",
+      "type": "wrong-data",
+      "title": "Search ignores what you type",
+      "page": "/shop",
+      "viewport": "any",
+      "steps": ["Open \"Shop\"", "Search for \"lamp\""],
+      "expected": "Only matching products, e.g. 3 lamps for \"lamp\".",
+      "actual": "The heading says \"Results for “lamp”\" but all 24 products are listed.",
+      "evidence": ["screen"],
+      "match": { "after": "^/shop\\?(.*&)?q=[^&]" }
+    },
+    {
+      "id": "stock-filter",
+      "type": "wrong-data",
+      "title": "\"In stock only\" still lists sold-out products",
+      "page": "/shop",
+      "viewport": "any",
+      "steps": ["Open \"Shop\"", "Tick \"In stock only\""],
+      "expected": "Sold-out products disappear from the list.",
+      "actual": "Products marked \"Sold out\" stay in the list (Ceramic Pendant Light is on page 1).",
+      "evidence": ["screen"],
+      "match": { "after": "^/shop\\?(.*&)?stock=1" }
+    },
+    {
+      "id": "price-sort",
+      "type": "wrong-data",
+      "title": "Sorting by price sorts the numbers as text",
+      "page": "/shop",
+      "viewport": "any",
+      "steps": ["Open \"Shop\"", "Choose \"Price: low to high\" in \"Sort by\""],
+      "expected": "Free, €9, €12, €18, €24…",
+      "actual": "Free, €110, €12, €1,250, €129… (\"Price: high to low\" is wrong the same way).",
+      "evidence": ["screen"],
+      "match": { "after": "^/shop\\?(.*&)?sort=price-" }
+    },
+    {
+      "id": "cart-total",
+      "type": "wrong-data",
+      "title": "Changing a quantity in the cart leaves the total unchanged",
+      "page": "/cart",
+      "viewport": "any",
+      "steps": ["Add any product to the cart", "Open the cart", "Click \"Increase quantity of …\""],
+      "expected": "Line total, subtotal, delivery and total all update.",
+      "actual": "Only the quantity and line total update. Subtotal and total keep the old amounts until the page reloads.",
+      "evidence": ["screen"],
+      "match": { "before": "^/cart", "role": "button", "control": "^(Increase|Decrease) quantity of " }
+    },
+    {
+      "id": "review-dates",
+      "type": "visual",
+      "title": "Reviews show \"Invalid Date\" and \"undefined / 5\"",
+      "page": "/product/*",
+      "viewport": "any",
+      "steps": ["Open any product", "Click the \"Reviews (n)\" tab"],
+      "expected": "Each review shows a date such as \"12 March 2026\" and a rating such as \"4 / 5\".",
+      "actual": "Every review shows \"Invalid Date\" and \"undefined / 5\".",
+      "evidence": ["screen"],
+      "match": { "before": "^/product/", "role": "button", "control": "^Reviews \\(" }
+    },
+    {
+      "id": "banner-overlap",
+      "type": "visual",
+      "title": "Sale banner covers the Deals page title",
+      "page": "/deals",
+      "viewport": "any",
+      "steps": ["Open \"Deals\""],
+      "expected": "The banner sits above the title \"This week's deals\".",
+      "actual": "The banner is drawn over the title and both texts overlap.",
+      "evidence": ["screen"],
+      "match": { "after": "^/deals" }
+    },
+    {
+      "id": "size-guide-trap",
+      "type": "visual",
+      "title": "The size guide can't be closed",
+      "page": "/product/*",
+      "viewport": "any",
+      "steps": ["Open any product", "Click \"Size guide\"", "Click \"Close\""],
+      "expected": "The dialog closes.",
+      "actual": "The dialog stays open and keeps covering the page. Escape and clicking outside don't close it either.",
+      "evidence": ["screen"],
+      "match": { "before": "^/product/", "role": "button", "control": "^Close$" }
+    },
+    {
+      "id": "lost-filters",
+      "type": "hard",
+      "title": "\"Back to results\" forgets the search, filters and page",
+      "page": "/shop → /product/*",
+      "viewport": "any",
+      "steps": ["Open \"Shop\" and choose a category, a sort, a search or another page", "Open a product", "Click \"Back to results\""],
+      "expected": "The shop opens with the same search, filters and page as before.",
+      "actual": "The shop opens unfiltered on page 1.",
+      "evidence": ["screen"],
+      "match": { "before": "^/product/[^?]*\\?(.*&)?from=[^&]", "role": "link", "control": "^Back to results$" }
+    },
+    {
+      "id": "flaky-add",
+      "type": "hard",
+      "title": "Every second \"Add to cart\" fails",
+      "page": "/product/*",
+      "viewport": "any",
+      "steps": ["Click \"Add to cart\" on any product", "Click \"Add to cart\" again, on the same or another product"],
+      "expected": "Every add succeeds.",
+      "actual": "The 2nd, 4th, 6th… add in a browser session shows \"Couldn't add the item. Please try again.\" and the request returns HTTP 503. A fresh browser's first add works, so a replay of a single add won't reproduce it.",
+      "evidence": ["screen", "network"],
+      "match": { "before": "^/product/", "role": "button", "control": "^Add to cart$", "every": 2 }
+    },
+    {
+      "id": "mobile-menu",
+      "type": "hard",
+      "title": "The mobile menu opens off-screen",
+      "page": "every page, mobile width",
+      "viewport": "mobile",
+      "steps": ["Use a mobile-width screen", "Click \"Menu\""],
+      "expected": "The navigation links appear below the header.",
+      "actual": "Nothing appears: the menu is placed to the right of the screen.",
+      "evidence": ["screen"],
+      "match": { "role": "button", "control": "^Menu$" }
+    }
+  ],
+  "decoys": [
+    {
+      "id": "sold-out",
+      "title": "Sold-out products can't be added",
+      "page": "/product/ceramic-pendant-light, /product/walnut-bench, /product/moss-wool-throw",
+      "behaviour": "The add button is greyed out and reads \"Sold out\". That is correct.",
+      "match": { "after": "^/product/(ceramic-pendant-light|walnut-bench|moss-wool-throw)(\\?|$)" }
+    },
+    {
+      "id": "invalid-promo",
+      "title": "Unknown promo codes are refused",
+      "page": "/cart",
+      "behaviour": "Any code except WELCOME10 shows \"This code isn't valid.\" WELCOME10 takes 10% off. Both are correct.",
+      "match": { "before": "^/cart", "role": "button", "control": "^Apply code$" }
+    },
+    {
+      "id": "empty-cart",
+      "title": "An empty cart says so",
+      "page": "/cart",
+      "behaviour": "With nothing added, the cart shows \"Your cart is empty.\" and a \"Continue shopping\" link. That is correct.",
+      "match": { "after": "^/cart", "after_text": "Your cart is empty" }
+    },
+    {
+      "id": "free-sample",
+      "title": "One product is free",
+      "page": "/product/fabric-swatch-set",
+      "behaviour": "The Fabric Swatch Set costs nothing and ships free. It shows \"Free\" and adds €0.00 to the cart. That is correct.",
+      "match": { "after": "^/product/fabric-swatch-set(\\?|$)" }
+    }
+  ]
+}
