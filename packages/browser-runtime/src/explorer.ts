@@ -133,7 +133,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
   const maxDurationMs = replay ? null : options.maxDurationMs !== undefined ? options.maxDurationMs : explorationDurationMs();
   const maxTokens = replay ? null : options.maxTokens ?? null, maxCostUsd = replay ? null : options.maxCostUsd ?? null;
   const stopAfterIdleActions = replay ? null : options.stopAfterIdleActions ?? null;
-  const strategy = new StrategyScheduler(strategySettings(options.strategy));
+  const strategy = new StrategyScheduler(strategySettings(options.strategy), maxActions === Infinity ? null : maxActions);
   for (const [name, value] of [['token', maxTokens], ['cost', maxCostUsd], ['idle action', stopAfterIdleActions]] as const)
     if (value !== null && !(Number.isFinite(value) && value > 0)) throw new Error(`Invalid exploration ${name} limit.`);
   if (maxDurationMs !== null && (!Number.isInteger(maxDurationMs) || maxDurationMs < 1)) throw new Error('Invalid exploration time limit.');
@@ -169,7 +169,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
     // Consecutive actions that reached only states already recorded in this run.
     // A new map state is one no run of this app had reached before.
-    let idleActions = 0, stateCreated = false, mapNovel = false;
+    let idleActions = 0, stateCreated = false, screenCreated = false, mapNovel = false;
     // Re-walks wait while an operator focus steers planning.
     let focused = false;
     // States ranked in this run; a stored ranking is reused only on a first visit.
@@ -320,6 +320,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           [stateId, runId, c.capture_id, fingerprint, c.observation.url, mapped?.key ?? null, mapped?.page_template ?? null]);
         const id: string = rows[0].state_id, mapKey: string | null = mapped ? rows[0].map_state_key ?? mapped.key : null;
         stateCreated = rows[0].created;
+        screenCreated = !!mapKey && !planner.screenSeen(mapKey);
         mapNovel = !!mapKey && !planner.mapKnown(mapKey);
         if (mapKey) mapKeys.set(id, mapKey);
         planner.observe(id, c, parentId, signals, likelihood, initial, mapKey);
@@ -660,7 +661,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           let comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
           let toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
           idleActions = stateCreated ? 0 : idleActions + 1;
-          const reached = { newState: stateCreated, newMapState: mapNovel };
+          // Progress: a screen this run had not reached, or a form step on the
+          // current one. Scrolling or coming back to a known screen is not.
+          const formStep = spec.command.type === 'fill' || spec.command.type === 'select' || spec.command.type === 'set_checked';
+          const reached = { progress: screenCreated || stateCreated && formStep, newMapState: mapNovel };
           // What earlier runs observed for this action on an equivalent screen.
           const fromKey = mapKeys.get(fromState); let toKey = mapKeys.get(toState);
           const earlier = fromKey && toKey ? planner.earlier(fromKey, spec.command) : null;
@@ -741,6 +745,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
                 toState = await state(recaptured.capture, fromState, changes(before.capture, recaptured.capture, lateDiff.rawMaskPng), spec.exploration?.purpose === 'explore' ? spec.exploration.likelihood : 1, executed === 1);
                 toKey = mapKeys.get(toState);
                 if (stateCreated && !wasNew) idleActions = 0;
+                reached.progress ||= screenCreated; reached.newMapState ||= mapNovel;
               }
               after = recaptured;
               diff = lateDiff;
@@ -778,7 +783,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               outcome: compared, strategy: spec.exploration?.strategy?.mode ?? null }, actionId);
           });
           const mode = spec.exploration?.strategy?.mode;
-          if (mode) strategy.record(mode, { travel: spec.exploration!.purpose !== 'explore', newState: reached.newState, compared,
+          if (mode) strategy.record(mode, { travel: spec.exploration!.purpose !== 'explore', progress: reached.progress, compared,
             reward: discoveryReward({ ...reached, compared, suspect: assessment.verdict === 'suspect' }) });
           const returning = spec.exploration?.purpose === 'return' ? spec.exploration.return_step : undefined;
           // Routes start where the action was planned: replaying this step from

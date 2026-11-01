@@ -2,7 +2,7 @@
 {
   "title": "Share a run between breadth, depth and re-walks",
   "description": "Each exploration shares its actions between new territory, deep journeys and re-walking paths earlier runs recorded. Set the split, and read depth and coverage per level.",
-  "reviewed": "2026-10-31",
+  "reviewed": "2026-11-01",
   "sidebar": {"order": 8}
 }
 ---
@@ -11,10 +11,21 @@ Every exploration shares its actions between three strategies:
 | Strategy | What it does | One turn |
 | --- | --- | --- |
 | **New territory** (breadth) | Tries controls no run has tried, spread across the app's areas. | One new control, plus any steps needed to reach it. |
-| **Deep journeys** (depth) | Follows one path, such as a sign-up or checkout, while it keeps reaching new screens. | Until a step reaches nothing new, the next step needs a return trip, or 12 steps. |
+| **Deep journeys** (depth) | Follows one path, such as a sign-up or checkout, while it keeps reaching new screens. | Until a step makes no progress, the next step needs a return trip, or the journey reaches its step limit. |
 | **Re-walk known paths** (rewalk) | Repeats an action earlier runs recorded in the [app map](../app-memory/#the-app-map) and compares where it leads and what it shows now. | One recorded action, plus any steps needed to reach it. |
 
 The default split is 50% new territory, 30% deep journeys and 20% re-walks. Steps taken to get back to an earlier screen count toward the strategy that asked for them.
+
+## When a journey ends
+
+A journey goes on while each step makes progress:
+
+- it reaches a screen this run has not reached yet;
+- or it fills a field, chooses an option or changes a checkbox, so a form moves forward.
+
+Scrolling, a small change that leaves the same controls, and a step back to a screen the run already reached end the journey. So does a next step that needs a return trip.
+
+A journey takes at most 12 steps. With an action limit, it is also held to its share of the limit, at least 2 steps: with the default 30% and a limit of 6 actions, a journey takes at most 2 steps. Without this, one journey could use a short run's whole budget, and the discovery tree would be a single chain.
 
 ## How turns are chosen
 
@@ -50,9 +61,15 @@ An active [testing focus](../testing-focus/) pauses re-walks until it is cleared
 
 ## Depth and coverage per level
 
-Depth is the number of steps from the entry page along the discovery tree. The **Flow** tab shows, for each depth, the screens reached and how many of their usable controls were tried. Blocked controls are counted separately. It also shows how many actions each strategy took and its current share.
+Depth is the number of screens from the entry page along the discovery tree. Scrolling, filling part of a form or closing a menu shows another view of the same screen, which keeps that screen's depth. The **Flow** tab shows:
 
-When a run ends, its configuration keeps **strategy** (actions, turns, yield and shares per strategy, the longest journey, and how many re-walked transitions matched or changed) and **coverage_by_depth**. The [app map](../app-memory/#the-app-map) reports the same per-depth coverage across all runs under **summary.by_depth**.
+- **Discovery tree**: each screen once, under the screen it was first reached from, with the action that reached it and how many of its controls were tried. A screen's other views are listed with it, and what was found from them appears under the screen.
+- **Depth and coverage**: for each depth, the screens reached and how many of their usable controls were tried in any view. Blocked controls are counted separately.
+- How many actions each strategy took and its current share.
+
+With few actions the tree stays small: each action can add at most one screen. A consent banner or another one-way choice on the entry page also leaves the page's other choices unreachable for the rest of the run, because the run keeps one browser session.
+
+When a run ends, its configuration keeps **strategy** (actions, turns, yield and shares per strategy, the longest journey and the journey step limit, and how many re-walked transitions matched or changed) and **coverage_by_depth**. The [app map](../app-memory/#the-app-map) reports the same per-depth coverage across all runs under **summary.by_depth**.
 
 ## Change the split
 

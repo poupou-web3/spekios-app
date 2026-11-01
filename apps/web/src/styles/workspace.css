@@ -196,6 +196,7 @@
 .discovery-tree li > div { display: flex; align-items: center; gap: 10px; min-width: 260px; padding: 10px 0; font-size: 13px; }
 .discovery-tree strong { font-weight: 550; overflow-wrap: anywhere; }
 .discovery-tree .small { flex: none; }
+.discovery-tree li > p { margin: -6px 0 8px; }
 .flow-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 20px 0; }
 .state-card { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); font-size: 13px; box-shadow: var(--shadow-sm); }
 .state-card strong { display: block; margin: 10px 0 6px; font-weight: 600; overflow-wrap: anywhere; }

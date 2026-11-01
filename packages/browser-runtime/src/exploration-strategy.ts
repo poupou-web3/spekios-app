@@ -4,12 +4,13 @@
 // takes the next turn, like a deficit round-robin scheduler. A turn ends when
 // its strategy has done what it set out to: one new control, one known
 // transition, or a whole journey. Travel to reach the target counts toward
-// the strategy that asked for it.
+// the strategy that asked for it. With an action limit, a journey is also
+// held to its share of it, so one journey cannot take a short run.
 //
 // Shares adapt to what each strategy finds. Its yield is a decayed mean of
 // per-action discovery rewards; a strategy that stops finding anything keeps
 // a quarter of its share, so none is starved by an early streak.
-export const STRATEGY_VERSION = 'strategy-v1';
+export const STRATEGY_VERSION = 'strategy-v2';
 export const STRATEGY_MODES = ['breadth', 'depth', 'rewalk'] as const;
 export type StrategyMode = typeof STRATEGY_MODES[number];
 export type StrategySettings = Record<StrategyMode, number> & { adaptive: boolean };
@@ -31,8 +32,10 @@ export function strategySettings(value: unknown): StrategySettings {
 // Discovery value of one executed action, from 0 to 1. A screen no run of
 // this app has reached is worth most; a difference from what earlier runs
 // observed for the same action is worth as much; a suspect adds to either.
-export function discoveryReward(o: { newState: boolean; newMapState: boolean; compared: 'same' | 'changed' | null; suspect: boolean }) {
-  let reward = o.newMapState ? 1 : o.newState ? .3 : 0;
+// Progress (a screen new to this run, or a form step on the current one) is
+// worth a little.
+export function discoveryReward(o: { progress: boolean; newMapState: boolean; compared: 'same' | 'changed' | null; suspect: boolean }) {
+  let reward = o.newMapState ? 1 : o.progress ? .3 : 0;
   if (o.compared === 'changed') reward = 1;
   else if (o.compared === 'same') reward = Math.max(reward, .2);
   return Math.min(1, reward + (o.suspect ? .5 : 0));
@@ -50,7 +53,8 @@ export class StrategyScheduler {
   private turn: Turn | null = null;
   private longestJourney = 0;
   private compared = 0; private changed = 0;
-  constructor(readonly settings: StrategySettings = DEFAULT_STRATEGY) {}
+  // budget is the run's action limit, or null without one.
+  constructor(readonly settings: StrategySettings = DEFAULT_STRATEGY, readonly budget: number | null = null) {}
 
   yieldOf(mode: StrategyMode) {
     return (PRIOR_MEAN * PRIOR_WEIGHT + this.decayed[mode]) / (PRIOR_WEIGHT + this.weight[mode]);
@@ -77,6 +81,13 @@ export class StrategyScheduler {
     const mode = [...available].sort((a, b) => deficit(b) - deficit(a) || this.settings[b] - this.settings[a])[0];
     return { mode, continued: false, available };
   }
+  // A journey's step limit: MAX_JOURNEY_STEPS, or its share of the action
+  // limit when that is smaller, but at least two steps.
+  journeyLimit() {
+    if (this.budget === null) return MAX_JOURNEY_STEPS;
+    const share = this.shares(this.available.length ? this.available : STRATEGY_MODES).depth;
+    return Math.min(MAX_JOURNEY_STEPS, Math.max(2, Math.ceil(share * this.budget)));
+  }
   // The strategy that would take the next action, without starting a turn.
   peek(best: Best) { return this.decide(best)?.mode ?? null; }
   choose(best: Best) {
@@ -86,8 +97,10 @@ export class StrategyScheduler {
     if (!decision.continued) { this.turn = { mode: decision.mode, steps: 0, traveling: false, open: true }; this.turns[decision.mode]++; }
     return { mode: decision.mode, continued: decision.continued, turn: this.turns[decision.mode], shares: this.shares(decision.available) };
   }
-  // Called once per executed action of the chosen strategy.
-  record(mode: StrategyMode, outcome: { travel: boolean; reward: number; newState: boolean; compared: 'same' | 'changed' | null }) {
+  // Called once per executed action of the chosen strategy. A journey goes on
+  // only after progress: a screen new to this run, or a form step on the
+  // current one. Scrolling or coming back to a known screen ends it.
+  record(mode: StrategyMode, outcome: { travel: boolean; reward: number; progress: boolean; compared: 'same' | 'changed' | null }) {
     const shares = this.shares(this.available);
     for (const m of this.available) this.credit[m] += shares[m];
     this.spent[mode]++;
@@ -99,7 +112,7 @@ export class StrategyScheduler {
     if (!t || t.mode !== mode) return;
     t.steps++;
     t.traveling = outcome.travel;
-    if (!outcome.travel) t.open = mode === 'depth' && outcome.newState && t.steps < MAX_JOURNEY_STEPS;
+    if (!outcome.travel) t.open = mode === 'depth' && outcome.progress && t.steps < this.journeyLimit();
     if (mode === 'depth') this.longestJourney = Math.max(this.longestJourney, t.steps);
   }
   // A compact view for each selection record.
@@ -112,6 +125,6 @@ export class StrategyScheduler {
   summary() {
     return { version: STRATEGY_VERSION, settings: this.settings, ...this.state(), turns: { ...this.turns },
       reward_total: Object.fromEntries(STRATEGY_MODES.map(m => [m, Math.round(this.rewards[m] * 100) / 100])),
-      longest_journey: this.longestJourney, compared_transitions: this.compared, changed_transitions: this.changed };
+      longest_journey: this.longestJourney, journey_limit: this.journeyLimit(), compared_transitions: this.compared, changed_transitions: this.changed };
   }
 }
