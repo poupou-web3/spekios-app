@@ -14,7 +14,7 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,launchUrlError,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {addSavedModel,editOverrides,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel} from './views/settings.js';
+import {addCatalogModel,addSavedModel,editOverrides,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 root.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -69,6 +69,7 @@ root.addEventListener('click',async e=>{
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
   // After adding, the model ID field is ready for the next one (or for fixing this one).
+  if(action==='add-catalog-model'){addCatalogModel(el.dataset.provider,el.dataset.model);render();}
   if(action==='add-saved-model')addModelAndRefocus();
   if(action==='remove-saved-model'&&removeSavedModel(Number(el.dataset.index)))render();
   if(action==='prev-action'||action==='next-action'){navigateAction(action==='prev-action'?-1:1,el.dataset.id);}

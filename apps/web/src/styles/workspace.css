@@ -257,6 +257,15 @@
 .model-add-fields .button { min-height: 40px; justify-self: start; }
 .model-add .settings-feedback { margin-top: 12px; }
 .model-add-status { margin-top: 10px; }
+.model-catalog { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.model-catalog h4 { margin-bottom: 4px; }
+.model-catalog > p { margin-bottom: 10px; }
+.catalog-family { margin-top: 12px; }
+.catalog-family-name { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.catalog-models { display: flex; flex-wrap: wrap; gap: 8px; }
+.catalog-model { height: auto; min-height: 44px; padding: 7px 10px; white-space: normal; text-align: left; flex-direction: column; align-items: flex-start; gap: 1px; }
+.catalog-model small { color: var(--muted); font-size: 11px; font-weight: 450; line-height: 1.35; }
+.catalog-model .catalog-note { color: var(--amber); }
 .provider-status li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .provider-status li:first-child { border-top: 0; padding-top: 0; }
 .settings-list-title { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; font-weight: 600; }
