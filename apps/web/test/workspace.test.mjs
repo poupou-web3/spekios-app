@@ -192,6 +192,26 @@ test('resumed, queued, older and verification runs restart only where it is safe
   replay.config.fix_verification={issue_id:'issue'};assert.equal(ui.restartRequest('run',replay),null);
   assert.equal(ui.restartRequest('run',run('fixture',{lifecycle:'failed',config:{runtime_version:'recorder-v1'}})),null);
 });
+test('an older run keeps the saved sign-in it started with when its job is no longer loaded',async()=>{
+  const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
+  const session={session_id:'saved',expires_at:'2999-01-01T00:00:00Z'};
+  const stopped=run('older',{lifecycle:'interrupted',config:{runtime_version:'explorer-v1',replay_of:null,viewport_profile:'desktop',auth_mode:'sign_in',auth_contexts:[
+    {context_id:'saved',session_id:'saved',verification:'saved_session_reused'},
+    {context_id:'later',session_id:'later',verification:'account_created_entry_page_sign_out_control'}]}});
+  Object.assign(ui.state,{runs:[stopped],jobs:[],access:{requests:[],sessions:[session,{session_id:'later',expires_at:'2999-01-01T00:00:00Z'}]}});
+  assert.equal(ui.restartRequest('run',stopped).session_id,'saved','the launch session is reused, not a later sign-in');
+  assert.equal(ui.continueRequest(stopped).session_id,'saved');
+  await click(ui,'restart-run','older');
+  assert.equal(posted[0].session_id,'saved');assert.equal(posted[0].auth_mode,'sign_in');
+  session.expires_at='2000-01-01T00:00:00Z';
+  assert.equal(ui.restartRequest('run',stopped).session_id,undefined,'an expired launch session is left out');
+  assert.equal(ui.continueRequest(stopped).session_id,undefined);
+  session.expires_at='2999-01-01T00:00:00Z';session.revoked_at='2026-01-01T00:00:00Z';
+  assert.equal(ui.restartRequest('run',stopped).session_id,undefined,'a removed launch session is left out');
+  stopped.config.auth_contexts=[{context_id:'later',session_id:'later',verification:'account_created_entry_page_sign_out_control'}];
+  delete session.revoked_at;
+  assert.equal(ui.restartRequest('run',stopped).session_id,undefined,'a sign-in saved during the run is not the session the run started with');
+});
 test('refresh rendering preserves a full text selection and marked disclosures',()=>{
   const ui=workspace();connect(ui);const selection=[];let focus=0;
   const input={id:'run-search',dataset:{},selectionStart:2,selectionEnd:7,selectionDirection:'backward',focus(){focus++;},setSelectionRange(...args){selection.push(args);}};

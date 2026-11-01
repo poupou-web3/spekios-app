@@ -20,8 +20,9 @@ function relaunch(kind,item){
   const job=kind==='job'?item:state.jobs.find(j=>j.run_id===item.run_id||j.previous_run_ids?.includes(item.run_id));
   // A job resumed after an interruption carries on in a later run.
   if(kind==='run'&&job?.run_id&&job.run_id!==item.run_id)return null;
-  // Only recent finished jobs are loaded. An older run records enough to start it again.
-  const source=job?.request??(kind==='job'?null:item.config.replay_of?{kind:'reproduce',source_action_id:item.config.replay_of.source_action_id}:{kind:'explore',target_url:item.target_url,auth_mode:item.config.auth_mode,auto_reproduce:item.config.automatic_reproduction_policy?.enabled});
+  // Only recent finished jobs are loaded. An older run records enough to start it again, including the saved sign-in it started with.
+  const launchSession=item.config?.auth_contexts?.find(c=>c.verification==='saved_session_reused')?.session_id;
+  const source=job?.request??(kind==='job'?null:item.config.replay_of?{kind:'reproduce',source_action_id:item.config.replay_of.source_action_id}:{kind:'explore',target_url:item.target_url,auth_mode:item.config.auth_mode,session_id:launchSession,auto_reproduce:item.config.automatic_reproduction_policy?.enabled});
   if(source?.kind==='reproduce')return {kind:'reproduce',source_action_id:source.source_action_id};
   if(source?.kind!=='explore')return null;
   const {target_url,auth_mode,session_id,auto_reproduce,app_memory}=source;
