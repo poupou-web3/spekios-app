@@ -6,7 +6,7 @@ The interface customers use: launch explorations, follow runs, review evidence a
 index.html, connect.html, issues.html   page shells (CSP-safe: external scripts and styles only)
 src/
   main.js          entry: delegated events, polling, startup
-  app.js           render, refresh, hash routing (#/workspace[/<run>[/<action>]], #/settings)
+  app.js           render, refresh, hash routing (#/workspace[/<run>[/<action>]], #/settings[/<section>])
   state.js         shared state; values several modules change live on `state`
   api.js, images.js, jobs.js, shell.js, private-login.js
   views/           home, run, action, review, steering, automatic, flow, settings, drawer, export

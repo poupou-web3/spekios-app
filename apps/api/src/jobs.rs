@@ -77,13 +77,46 @@ fn valid_model(model: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"/:._-".contains(&c))
 }
+fn valid_provider(provider: &str) -> bool {
+    matches!(provider, "openai" | "anthropic" | "openrouter" | "meta")
+}
+/// A model kept in the settings page's list to choose from. It names a
+/// provider and model ID; credentials stay in the server configuration and
+/// jobs never freeze the list.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedModel {
+    provider: String,
+    model: String,
+    #[serde(default)]
+    label: Option<String>,
+}
+const MAX_SAVED_MODELS: usize = 30;
+const MAX_MODEL_LABEL_CHARS: usize = 60;
+impl SavedModel {
+    fn normalize(&self) -> Result<Value, &'static str> {
+        let model = self.model.trim();
+        let label = self.label.as_deref().unwrap_or("").trim();
+        if !valid_provider(&self.provider)
+            || self.model.chars().any(char::is_control)
+            || !valid_model(model)
+            || label.chars().any(char::is_control)
+            || label.chars().count() > MAX_MODEL_LABEL_CHARS
+        {
+            return Err("invalid_saved_model");
+        }
+        let mut saved = json!({"provider":self.provider,"model":model});
+        if !label.is_empty() {
+            saved["label"] = json!(label);
+        }
+        Ok(saved)
+    }
+}
 impl NavigationModel {
     fn normalize(&self, free_only: bool) -> Result<Value, &'static str> {
         let model = self.model.trim();
-        if !matches!(
-            self.provider.as_str(),
-            "openai" | "anthropic" | "openrouter" | "meta"
-        ) || self.model.chars().any(char::is_control)
+        if !valid_provider(&self.provider)
+            || self.model.chars().any(char::is_control)
             || !valid_model(model)
         {
             return Err("invalid_navigation_model");
@@ -185,10 +218,7 @@ impl LimitOverride {
         let invalid = Err("invalid_limit_override");
         if self.project_id.is_none() && self.provider.is_none() && self.model.is_none()
             || self.project_id.is_some_and(|id| id.is_nil())
-            || self
-                .provider
-                .as_deref()
-                .is_some_and(|p| !matches!(p, "openai" | "anthropic" | "openrouter" | "meta"))
+            || self.provider.as_deref().is_some_and(|p| !valid_provider(p))
             || self.model.as_deref().is_some_and(|m| {
                 m.is_empty()
                     || m.len() > 200
@@ -295,6 +325,9 @@ pub struct SettingsSubmission {
     reuse_rankings: bool,
     #[serde(default)]
     navigation_model: Option<NavigationModel>,
+    /// Models to choose from on the settings page. Absent: an empty list.
+    #[serde(default)]
+    saved_models: Vec<SavedModel>,
     viewport_profile: String,
     free_only: bool,
     auto_reproduce: bool,
@@ -320,10 +353,7 @@ impl SettingsSubmission {
         {
             return Err("invalid_settings_request_id_or_revision");
         }
-        if !matches!(
-            self.provider.as_str(),
-            "openai" | "anthropic" | "openrouter" | "meta"
-        ) {
+        if !valid_provider(&self.provider) {
             return Err("invalid_settings_provider");
         }
         let model = self.model.trim();
@@ -364,6 +394,21 @@ impl SettingsSubmission {
             Some(navigation) => navigation.normalize(self.free_only)?,
             None => Value::Null,
         };
+        if self.saved_models.len() > MAX_SAVED_MODELS {
+            return Err("invalid_saved_model");
+        }
+        let saved_models = self
+            .saved_models
+            .iter()
+            .map(SavedModel::normalize)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut listed = std::collections::HashSet::new();
+        if !saved_models
+            .iter()
+            .all(|m| listed.insert(json!([m["provider"], m["model"]]).to_string()))
+        {
+            return Err("duplicate_saved_model");
+        }
         if !(1..=3).contains(&self.max_auto_reproductions)
             || !(1..=MAX_AUTO_REPLAY_ACTIONS).contains(&self.max_auto_replay_actions)
         {
@@ -389,7 +434,7 @@ impl SettingsSubmission {
                     "autoReproduce":self.auto_reproduce,"maxAutoReproductions":self.max_auto_reproductions,
                     "maxAutoReplayActions":self.max_auto_replay_actions,"appMemory":self.app_memory,
                     "explorationStrategy":strategy,"reuseRankings":self.reuse_rankings,
-                    "navigationModel":navigation_model
+                    "navigationModel":navigation_model,"savedModels":saved_models
                 });
                 settings.as_object_mut().unwrap().extend(limits);
                 settings
@@ -427,6 +472,17 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
         }
     }
     settings["settingsRevision"] = json!(revision);
+    settings
+}
+
+/// What the settings page reads: the job defaults plus the saved model list.
+/// Jobs are admitted from settings_snapshot, so they never freeze the list.
+fn settings_view(base: &Value, saved: Option<&Value>, revision: i64) -> Value {
+    let mut settings = settings_snapshot(base, saved, revision);
+    settings["savedModels"] = saved
+        .and_then(|s| s.get("savedModels"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
     settings
 }
 
@@ -783,7 +839,7 @@ impl Queue {
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
         Ok(
-            json!({"revision":revision,"settings":settings_snapshot(&self.settings,settings.as_ref(),revision)}),
+            json!({"revision":revision,"settings":settings_view(&self.settings,settings.as_ref(),revision)}),
         )
     }
 
@@ -813,7 +869,7 @@ impl Queue {
             )?;
             let revision = saved["revision"].as_i64().ok_or("database_unavailable")?;
             return Ok(
-                json!({"revision":revision,"settings":settings_snapshot(&self.settings,Some(&saved["settings"]),revision),"reused":true}),
+                json!({"revision":revision,"settings":settings_view(&self.settings,Some(&saved["settings"]),revision),"reused":true}),
             );
         }
         let current:i64=tx.query_one("SELECT COALESCE(max(revision),0) FROM exploration_settings_versions WHERE workspace_id=$1 AND user_id=$2",&[&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_|"database_unavailable")?.get(0);
@@ -821,7 +877,7 @@ impl Queue {
         tx.execute("INSERT INTO exploration_settings_versions(request_id,workspace_id,user_id,revision,expected_revision,settings) VALUES($1,$2,$3,$4,$5,$6)",&[&input.request_id,&self.principal.workspace_id,&self.principal.user_id,&revision,&input.expected_revision,&input.settings]).await.map_err(|_|"database_unavailable")?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
         Ok(
-            json!({"revision":revision,"settings":settings_snapshot(&self.settings,Some(&input.settings),revision),"reused":false}),
+            json!({"revision":revision,"settings":settings_view(&self.settings,Some(&input.settings),revision),"reused":false}),
         )
     }
 
@@ -1485,6 +1541,68 @@ mod tests {
             normalize_settings(split).unwrap().settings["explorationStrategy"],
             json!({"breadth":0,"depth":70,"rewalk":30,"adaptive":false})
         );
+    }
+
+    #[test]
+    fn saved_models_are_a_bounded_list_for_the_settings_page_that_jobs_never_freeze() {
+        assert_eq!(
+            normalize_settings(settings_input()).unwrap().settings["savedModels"],
+            json!([]),
+            "Older clients omit the list."
+        );
+        let mut input = settings_input();
+        input["saved_models"] = json!([
+            {"provider":"anthropic","model":" large-model ","label":"  Large  "},
+            {"provider":"openrouter","model":"vendor/lite:free","label":""},
+            {"provider":"openai","model":"paid-model"}
+        ]);
+        let settings = normalize_settings(input).unwrap().settings;
+        assert_eq!(
+            settings["savedModels"],
+            json!([
+                {"provider":"anthropic","model":"large-model","label":"Large"},
+                {"provider":"openrouter","model":"vendor/lite:free"},
+                {"provider":"openai","model":"paid-model"}
+            ]),
+            "Paid models can be listed while free-only is on; only the models in use must be free."
+        );
+        for saved_models in [
+            json!([{"provider":"other","model":"m"}]),
+            json!([{"provider":"openai","model":"a b"}]),
+            json!([{"provider":"openai","model":""}]),
+            json!([{"provider":"openai","model":"m","label":"x".repeat(61)}]),
+            json!([{"provider":"openai","model":"m","label":"bad\nlabel"}]),
+            json!([{"provider":"openai","model":"m","api_key":"secret"}]),
+            json!([{"provider":"openai","model":"m"},{"provider":"openai","model":" m "}]),
+            json!(
+                (0..=MAX_SAVED_MODELS)
+                    .map(|i| json!({"provider":"openai","model":format!("m{i}")}))
+                    .collect::<Vec<_>>()
+            ),
+        ] {
+            let mut input = settings_input();
+            input["saved_models"] = saved_models.clone();
+            assert!(
+                normalize_settings(input).is_err(),
+                "Rejected {saved_models}"
+            );
+        }
+        let mut same_id = settings_input();
+        same_id["saved_models"] =
+            json!([{"provider":"openai","model":"m"},{"provider":"openrouter","model":"m"}]);
+        assert!(
+            normalize_settings(same_id).is_ok(),
+            "Providers can share a model ID."
+        );
+        let saved = json!({"model":"m","savedModels":[{"provider":"openai","model":"m"}]});
+        let view = settings_view(&defaults(), Some(&saved), 2);
+        assert_eq!(view["savedModels"], saved["savedModels"]);
+        assert_eq!(
+            settings_view(&defaults(), None, 0)["savedModels"],
+            json!([])
+        );
+        let job_defaults = settings_snapshot(&defaults(), Some(&saved), 2);
+        assert!(job_defaults.get("savedModels").is_none());
     }
 
     #[test]

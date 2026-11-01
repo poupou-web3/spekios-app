@@ -48,7 +48,7 @@ Memory also keeps the rankings the model made for screens, so a later run can [r
 
 ## Turn it on or off
 
-Memory is on by default for explorations with a live model. Turn off **Remember explored pages and controls across runs** in **Settings → Exploration defaults** to explore without it. A run with memory off neither reads nor records it. Runs with simulated test models use memory only when the job explicitly asks for it, so repeated test runs stay independent.
+Memory is on by default for explorations with a live model. Turn off **Remember explored pages and controls across runs** in **Settings → Memory & sessions** to explore without it. A run with memory off neither reads nor records it. Runs with simulated test models use memory only when the job explicitly asks for it, so repeated test runs stay independent.
 
 Agents and API clients can override the default for one exploration with `app_memory: false` (or `true`) when starting it.
 

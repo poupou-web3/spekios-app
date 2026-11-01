@@ -10,7 +10,7 @@ An exploration has no action, time, token or cost limit unless you set one. It k
 
 ## Your limits
 
-Open **Settings → Exploration defaults → Limits**. Leave a field empty for no limit.
+Open **Settings → Limits**. Leave a field empty for no limit.
 
 | Limit | Range | What it counts |
 | --- | --- | --- |

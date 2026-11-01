@@ -1,4 +1,4 @@
-// Rendering, data refresh and hash routing for the workspace (#/workspace, #/workspace/<run>[/<action>], #/settings).
+// Rendering, data refresh and hash routing for the workspace (#/workspace, #/workspace/<run>[/<action>], #/settings[/<section>]).
 import {get} from './api.js';
 import {clearImages,loadImages} from './images.js';
 import {clearTrackedJob,followSubmittedJob} from './jobs.js';
@@ -8,7 +8,7 @@ import {root,state} from './state.js';
 import {closeReportExport} from './views/export.js';
 import {home} from './views/home.js';
 import {runView} from './views/run.js';
-import {applyConfiguration,settingsView} from './views/settings.js';
+import {SETTINGS_SECTIONS,applyConfiguration,settingsView} from './views/settings.js';
 import {mergeSteering} from './views/steering.js';
 let refreshing = false, renderIdentity = '', drawerOpener = null, rendering = false, renderAgain = false;
 export function render(){
@@ -23,7 +23,7 @@ export function render(){
   // Number inputs expose no caret. Reading selectionStart throws in some browsers.
   let selection=null;try{if(typeof focused?.selectionStart==='number')selection=[focused.selectionStart,focused.selectionEnd,focused.selectionDirection];}catch{}
   const focusId=focused?.id;
-  const focusKey=focused?.dataset?.action?{...focused.dataset}:null,identity=[state.view,state.runId,state.tab].join(':');
+  const focusKey=focused?.dataset?.action?{...focused.dataset}:null,identity=[state.view,state.runId,state.tab,state.settingsSection].join(':');
   const preserved=identity===renderIdentity;
   const details=preserved?Array.from(root.querySelectorAll('details[data-disclosure]')).map(n=>[n.dataset.disclosure,n.open]):[];
   const scroll=preserved?Array.from(root.querySelectorAll('.action-list,.event-list,.table-wrap,.drawer,.discovery-tree')).map(n=>[n.scrollTop,n.scrollLeft]):[];
@@ -55,8 +55,8 @@ export async function refresh(){
   try{
     const [runs,jobs,providers,access]=await Promise.all(['/v1/runs','/v1/browser-jobs','/v1/model-providers','/v1/browser-access'].map(get));
     if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
-    // Memory is shown only in Settings; other views do not poll it.
-    if(state.view==='settings'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
+    // Memory is shown only in Settings → Memory & sessions; other views do not poll it.
+    if(state.view==='settings'&&state.settingsSection==='data'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
     if(privateLogin&&!access.requests.some(a=>a.access_id===privateLogin.id&&['waiting','active'].includes(a.status)))await closePrivateLogin(false);
     if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
@@ -66,6 +66,8 @@ export async function refresh(){
 export async function route(){
   const parts=location.hash.replace(/^#\/?/,'').split('/');
   state.view=parts[0]==='settings'?'settings':'workspace';
+  // Each settings section is its own page, opened at the top. Unknown sections show the first.
+  if(state.view==='settings'){const section=SETTINGS_SECTIONS.some(([key])=>key===parts[1])?parts[1]:SETTINGS_SECTIONS[0][0];if(section!==state.settingsSection){state.settingsSection=section;window.scrollTo?.(0,0);}}
   const id=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'')?parts[1]:null;
   if(state.trackedJobId&&(state.view!=='workspace'||id))clearTrackedJob();
   if(id!==state.runId){state.runId=id;state.report=null;state.reportEtag='';state.actionId=null;state.tab='actions';state.image='after';state.findingFilter='needs_review';clearImages();}

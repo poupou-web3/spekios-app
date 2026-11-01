@@ -1,5 +1,6 @@
-// Workspace settings: exploration defaults, provider availability, saved app sessions and appearance.
-import {button,toast} from '/assets/ui/components.js';
+// Workspace settings, one section per page (#/settings/<section>): models, exploration, limits,
+// memory and sessions, appearance. One draft spans the sections and the save bar follows it.
+import {button,icon,toast} from '/assets/ui/components.js';
 import {MODEL_PROVIDERS,date,esc,number,providerName,short} from '/assets/ui/format.js';
 import {themePreference,themeSwitch} from '/assets/ui/theme.js';
 import {api,get} from '../api.js';
@@ -7,7 +8,7 @@ import {render} from '../app.js';
 import {state} from '../state.js';
 import {accessBanner} from './home.js';
 // Server bounds. Exploration limits are optional: empty means no limit.
-export const MAX_ACTIONS=10000,MAX_REPLAY_ACTIONS=100;
+export const MAX_ACTIONS=10000,MAX_REPLAY_ACTIONS=100,MAX_SAVED_MODELS=30,MAX_MODEL_LABEL=60;
 // A number input's value is canonical ("0") while a decimal is still being typed ("0.0"). Keep that text.
 export function numericFieldValue(raw){
   if(raw==='')return null;const n=Number(raw);return Number.isFinite(n)&&String(n)===raw?n:raw;
@@ -19,7 +20,33 @@ export const LIMITS=[['max_actions','maxActions','Maximum actions',1,MAX_ACTIONS
   ['stop_after_idle_actions','stopAfterIdleActions','Stop after actions with nothing new',5,1000,1]];
 // How each run's actions are shared: new territory, deep journeys and re-walks of known paths.
 export const STRATEGY=[['breadth','New territory'],['depth','Deep journeys'],['rewalk','Re-walk known paths']],DEFAULT_STRATEGY={breadth:50,depth:30,rewalk:20,adaptive:true};
-const MAX_OVERRIDES=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// [key, title, icon, summary]. The first section opens on #/settings.
+export const SETTINGS_SECTIONS=[['models','Models','bolt','Which models explore, and the list you pick them from'],['exploration','Exploration','flow','Screen size, strategy and automatic rechecks'],
+  ['limits','Limits','clock','When explorations stop, per project or model'],['data','Memory & sessions','database','What runs remember and saved app sign-ins'],['appearance','Appearance','image','Light or dark theme in this browser']];
+// The draft fields each form section edits, for its unsaved-changes mark and error links.
+const SECTION_FIELDS={models:['provider','model','navigation_model','saved_models','free_only','reuse_rankings'],exploration:['viewport_profile','exploration_strategy','auto_reproduce','max_auto_reproductions','max_auto_replay_actions'],
+  limits:[...LIMITS.map(([key])=>key),'limit_overrides'],data:['app_memory']};
+export function settingsSection(){return SETTINGS_SECTIONS.some(([key])=>key===state.settingsSection)?state.settingsSection:SETTINGS_SECTIONS[0][0];}
+export function settingsSectionTitle(){return SETTINGS_SECTIONS.find(([key])=>key===settingsSection())[1];}
+const MAX_OVERRIDES=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,MODEL_ID=/^[A-Za-z0-9/:._-]{1,200}$/,CONTROL=/[\x00-\x1f\x7f-\x9f]/;
+// Model IDs never contain "|", so a provider and model ID make one option value.
+const modelChoice=(provider,model)=>`${provider}|${model}`;
+const freeModel=model=>model==='openrouter/free'||model.endsWith(':free');
+// The saved model list, plus the models in use so they stay available after switching away.
+function modelList(saved,inUse){
+  const list=[],seen=new Set();
+  const add=(provider,model,label)=>{const id=String(model??'').trim();if(!MODEL_PROVIDERS.includes(provider)||!id||seen.has(modelChoice(provider,id)))return;seen.add(modelChoice(provider,id));list.push({provider,model:id,label:String(label??'').trim()});};
+  for(const m of Array.isArray(saved)?saved:[])add(m?.provider,m?.model,m?.label);
+  for(const [provider,model] of inUse)add(provider,model,'');
+  return list;
+}
+const inUseModels=values=>[[values.provider,values.model],[values.navigation_model.provider,values.navigation_model.model]];
+export function modelRoles(values,m){
+  const nav=values.navigation_model;
+  return [...(values.provider===m.provider&&values.model.trim()===m.model?['Exploration']:[]),...(nav.provider===m.provider&&nav.model.trim()===m.model?['Navigation']:[])];
+}
+// True, false, or null while provider status is unknown.
+function providerReady(provider){const p=(state.providers.providers||[]).find(x=>x.provider===provider);return p?p.configured===true:null;}
 // An override row: what it matches and its limits. Empty limits inherit.
 const overrideRow=(o={})=>({project_id:o.projectId||'',provider:o.provider||'',model:o.model||'',...Object.fromEntries(LIMITS.map(([key,camel])=>[key,o.limits?.[camel]??null]))});
 export function overridePayload(row){
@@ -28,66 +55,108 @@ export function overridePayload(row){
   return item;
 }
 export function configurationValues(settings=state.settings){
-  return {provider:settings.provider||'openrouter',model:settings.model||'',...Object.fromEntries(LIMITS.map(([key,camel])=>[key,settings[camel]??null])),
-    stop_after_idle_actions:settings.stopAfterIdleActions===undefined?50:settings.stopAfterIdleActions,limit_overrides:(settings.limitOverrides||[]).map(overrideRow),exploration_strategy:{...DEFAULT_STRATEGY,...settings.explorationStrategy},reuse_rankings:settings.reuseRankings!==false,navigation_model:{provider:settings.navigationModel?.provider||'',model:settings.navigationModel?.model||''},viewport_profile:settings.viewportProfile||'desktop',free_only:settings.provider==='openrouter'&&settings.freeOnly===true,auto_reproduce:settings.autoReproduce===true,max_auto_reproductions:settings.maxAutoReproductions??2,max_auto_replay_actions:settings.maxAutoReplayActions??12,app_memory:settings.appMemory!==false};
+  const provider=settings.provider||'openrouter',navigation_model={provider:settings.navigationModel?.provider||'',model:settings.navigationModel?.model||''};
+  return {provider,model:settings.model||'',...Object.fromEntries(LIMITS.map(([key,camel])=>[key,settings[camel]??null])),
+    stop_after_idle_actions:settings.stopAfterIdleActions===undefined?50:settings.stopAfterIdleActions,limit_overrides:(settings.limitOverrides||[]).map(overrideRow),exploration_strategy:{...DEFAULT_STRATEGY,...settings.explorationStrategy},reuse_rankings:settings.reuseRankings!==false,navigation_model,
+    saved_models:modelList(settings.savedModels,[[provider,settings.model],[navigation_model.provider,navigation_model.model]]),viewport_profile:settings.viewportProfile||'desktop',free_only:settings.provider==='openrouter'&&settings.freeOnly===true,auto_reproduce:settings.autoReproduce===true,max_auto_reproductions:settings.maxAutoReproductions??2,max_auto_replay_actions:settings.maxAutoReplayActions??12,app_memory:settings.appMemory!==false};
 }
+// The add-a-model fields start on the first provider this server can use.
+const newModel=()=>({provider:MODEL_PROVIDERS.find(p=>providerReady(p))||MODEL_PROVIDERS[0],model:'',label:''});
 export function configurationDraft(){
   const values=configurationValues(),fingerprint=JSON.stringify(values),old=state.configurationDraft;
   if(!old||!old.dirty&&!old.saving&&(old.revision!==state.settingsRevision||old.fingerprint!==fingerprint)){
-    state.configurationDraft={values,revision:state.settingsRevision,fingerprint,dirty:false,saving:false,requestId:null,error:'',message:old?.message||'',models:{[values.provider]:values.model}};
+    state.configurationDraft={values,revision:state.settingsRevision,fingerprint,dirty:false,saving:false,requestId:null,error:'',message:old?.message||'',adding:old?.adding||newModel(),addError:'',added:''};
   }
   return state.configurationDraft;
 }
-export function configurationError(values){
-  if(!MODEL_PROVIDERS.includes(values.provider))return 'Choose a supported provider.';
-  if(typeof values.model!=='string'||/[\x00-\x1f\x7f]/.test(values.model)||! /^[A-Za-z0-9/:._-]{1,200}$/.test(values.model.trim()))return 'Enter a model ID using letters, numbers, / : . _ or - (up to 200 characters).';
-  for(const [key,max,label] of [['max_auto_reproductions',3,'Maximum automatic cases'],['max_auto_replay_actions',MAX_REPLAY_ACTIONS,'Total replay actions']]){const n=finite(values[key]);if(!Number.isInteger(n)||n<1||n>max)return `${label} must be a whole number from 1 to ${max}.`;}
+// The first problem as [section, message], or null. Sections are checked in the order the navigation lists them.
+export function configurationIssue(values){
+  const nav=values.navigation_model,free=values.provider==='openrouter'&&values.free_only;
+  if(!MODEL_PROVIDERS.includes(values.provider))return ['models','Choose a supported provider.'];
+  if(typeof values.model!=='string'||CONTROL.test(values.model)||!MODEL_ID.test(values.model.trim()))return ['models','Enter a model ID using letters, numbers, / : . _ or - (up to 200 characters).'];
+  if(free&&!freeModel(values.model.trim()))return ['models','Free-only requires openrouter/free or a model ID ending in :free.'];
+  if(nav.provider){
+    if(!MODEL_PROVIDERS.includes(nav.provider))return ['models','Choose a supported navigation model provider.'];
+    if(CONTROL.test(nav.model)||!MODEL_ID.test(nav.model.trim()))return ['models','Enter a navigation model ID using letters, numbers, / : . _ or - (up to 200 characters).'];
+    if(nav.provider==='openrouter'&&values.free_only&&!freeModel(nav.model.trim()))return ['models','Free-only also applies to the navigation model: use openrouter/free or a model ID ending in :free.'];
+  }
+  if(values.saved_models.length>MAX_SAVED_MODELS)return ['models',`Keep at most ${MAX_SAVED_MODELS} models in your list.`];
+  const listed=new Set();
+  for(const m of values.saved_models){
+    if(!MODEL_PROVIDERS.includes(m.provider)||CONTROL.test(m.model)||!MODEL_ID.test(m.model.trim())||CONTROL.test(m.label)||[...m.label.trim()].length>MAX_MODEL_LABEL)return ['models',`Your model list has an entry that cannot be saved: ${m.model}. Remove it.`];
+    if(listed.has(modelChoice(m.provider,m.model.trim())))return ['models',`${m.model} is listed twice for ${providerName(m.provider)}.`];listed.add(modelChoice(m.provider,m.model.trim()));
+  }
+  if(!['desktop','tablet','mobile'].includes(values.viewport_profile))return ['exploration','Choose a supported viewport.'];
+  const split=values.exploration_strategy,share=key=>finite(split[key]);
+  if(STRATEGY.some(([key])=>!Number.isInteger(share(key))||share(key)<0||share(key)>100))return ['exploration','Strategy shares must be whole percentages from 0 to 100.'];
+  if(STRATEGY.reduce((sum,[key])=>sum+share(key),0)!==100)return ['exploration','Strategy shares must add up to 100%.'];
+  if(split.breadth+split.depth===0)return ['exploration','Give new territory or deep journeys a share.'];
+  for(const [key,max,label] of [['max_auto_reproductions',3,'Maximum automatic cases'],['max_auto_replay_actions',MAX_REPLAY_ACTIONS,'Total replay actions']]){const n=finite(values[key]);if(!Number.isInteger(n)||n<1||n>max)return ['exploration',`${label} must be a whole number from 1 to ${max}.`];}
   const limitError=(row,prefix='')=>{for(const [key,,label,min,max,step] of LIMITS){const v=row[key];if(v===null||v==='')continue;const n=finite(v);if(!Number.isFinite(n)||n<min||n>max||step===1&&!Number.isInteger(n))return `${prefix}${label} must be empty (no limit) or ${step===1?'a whole number':'a number'} from ${min} to ${max}.`;}return '';};
-  const own=limitError(values);if(own)return own;
-  if(values.limit_overrides.length>MAX_OVERRIDES)return `Use at most ${MAX_OVERRIDES} limit overrides.`;
+  const own=limitError(values);if(own)return ['limits',own];
+  if(values.limit_overrides.length>MAX_OVERRIDES)return ['limits',`Use at most ${MAX_OVERRIDES} limit overrides.`];
   const seen=new Set();
   for(const [index,row] of values.limit_overrides.entries()){
     const label=`Override ${index+1}: `;
-    if(!row.project_id.trim()&&!row.provider&&!row.model.trim())return label+'choose a project ID, a provider or a model.';
-    if(row.project_id.trim()&&!UUID.test(row.project_id.trim()))return label+'the project ID must be a UUID.';
-    if(row.model.trim()&&!/^[A-Za-z0-9/:._-]{1,200}$/.test(row.model.trim()))return label+'enter a model ID using letters, numbers, / : . _ or -.';
-    const error=limitError(row,label);if(error)return error;
-    if(LIMITS.every(([key])=>row[key]===null))return label+'set at least one limit.';
-    const match=JSON.stringify([row.project_id.trim(),row.provider,row.model.trim()]);if(seen.has(match))return label+'another override matches the same project and model.';seen.add(match);
+    if(!row.project_id.trim()&&!row.provider&&!row.model.trim())return ['limits',label+'choose a project ID, a provider or a model.'];
+    if(row.project_id.trim()&&!UUID.test(row.project_id.trim()))return ['limits',label+'the project ID must be a UUID.'];
+    if(row.model.trim()&&!MODEL_ID.test(row.model.trim()))return ['limits',label+'enter a model ID using letters, numbers, / : . _ or -.'];
+    const error=limitError(row,label);if(error)return ['limits',error];
+    if(LIMITS.every(([key])=>row[key]===null))return ['limits',label+'set at least one limit.'];
+    const match=JSON.stringify([row.project_id.trim(),row.provider,row.model.trim()]);if(seen.has(match))return ['limits',label+'another override matches the same project and model.'];seen.add(match);
   }
-  const split=values.exploration_strategy;
-  const share=key=>finite(split[key]);
-  if(STRATEGY.some(([key])=>!Number.isInteger(share(key))||share(key)<0||share(key)>100))return 'Strategy shares must be whole percentages from 0 to 100.';
-  if(STRATEGY.reduce((sum,[key])=>sum+share(key),0)!==100)return 'Strategy shares must add up to 100%.';
-  if(split.breadth+split.depth===0)return 'Give new territory or deep journeys a share.';
-  const nav=values.navigation_model;
-  if(nav.provider){
-    if(!MODEL_PROVIDERS.includes(nav.provider))return 'Choose a supported navigation model provider.';
-    if(/[\x00-\x1f\x7f]/.test(nav.model)||!/^[A-Za-z0-9/:._-]{1,200}$/.test(nav.model.trim()))return 'Enter a navigation model ID using letters, numbers, / : . _ or - (up to 200 characters).';
-    if(nav.provider==='openrouter'&&values.free_only&&nav.model.trim()!=='openrouter/free'&&!nav.model.trim().endsWith(':free'))return 'Free-only also applies to the navigation model: use openrouter/free or a model ID ending in :free.';
-  }
-  if(!['desktop','tablet','mobile'].includes(values.viewport_profile))return 'Choose a supported viewport.';
-  if(values.provider==='openrouter'&&values.free_only&&values.model.trim()!=='openrouter/free'&&!values.model.trim().endsWith(':free'))return 'Free-only requires openrouter/free or a model ID ending in :free.';
-  return '';
+  return null;
 }
+export function configurationError(values){return configurationIssue(values)?.[1]||'';}
+function touched(draft){draft.dirty=JSON.stringify(draft.values)!==draft.fingerprint;draft.requestId=null;draft.error='';draft.message='';return true;}
 export function updateConfiguration(field,value){
   const draft=configurationDraft();if(draft.saving)return false;
+  // The exploration and navigation models are picked from the saved list.
+  if(field==='exploration_model'||field==='navigation_choice'){
+    const chosen=draft.values.saved_models.find(m=>modelChoice(m.provider,m.model)===value);
+    if(field==='exploration_model'){if(!chosen)return false;draft.values.provider=chosen.provider;draft.values.model=chosen.model;if(chosen.provider!=='openrouter')draft.values.free_only=false;}
+    else{if(value&&!chosen)return false;draft.values.navigation_model=chosen?{provider:chosen.provider,model:chosen.model}:{provider:'',model:''};}
+    return touched(draft);
+  }
   const override=/^override\.(\d+)\.(\w+)$/.exec(field);
   const nested=override?draft.values.limit_overrides[Number(override[1])]:/^strategy\.\w+$/.test(field)?draft.values.exploration_strategy:/^navigation\.\w+$/.test(field)?draft.values.navigation_model:null,key=override?override[2]:field.slice(field.indexOf('.')+1);
-  if(override||nested){if(!nested||!Object.hasOwn(nested,key))return false;nested[key]=value;draft.dirty=JSON.stringify(draft.values)!==draft.fingerprint;draft.requestId=null;draft.error='';draft.message='';return true;}
-  if(!Object.hasOwn(draft.values,field))return false;
-  if(field==='provider'){
-    draft.models[draft.values.provider]=draft.values.model;
-    draft.values.model=Object.hasOwn(draft.models,value)?draft.models[value]:value==='meta'?'muse-wonder-1.0':'';
-    if(value!=='openrouter')draft.values.free_only=false;
-  }
-  draft.values[field]=value;draft.dirty=JSON.stringify(draft.values)!==draft.fingerprint;
-  draft.requestId=null;draft.error='';draft.message='';return true;
+  if(override||nested){if(!nested||!Object.hasOwn(nested,key))return false;nested[key]=value;return touched(draft);}
+  if(!Object.hasOwn(draft.values,field)||field==='saved_models')return false;
+  if(field==='provider'&&value!=='openrouter')draft.values.free_only=false;
+  draft.values[field]=value;return touched(draft);
+}
+export function updateNewModel(field,value){
+  // A replaced field's late change event repeats the value it already sent; it must not clear messages.
+  const draft=configurationDraft();if(draft.saving||!Object.hasOwn(draft.adding,field)||draft.adding[field]===value)return false;
+  const redraw=field==='provider'||!!draft.addError||!!draft.added;draft.adding[field]=value;draft.addError='';draft.added='';return redraw;
+}
+export function newModelError(values,adding){
+  const model=adding.model.trim(),label=adding.label.trim();
+  if(!MODEL_PROVIDERS.includes(adding.provider))return 'Choose a provider.';
+  if(!model)return 'Enter the model ID your provider uses.';
+  if(CONTROL.test(adding.model)||!MODEL_ID.test(model))return 'Enter a model ID using letters, numbers, / : . _ or - (up to 200 characters).';
+  if(CONTROL.test(label)||[...label].length>MAX_MODEL_LABEL)return `Keep the name to ${MAX_MODEL_LABEL} characters on one line.`;
+  if(values.saved_models.some(m=>m.provider===adding.provider&&m.model===model))return `${model} is already in your list for ${providerName(adding.provider)}.`;
+  if(values.saved_models.length>=MAX_SAVED_MODELS)return `Your list holds up to ${MAX_SAVED_MODELS} models. Remove one first.`;
+  return '';
+}
+export function addSavedModel(){
+  const draft=configurationDraft();if(draft.saving)return false;
+  draft.addError=newModelError(draft.values,draft.adding);if(draft.addError)return false;
+  const {provider}=draft.adding,model=draft.adding.model.trim(),label=draft.adding.label.trim();
+  draft.values.saved_models.push({provider,model,label});draft.adding={provider,model:'',label:''};touched(draft);
+  draft.added=`Added ${label||model}. Choose it as the exploration or navigation model above, then save.`;return true;
+}
+// Models in use stay listed: choose another model first.
+export function removeSavedModel(index){
+  const draft=configurationDraft(),m=draft.values.saved_models[index];
+  if(draft.saving||!m||modelRoles(draft.values,m).length)return false;
+  draft.values.saved_models.splice(index,1);draft.added='';return touched(draft);
 }
 export function editOverrides(add,index){
   const draft=configurationDraft();if(draft.saving)return;
   if(add){if(draft.values.limit_overrides.length<MAX_OVERRIDES)draft.values.limit_overrides.push(overrideRow());}else draft.values.limit_overrides.splice(index,1);
-  draft.dirty=JSON.stringify(draft.values)!==draft.fingerprint;draft.requestId=null;draft.error='';draft.message='';
+  touched(draft);
 }
 export function rebaseConfiguration(discard=false){
   const draft=configurationDraft();if(draft.saving)return;
@@ -107,13 +176,14 @@ export async function saveConfiguration(){
   const token=state.token,developmentAccess=state.developmentAccess,sameSession=()=>token===state.token&&developmentAccess===state.developmentAccess;
   const numbers=Object.fromEntries([...LIMITS.map(([key])=>[key,commitNumber(draft.values[key])]),['max_auto_reproductions',commitNumber(draft.values.max_auto_reproductions)],['max_auto_replay_actions',commitNumber(draft.values.max_auto_replay_actions)]]);
   const exploration_strategy={...draft.values.exploration_strategy};for(const [key] of STRATEGY)exploration_strategy[key]=commitNumber(exploration_strategy[key]);
-  const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,...numbers,exploration_strategy,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),
+  const saved_models=modelList(draft.values.saved_models,inUseModels(draft.values)).map(({provider,model,label})=>label?{provider,model,label}:{provider,model});
+  const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,...numbers,exploration_strategy,saved_models,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),
     navigation_model:draft.values.navigation_model.provider?{provider:draft.values.navigation_model.provider,model:draft.values.navigation_model.model.trim()}:null};
   try{
     const saved=await (await api('/v1/exploration-settings',body)).json();if(!sameSession()||state.configurationDraft!==draft)return;
     applyConfiguration(saved);draft.saving=false;draft.dirty=false;state.configurationDraft=null;
-    const clean=configurationDraft();clean.message=`Saved revision ${saved.revision}. These defaults apply to new explorations.`;
-    toast(clean.message);
+    // The save bar's status line shows the new revision; the toast announces it.
+    configurationDraft();toast(`Saved revision ${saved.revision}. These defaults apply to new explorations.`);
     // Read the latest state after an idempotent retry that returned an older revision.
     try{const latest=await get('/v1/exploration-settings');if(sameSession())applyConfiguration(latest);}catch{}
   }catch(error){
@@ -126,43 +196,85 @@ export async function saveConfiguration(){
     }else if(error.status&&error.status<500){draft.requestId=null;}
   }finally{draft.saving=false;if(sameSession())render();}
 }
-export function configurationView(){
-  const draft=configurationDraft(),v=draft.values,conflict=draft.dirty&&draft.revision!==state.settingsRevision,invalid=configurationError(v);
-  const field=(key,label,type='text',min='',max='')=>`<label for="configuration-${key}"><span>${label}</span><input id="configuration-${key}" data-configuration-field="${key}" type="${type}" value="${esc(v[key]??'')}" ${type==='number'?`min="${min}" max="${max}" step="1"`:'maxlength="200" autocomplete="off" spellcheck="false"'} required></label>`;
-  return `<section class="panel settings-panel"><div class="panel-header"><div><h2>Exploration defaults</h2><p class="small muted">Saved revision ${esc(state.settingsRevision)} · applies to new explorations</p></div>${draft.dirty?'<span class="pill dirty-indicator">Unsaved changes</span>':''}</div><p class="configuration-note small muted">Save the model, action limits and viewport for future jobs. Queued and running jobs keep their original settings. Each URL launch can override its viewport and automatic checks. Saving does not call a model or test a connection.</p><form id="exploration-configuration-form" class="configuration-form"><fieldset ${draft.saving?'disabled':''}><legend class="sr-only">Default exploration settings</legend><div class="configuration-grid"><label for="configuration-provider"><span>Model provider</span><select id="configuration-provider" data-configuration-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${v.provider===p?'selected':''}>${providerName(p)}</option>`).join('')}</select></label>${field('model','Model ID')}<label for="configuration-viewport_profile"><span>Default viewport</span><select id="configuration-viewport_profile" data-configuration-field="viewport_profile">${['desktop','tablet','mobile'].map(p=>`<option value="${p}" ${v.viewport_profile===p?'selected':''}>${p[0].toUpperCase()+p.slice(1)}</option>`).join('')}</select></label>${field('max_auto_reproductions','Maximum automatic cases','number',1,3)}${field('max_auto_replay_actions','Total additional replay actions','number',1,MAX_REPLAY_ACTIONS)}</div> ${limitsView(v)}${strategyView(v.exploration_strategy)}${costView(v)}<label class="configuration-toggle"><input id="configuration-free_only" data-configuration-field="free_only" type="checkbox" ${v.free_only?'checked':''} ${v.provider!=='openrouter'?'disabled':''}><span>Restrict OpenRouter to free model IDs</span></label><p class="small muted">Use openrouter/free or a model ending in :free. Provider availability and rate limits still apply. Direct OpenAI, Anthropic and Meta AI calls use their own API billing. Meta AI defaults to muse-wonder-1.0.</p><label class="configuration-toggle"><input id="configuration-auto_reproduce" data-configuration-field="auto_reproduce" type="checkbox" ${v.auto_reproduce?'checked':''}><span>Automatically recheck suspected bugs by default</span></label><p class="small muted">Fresh-browser checks use additional model calls. Findings still require human review. Allowed app origins and provider credentials stay in the server configuration managed by your Spekios administrator.</p><label class="configuration-toggle"><input id="configuration-app_memory" data-configuration-field="app_memory" type="checkbox" ${v.app_memory?'checked':''}><span>Remember explored pages and controls across runs</span></label><p class="small muted">Later runs of the same app, screen size and sign-in state skip controls already tried and can reopen pages earlier runs did not finish. Memory guides choices only; every action still records fresh evidence.</p></fieldset>${conflict?`<div class="settings-feedback notice" role="status">Saved defaults are now revision ${esc(state.settingsRevision)}. Your edits still use revision ${esc(draft.revision)}. ${draft.requestId?'A previous save may have completed. Retry save to check its original receipt, or discard your edits.':'Review the current values below before keeping your edits.'}</div>`:''}${draft.error?`<p class="settings-feedback notice error" role="alert">${esc(draft.error)}</p>`:''}${draft.message?`<p class="settings-feedback" role="status">${esc(draft.message)}</p>`:''}${draft.dirty&&invalid?`<p class="small muted">${esc(invalid)}</p>`:''}<div class="configuration-actions"><button type="submit" class="button primary" ${draft.saving||!draft.dirty||conflict&&!draft.requestId||invalid?'disabled':''}>${draft.saving?'Saving…':draft.requestId?'Retry save':'Save defaults'}</button><button type="button" class="button" data-action="discard-configuration" ${!draft.dirty||draft.saving?'disabled':''}>Discard edits</button>${conflict?`<button type="button" class="button" data-action="rebase-configuration" ${draft.saving?'disabled':''}>Keep my edits on revision ${esc(state.settingsRevision)}</button>`:''}</div></form></section>`;
+// Sections whose fields differ from the saved revision.
+export function changedSections(draft=configurationDraft()){
+  if(!draft.dirty)return [];const saved=JSON.parse(draft.fingerprint);
+  return Object.keys(SECTION_FIELDS).filter(section=>SECTION_FIELDS[section].some(key=>JSON.stringify(draft.values[key])!==JSON.stringify(saved[key])));
+}
+const card=(id,title,intro,body,extra='')=>`<section class="panel settings-card" aria-labelledby="${id}"><div class="settings-card-head"><div><h3 id="${id}">${title}</h3>${intro?`<p>${intro}</p>`:''}</div>${extra}</div><div class="settings-card-body">${body}</div></section>`;
+const toggle=(key,label,checked,disabled=false,field=key)=>`<label class="configuration-toggle" for="configuration-${key}"><input id="configuration-${key}" data-configuration-field="${field}" type="checkbox" ${checked?'checked':''} ${disabled?'disabled':''}><span>${label}</span></label>`;
+const numberField=(v,key,label,min,max)=>`<label for="configuration-${key}"><span>${label}</span><input id="configuration-${key}" data-configuration-field="${key}" type="number" value="${esc(v[key]??'')}" min="${min}" max="${max}" step="1" required></label>`;
+// A model option: its name, or its ID, grouped under its provider.
+function modelOptions(list,selected){
+  const items=[...list];
+  if(selected&&!items.some(m=>modelChoice(m.provider,m.model)===selected)){const [provider,...rest]=selected.split('|');items.push({provider,model:rest.join('|'),label:''});}
+  return [...MODEL_PROVIDERS,...new Set(items.map(m=>m.provider).filter(p=>!MODEL_PROVIDERS.includes(p)))].map(provider=>{
+    const group=items.filter(m=>m.provider===provider);if(!group.length)return '';
+    return `<optgroup label="${esc(providerName(provider))}${providerReady(provider)===false?' · not configured on this server':''}">${group.map(m=>{const value=modelChoice(m.provider,m.model);return `<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(m.label?`${m.label} (${m.model})`:m.model)}</option>`;}).join('')}</optgroup>`;
+  }).join('');
+}
+// Model IDs the provider docs name, offered while typing. Any other current ID can be typed.
+const SUGGESTED_MODELS={openrouter:['openrouter/free'],meta:['muse-wonder-1.0']},PLACEHOLDERS={openrouter:'openrouter/free or vendor/model:free',meta:'muse-wonder-1.0, or another Meta model'};
+function modelsSection(v){
+  const nav=v.navigation_model,exploration=v.model.trim()?modelChoice(v.provider,v.model.trim()):'',navigation=nav.provider?modelChoice(nav.provider,nav.model.trim()):'';
+  const unready=[...new Set([v.provider,...(nav.provider?[nav.provider]:[])])].filter(p=>providerReady(p)===false);
+  const inUse=`<div class="configuration-grid"><label for="configuration-exploration_model"><span>Exploration model</span><select id="configuration-exploration_model" data-configuration-field="exploration_model" aria-describedby="exploration-model-help">${exploration?'':'<option value="" selected disabled>Choose a model</option>'}${modelOptions(v.saved_models,exploration)}</select><small id="exploration-model-help" class="small">Plans each action, clicks, fills forms and judges what happened.</small></label><label for="configuration-navigation_choice"><span>Navigation model</span><select id="configuration-navigation_choice" data-configuration-field="navigation_choice" aria-describedby="navigation-model-help"><option value="" ${navigation?'':'selected'}>Same as exploration model</option>${modelOptions(v.saved_models,navigation)}</select><small id="navigation-model-help" class="small">Optional cheaper model for opening pages, following links and scrolling.</small></label></div>${unready.length?`<p class="settings-feedback notice" role="status">${esc(unready.map(providerName).join(' and '))} ${unready.length>1?'are':'is'} not configured on this server, so new tests cannot start with ${unready.length>1?'these models':'this model'}. Choose a model from an available provider, or ask your Spekios administrator to add the key.</p>`:''}<p class="small muted settings-note">Clicks on buttons, form entry and submissions always use the exploration model. A navigation result that isn’t clean, or that comes with browser errors or failed requests, is assessed again by the exploration model.</p>`;
+  const rows=v.saved_models.map((m,i)=>{const roles=modelRoles(v,m),ready=providerReady(m.provider);
+    return `<li class="model-row"><div class="model-row-main"><span class="model-row-name">${esc(m.label||m.model)}</span><span class="model-row-id">${esc(providerName(m.provider))}${m.label?` · <code>${esc(m.model)}</code>`:''}</span></div><div class="model-row-tags">${roles.map(role=>`<span class="pill blue model-role">${role}</span>`).join('')}${m.provider==='openrouter'&&freeModel(m.model)?'<span class="tag">FREE</span>':''}${ready===false?'<span class="pill amber">Not configured</span>':''}${roles.length?'':`<button type="button" class="button quiet" data-action="remove-saved-model" data-index="${i}" aria-label="Remove ${esc(m.label||m.model)} from your models">${icon('close')}Remove</button>`}</div></li>`;}).join('');
+  const draft=configurationDraft(),a=draft.adding;
+  const add=`<div class="model-add" role="group" aria-labelledby="model-add-title"><h4 id="model-add-title">Add a model</h4><div class="model-add-fields"><label for="new-model-provider"><span>Provider</span><select id="new-model-provider" data-new-model-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${a.provider===p?'selected':''}>${providerName(p)}${providerReady(p)===false?' (not configured)':''}</option>`).join('')}</select></label><label for="new-model-model"><span>Model ID</span><input id="new-model-model" data-new-model-field="model" value="${esc(a.model)}" maxlength="200" autocomplete="off" spellcheck="false" placeholder="${esc(PLACEHOLDERS[a.provider]||'The ID your provider uses')}" list="new-model-suggestions"${draft.addError?' aria-invalid="true" aria-describedby="new-model-error"':''}><datalist id="new-model-suggestions">${(SUGGESTED_MODELS[a.provider]||[]).filter(id=>!v.saved_models.some(m=>m.provider===a.provider&&m.model===id)).map(id=>`<option value="${esc(id)}"></option>`).join('')}</datalist></label><label for="new-model-label"><span>Name <small class="small">optional</small></span><input id="new-model-label" data-new-model-field="label" value="${esc(a.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in model menus"></label><button type="button" class="button" data-action="add-saved-model" ${v.saved_models.length>=MAX_SAVED_MODELS?'disabled':''}>${icon('plus')}Add model</button></div>${draft.addError?`<p id="new-model-error" class="settings-feedback error" role="alert">${esc(draft.addError)}</p>`:draft.added?`<p class="small muted model-add-status" role="status">${esc(draft.added)}</p>`:''}</div>`;
+  const providers=(state.providers.providers||[]).map(p=>`<li><span>${esc(providerName(p.provider))}</span><span class="pill ${p.configured?'green':''}">${p.configured?'Available':'Not configured'}</span></li>`).join('');
+  return card('models-in-use','Models in use','New explorations use these. Queued and running jobs keep the models they started with.',inUse)
+    +card('models-list','Your models',`Add the model IDs you want to switch between, up to ${MAX_SAVED_MODELS}. Only the provider and model ID are saved; API keys stay in the server configuration.`,`${rows?`<ul class="model-list">${rows}</ul>`:'<p class="small muted">No models yet. Add one below.</p>'}${add}`,`<span class="small muted">${number(v.saved_models.length)} of ${MAX_SAVED_MODELS}</span>`)
+    +card('models-cost','Cost controls','',`${toggle('free_only','Restrict OpenRouter to free model IDs',v.free_only,v.provider!=='openrouter')}<p class="small muted">${v.provider==='openrouter'?'Use openrouter/free or a model ending in :free, for exploration and navigation. Provider availability and rate limits still apply.':'Applies when the exploration model is on OpenRouter. Direct OpenAI, Anthropic and Meta AI calls use their own API billing.'}</p>${toggle('reuse_rankings','Reuse a screen’s ranking from earlier runs when it hasn’t changed',v.reuse_rankings)}<p class="small muted">Skips the planning request on a screen whose address pattern, text and controls match one an earlier run ranked with the same model. Needs app memory. A ranking is reused up to 10 times, then asked for again. Screens where the model chose to type text, and runs with a testing focus, always get a fresh ranking.</p>`)
+    +card('models-providers','Provider access',`Your Spekios administrator manages provider credentials; they are never shown here.${state.providers.test_mode?' This server currently returns simulated model responses.':''}`,providers?`<ul class="provider-status">${providers}</ul>`:'<p class="small muted">No provider status is available yet. Refresh the workspace.</p>');
+}
+function explorationSection(v){
+  const split=v.exploration_strategy,total=STRATEGY.reduce((sum,[key])=>sum+(Number.isInteger(split[key])?split[key]:0),0);
+  return card('exploration-viewport','Default screen size','Each launch can pick another size under its options.',`<div class="configuration-grid"><label for="configuration-viewport_profile"><span>Default viewport</span><select id="configuration-viewport_profile" data-configuration-field="viewport_profile">${['desktop','tablet','mobile'].map(p=>`<option value="${p}" ${v.viewport_profile===p?'selected':''}>${p[0].toUpperCase()+p.slice(1)}</option>`).join('')}</select></label></div>`)
+    // Shares are whole percentages; adaptive shares follow what each strategy finds.
+    +card('exploration-strategy','Exploration strategy','How each run shares its actions. New territory spreads actions across the app’s areas. Deep journeys follow one path while it keeps reaching new screens. Re-walking repeats paths earlier runs recorded and compares where they lead now. Re-walks need app memory and an earlier run.',`<div class="configuration-grid three">${STRATEGY.map(([key,label])=>`<label for="configuration-strategy-${key}"><span>${label} (%)</span><input id="configuration-strategy-${key}" data-configuration-field="strategy.${key}" type="number" value="${split[key]===null?'':esc(split[key])}" min="0" max="100" step="1" required></label>`).join('')}</div><p class="small ${total===100?'muted':'strategy-total-off'}">Total ${esc(total)}% of 100%.</p>${toggle('strategy-adaptive','Adapt shares during a run',split.adaptive,false,'strategy.adaptive')}<p class="small muted">A strategy that keeps finding new screens, differences or suspected bugs gets more turns. One that finds nothing keeps at least a quarter of its share.</p>`)
+    +card('exploration-rechecks','Automatic rechecks','After exploring, open fresh browsers to check whether suspected bugs happen again.',`${toggle('auto_reproduce','Automatically recheck suspected bugs by default',v.auto_reproduce)}<p class="small muted">Each launch can turn this on or off. Fresh-browser checks use additional model calls. Findings still require human review.</p><div class="configuration-grid">${numberField(v,'max_auto_reproductions','Maximum automatic cases',1,3)}${numberField(v,'max_auto_replay_actions','Total additional replay actions',1,MAX_REPLAY_ACTIONS)}</div>`);
 }
 // Empty means no limit. Overrides apply to a project, a model or both; the most specific one wins.
-function limitsView(v){
+function limitsSection(v){
   const input=(id,field,value,[,,label,min,max,step],extra='')=>`<label for="${id}"><span>${label}</span><input id="${id}" data-configuration-field="${field}" type="number" value="${value===null?'':esc(value)}" min="${min}" max="${max}" step="${step}" placeholder="${extra||'No limit'}"></label>`;
-  const rows=v.limit_overrides.map((row,i)=>`<fieldset class="configuration-override"><legend>Override ${i+1}</legend><div class="configuration-grid"><label for="override-${i}-project_id"><span>Project ID</span><input id="override-${i}-project_id" data-configuration-field="override.${i}.project_id" value="${esc(row.project_id)}" maxlength="36" placeholder="Any project" autocomplete="off" spellcheck="false"></label><label for="override-${i}-provider"><span>Provider</span><select id="override-${i}-provider" data-configuration-field="override.${i}.provider"><option value="">Any provider</option>${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${row.provider===p?'selected':''}>${providerName(p)}</option>`).join('')}</select></label><label for="override-${i}-model"><span>Model ID</span><input id="override-${i}-model" data-configuration-field="override.${i}.model" value="${esc(row.model)}" maxlength="200" placeholder="Any model" autocomplete="off" spellcheck="false"></label>${LIMITS.map(limit=>input(`override-${i}-${limit[0]}`,`override.${i}.${limit[0]}`,row[limit[0]],limit,'Inherit')).join('')}</div><button type="button" class="button quiet" data-action="remove-limit-override" data-index="${i}">Remove override</button></fieldset>`).join('');
-  return `<h3 class="configuration-subheading">Limits</h3><p class="small muted">Leave a limit empty for no limit. Explorations then run until nothing new is left to explore or you stop them. Token and cost limits count usage the provider has reported; an action already in progress can finish past the limit.</p><div class="configuration-grid">${LIMITS.map(limit=>input(`configuration-${limit[0]}`,limit[0],v[limit[0]],limit)).join('')}</div><p class="small muted">Overrides set different limits for a project, a model, or a model within a project. The most specific matching override wins; empty fields inherit. Jobs keep the limits they started with.</p>${rows}<button type="button" class="button" data-action="add-limit-override" ${v.limit_overrides.length>=MAX_OVERRIDES?'disabled':''}>Add override</button>`;
-}
-// Shares are whole percentages; adaptive shares follow what each strategy finds.
-function strategyView(split){
-  const total=STRATEGY.reduce((sum,[key])=>sum+(Number.isInteger(split[key])?split[key]:0),0);
-  return `<h3 class="configuration-subheading">Exploration strategy</h3><p class="small muted">How each run shares its actions. New territory spreads actions across the app’s areas. Deep journeys follow one path while it keeps reaching new screens. Re-walking repeats paths earlier runs recorded and compares where they lead now. Re-walks need app memory and an earlier run.</p><div class="configuration-grid">${STRATEGY.map(([key,label])=>`<label for="configuration-strategy-${key}"><span>${label} (%)</span><input id="configuration-strategy-${key}" data-configuration-field="strategy.${key}" type="number" value="${split[key]===null?'':esc(split[key])}" min="0" max="100" step="1" required></label>`).join('')}</div><p class="small muted">Total ${esc(total)}% of 100%.</p><label class="configuration-toggle"><input id="configuration-strategy-adaptive" data-configuration-field="strategy.adaptive" type="checkbox" ${split.adaptive?'checked':''}><span>Adapt shares during a run</span></label><p class="small muted">A strategy that keeps finding new screens, differences or suspected bugs gets more turns. One that finds nothing keeps at least a quarter of its share.</p>`;
-}
-// Fewer and cheaper model calls: reused rankings and a navigation model.
-function costView(v){
-  const nav=v.navigation_model;
-  return `<h3 class="configuration-subheading">Model use</h3><label class="configuration-toggle"><input id="configuration-reuse_rankings" data-configuration-field="reuse_rankings" type="checkbox" ${v.reuse_rankings?'checked':''}><span>Reuse a screen’s ranking from earlier runs when it hasn’t changed</span></label><p class="small muted">Skips the planning request on a screen whose address pattern, text and controls match one an earlier run ranked with the same model. Needs app memory. A ranking is reused up to 10 times, then asked for again. Screens where the model chose to type text, and runs with a testing focus, always get a fresh ranking.</p><div class="configuration-grid"><label for="configuration-navigation-provider"><span>Navigation model provider</span><select id="configuration-navigation-provider" data-configuration-field="navigation.provider"><option value="" ${nav.provider?'':'selected'}>Same as exploration model</option>${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${nav.provider===p?'selected':''}>${providerName(p)}</option>`).join('')}</select></label><label for="configuration-navigation-model"><span>Navigation model ID</span><input id="configuration-navigation-model" data-configuration-field="navigation.model" value="${esc(nav.model)}" maxlength="200" autocomplete="off" spellcheck="false" ${nav.provider?'required':'disabled'} placeholder="${nav.provider?'':'Not used'}"></label></div><p class="small muted">A cheaper model predicts and assesses navigation: opening a page, following a link and scrolling. Clicks on buttons, form entry and submissions always use the exploration model. Any navigation result that isn’t clean, or that comes with browser errors or failed requests, is assessed again by the exploration model.</p>`;
+  const rows=v.limit_overrides.map((row,i)=>`<fieldset class="configuration-override"><legend>Override ${i+1}</legend><div class="configuration-grid"><label for="override-${i}-project_id"><span>Project ID</span><input id="override-${i}-project_id" data-configuration-field="override.${i}.project_id" value="${esc(row.project_id)}" maxlength="36" placeholder="Any project" autocomplete="off" spellcheck="false"></label><label for="override-${i}-provider"><span>Provider</span><select id="override-${i}-provider" data-configuration-field="override.${i}.provider"><option value="">Any provider</option>${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${row.provider===p?'selected':''}>${providerName(p)}</option>`).join('')}</select></label><label for="override-${i}-model"><span>Model ID</span><input id="override-${i}-model" data-configuration-field="override.${i}.model" value="${esc(row.model)}" maxlength="200" placeholder="Any model" list="saved-model-ids" autocomplete="off" spellcheck="false"></label>${LIMITS.map(limit=>input(`override-${i}-${limit[0]}`,`override.${i}.${limit[0]}`,row[limit[0]],limit,'Inherit')).join('')}</div><button type="button" class="button quiet" data-action="remove-limit-override" data-index="${i}">${icon('close')}Remove override</button></fieldset>`).join('');
+  return card('limits-run','Run limits','Leave a limit empty for no limit. Explorations then run until nothing new is left to explore or you stop them. Token and cost limits count usage the provider has reported; an action already in progress can finish past the limit.',`<div class="configuration-grid">${LIMITS.map(limit=>input(`configuration-${limit[0]}`,limit[0],v[limit[0]],limit)).join('')}</div>`)
+    +card('limits-overrides','Overrides','Different limits for a project, a model, or a model within a project. The most specific matching override wins; empty fields inherit. Jobs keep the limits they started with.',`<datalist id="saved-model-ids">${[...new Set(v.saved_models.map(m=>m.model))].map(m=>`<option value="${esc(m)}"></option>`).join('')}</datalist>${rows||'<p class="small muted">No overrides. Every exploration uses the run limits above.</p>'}<button type="button" class="button" data-action="add-limit-override" ${v.limit_overrides.length>=MAX_OVERRIDES?'disabled':''}>${icon('plus')}Add override</button>`,v.limit_overrides.length?`<span class="small muted">${number(v.limit_overrides.length)} of ${MAX_OVERRIDES}</span>`:'');
 }
 export function savedSessions(){
   const sessions=state.access.sessions||[];
-  return `<section class="panel settings-panel"><h2>Saved app sessions</h2><p class="small muted">Encrypted on this machine for up to 24 hours. Select a session when starting a run for the same app. Removing it prevents future reuse; an already running browser keeps its current session.</p>${sessions.map(s=>`<div class="key-value"><span>${esc(s.origin)}<small class="table-sub">${s.execution_mode==='protocol_fixture'?'Test session · ':''}${short(s.session_id)} · expires ${date(s.expires_at)}</small></span>${s.revoked_at?'<span class="muted">Removed</span>':new Date(s.expires_at)<=new Date()?'<span class="muted">Expired</span>':button('revoke-session','Remove session','close',`data-id="${s.session_id}"`)}</div>`).join('')||'<p>No saved app sessions.</p>'}</section>`;
+  return sessions.map(s=>`<div class="key-value"><span>${esc(s.origin)}<small class="table-sub">${s.execution_mode==='protocol_fixture'?'Test session · ':''}${short(s.session_id)} · expires ${date(s.expires_at)}</small></span>${s.revoked_at?'<span class="muted">Removed</span>':new Date(s.expires_at)<=new Date()?'<span class="muted">Expired</span>':button('revoke-session','Remove session','close',`type="button" data-id="${s.session_id}"`)}</div>`).join('')||'<p class="small muted">No saved app sessions.</p>';
 }
 export function memoryPanel(){
   const scopes=state.memory?.scopes;
-  const row=s=>`<div class="key-value"><span>${esc(s.origin)}<small class="table-sub">${s.execution_mode==='protocol_fixture'?'Test data · ':''}${esc(s.viewport_profile)} · ${s.auth_scope==='signed_in'?'signed in':'public'} · ${number(s.runs)} run${s.runs===1?'':'s'} · ${number(s.pages)} pages · ${number(s.tried_controls)} tried / ${number(s.untried_controls)} untried controls · map: ${number(s.map_states??0)} states, ${number(s.map_transitions??0)} transitions${s.map_max_depth==null?'':`, ${number(s.map_max_depth)} deep`} · updated ${date(s.updated_at)}</small></span>${s.in_use?'<span class="muted">In use by a running test</span>':button('forget-memory','Forget','close',`data-id="${s.scope_id}"`)}</div>`;
-  return `<section class="panel settings-panel"><h2>App memory</h2><p class="small muted">What earlier runs explored, kept separately for each app, screen size and sign-in state. Forgetting removes only this memory; recorded runs and evidence stay.</p>${scopes?scopes.map(row).join('')||'<p>No app memory yet. It is recorded by explorations that use it.</p>':state.memoryError?`<p class="notice error" role="alert">${esc(state.memoryError)}</p>`:'<p class="small muted">Loading app memory…</p>'}</section>`;
+  const row=s=>`<div class="key-value"><span>${esc(s.origin)}<small class="table-sub">${s.execution_mode==='protocol_fixture'?'Test data · ':''}${esc(s.viewport_profile)} · ${s.auth_scope==='signed_in'?'signed in':'public'} · ${number(s.runs)} run${s.runs===1?'':'s'} · ${number(s.pages)} pages · ${number(s.tried_controls)} tried / ${number(s.untried_controls)} untried controls · map: ${number(s.map_states??0)} states, ${number(s.map_transitions??0)} transitions${s.map_max_depth==null?'':`, ${number(s.map_max_depth)} deep`} · updated ${date(s.updated_at)}</small></span>${s.in_use?'<span class="muted">In use by a running test</span>':button('forget-memory','Forget','close',`type="button" data-id="${s.scope_id}"`)}</div>`;
+  return `<h4 class="settings-list-title">Remembered apps</h4><p class="small muted">Kept separately for each app, screen size and sign-in state. Forgetting removes only this memory; recorded runs and evidence stay.</p>${scopes?scopes.map(row).join('')||'<p class="small muted">No app memory yet. It is recorded by explorations that use it.</p>':state.memoryError?`<p class="notice error" role="alert">${esc(state.memoryError)}</p>`:'<p class="small muted">Loading app memory…</p>'}`;
 }
-export function providerAvailability(){
-  const providers=state.providers.providers||[];
-  return `<section class="panel settings-panel"><h2>Available model providers</h2><p class="small muted">Your Spekios administrator manages provider credentials; they are never shown here.${state.providers.test_mode?' This server currently returns simulated model responses.':''}</p>${providers.map(p=>`<div class="key-value"><span>${esc(providerName(p.provider))}</span><span class="pill ${p.configured?'green':''}">${p.configured?'Available':'Not configured'}</span></div>`).join('')||'<p class="small muted">No provider status is available yet. Refresh the workspace.</p>'}</section>`;
+function dataSection(v){
+  return card('data-memory','App memory','What earlier runs explored, so later runs can go further.',`${toggle('app_memory','Remember explored pages and controls across runs',v.app_memory)}<p class="small muted">Later runs of the same app, screen size and sign-in state skip controls already tried and can reopen pages earlier runs did not finish. Memory guides choices only; every action still records fresh evidence.</p>${memoryPanel()}`)
+    +card('data-sessions','Saved app sessions','Encrypted on this machine for up to 24 hours. Select a session when starting a run for the same app. Removing it prevents future reuse; an already running browser keeps its current session.',savedSessions());
 }
 export function appearancePanel(){
-  return `<section class="panel settings-panel"><h2>Appearance</h2><p class="small muted">Follow your computer’s light or dark setting, or keep one theme in this browser.</p><div class="appearance-row">${themeSwitch(themePreference(),true)}</div></section>`;
+  return card('appearance-theme','Theme','Follow your computer’s light or dark setting, or keep one theme in this browser. This is not saved with your defaults.',`<div class="appearance-row">${themeSwitch(themePreference(),true)}</div>`);
+}
+// Revision, unsaved sections, conflicts and errors, with links to the section that needs attention.
+function saveBar(section){
+  const draft=configurationDraft(),conflict=draft.dirty&&draft.revision!==state.settingsRevision,issue=configurationIssue(draft.values),changed=changedSections(draft);
+  const title=key=>SETTINGS_SECTIONS.find(([k])=>k===key)[1],link=key=>key===section?esc(title(key)):`<a href="#/settings/${key}">${esc(title(key))}</a>`;
+  const status=draft.saving?'Saving your defaults…':draft.dirty?`Unsaved changes in ${changed.map(link).join(', ')||'these settings'}.`:`Saved revision ${esc(state.settingsRevision)} · applies to new explorations.`;
+  return `<div class="settings-savebar${draft.dirty?' dirty':''}" role="region" aria-label="Save defaults"><div class="settings-savebar-status"><p><strong>${status}</strong></p><p class="small muted">Queued and running jobs keep their original settings. Saving does not call a model or test a connection.</p>${conflict?`<div class="settings-feedback notice" role="status">Saved defaults are now revision ${esc(state.settingsRevision)}. Your edits still use revision ${esc(draft.revision)}. ${draft.requestId?'A previous save may have completed. Retry save to check its original receipt, or discard your edits.':'Review the current values before keeping your edits.'}</div>`:''}${draft.error?`<p class="settings-feedback notice error" role="alert">${esc(draft.error)}</p>`:''}${draft.message?`<p class="settings-feedback" role="status">${esc(draft.message)}</p>`:''}${draft.dirty&&issue?`<p class="settings-feedback notice error">${issue[0]===section?'':`${link(issue[0])}: `}${esc(issue[1])}</p>`:''}</div><div class="configuration-actions">${conflict?`<button type="button" class="button" data-action="rebase-configuration" ${draft.saving?'disabled':''}>Keep my edits on revision ${esc(state.settingsRevision)}</button>`:''}<button type="button" class="button" data-action="discard-configuration" ${!draft.dirty||draft.saving?'disabled':''}>Discard edits</button><button type="submit" class="button primary" ${draft.saving||!draft.dirty||conflict&&!draft.requestId||issue?'disabled':''}>${draft.saving?'Saving…':draft.requestId?'Retry save':'Save defaults'}</button></div></div>`;
+}
+// One settings section and its save bar. Fields freeze while a save is in flight.
+export function configurationView(section=settingsSection()){
+  const draft=configurationDraft(),v=draft.values,[,title,,summary]=SETTINGS_SECTIONS.find(([key])=>key===section);
+  const body={models:modelsSection,exploration:explorationSection,limits:limitsSection,data:dataSection}[section];
+  return `<div class="settings-section-head"><h2 id="settings-section-title">${esc(title)}</h2><p>${esc(summary)}.</p></div>${body?`<fieldset ${draft.saving?'disabled':''}><legend class="sr-only">${esc(title)} defaults</legend>${body(v)}</fieldset>`:appearancePanel()}${body||draft.dirty?saveBar(section):''}`;
 }
 export function settingsView(){
-  return `${accessBanner()}<div class="page-heading"><div><div class="eyebrow">Workspace</div><h1>Settings</h1><p>Defaults for new explorations, saved app sign-ins and how Spekios looks in this browser.</p></div></div>${configurationView()}${memoryPanel()}${providerAvailability()}${savedSessions()}${appearancePanel()}`;
+  const section=settingsSection(),draft=configurationDraft(),changed=changedSections(draft),issue=draft.dirty?configurationIssue(draft.values):null;
+  const nav=SETTINGS_SECTIONS.map(([key,title,glyph,summary])=>{const mark=issue?.[0]===key?'<span class="settings-nav-mark error" title="Needs a fix before saving"></span><span class="sr-only">, needs a fix</span>':changed.includes(key)?'<span class="settings-nav-mark" title="Unsaved changes"></span><span class="sr-only">, unsaved changes</span>':'';
+    return `<a class="settings-nav-item${key===section?' active':''}" href="#/settings/${key}" ${key===section?'aria-current="page"':''}>${icon(glyph)}<span>${esc(title)}${mark}</span><small>${esc(summary)}</small></a>`;}).join('');
+  return `${accessBanner()}<div class="page-heading"><div><div class="eyebrow">Workspace</div><h1>Settings</h1><p>The models new explorations use, how far they go, what they remember and how Spekios looks in this browser.</p></div></div><div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">${nav}</nav><form id="exploration-configuration-form" class="configuration-form settings-form" aria-labelledby="settings-section-title">${configurationView(section)}</form></div>`;
 }

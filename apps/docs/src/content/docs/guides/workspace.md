@@ -26,9 +26,12 @@ Use [finding review](../findings/) to record a human conclusion and rationale. E
 
 ## Settings and appearance
 
-- **Exploration defaults:** provider, model, action budget, viewport and automatic-check preferences for new runs.
-- **Available model providers:** which providers the server can use; credentials are never shown.
-- **Saved app sessions:** encrypted sign-ins for your test apps, with removal controls.
+Settings has one page per section, listed beside the content (or as tabs on a narrow screen). Each has its own address, such as `#/settings/limits`. Edits in any section stay until you save or discard them; the save bar names the sections with unsaved changes and links to any that need a fix.
+
+- **Models:** your list of model IDs (several per provider if you like), the exploration and navigation models chosen from it, free-only and ranking reuse, and which providers the server can use. Credentials are never shown.
+- **Exploration:** default viewport, exploration strategy and automatic rechecks.
+- **Limits:** run limits and overrides for projects and models.
+- **Memory & sessions:** app memory on or off, remembered apps you can forget, and saved app sessions with removal controls.
 - **Appearance:** match your computer’s light or dark setting, or keep one theme in this browser. The same control sits in the top bar.
 
 ## Operator back office

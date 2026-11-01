@@ -37,7 +37,9 @@ Provider model availability, rate limits and pricing can change. Scout checks fr
 
 ## Save nonsecret defaults
 
-In the workspace under **Settings → Exploration defaults**, choose a provider, model, viewport and action budget. Defaults are append-only revisions. A newly admitted job freezes its effective settings; retries preserve the original admission.
+In the workspace, open **Settings → Models**. Under **Your models**, add each model ID you want to switch between, with an optional name: for example two Meta AI models, `muse-wonder-1.0` and another current Meta model ID. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Models whose provider has no key on this server are marked **Not configured**. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
+
+Defaults are append-only revisions. A newly admitted job freezes its effective settings; retries preserve the original admission. Your model list is saved with the defaults, but jobs do not freeze it.
 
 Provider keys and allowed origins remain environment-level configuration. Saving a GUI preference does not alter either.
 

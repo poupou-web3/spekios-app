@@ -73,6 +73,6 @@ When a run ends, its configuration keeps **strategy** (actions, turns, yield and
 
 ## Change the split
 
-Open **Settings → Exploration defaults → Exploration strategy**. Enter whole percentages that add up to 100. New territory or deep journeys must have a share; set re-walks to 0 to turn them off. Turn off **Adapt shares during a run** to keep the split fixed. API clients send **exploration_strategy** with the settings, for example `{"breadth": 40, "depth": 40, "rewalk": 20, "adaptive": true}`.
+Open **Settings → Exploration** and find **Exploration strategy**. Enter whole percentages that add up to 100. New territory or deep journeys must have a share; set re-walks to 0 to turn them off. Turn off **Adapt shares during a run** to keep the split fixed. API clients send **exploration_strategy** with the settings, for example `{"breadth": 40, "depth": 40, "rewalk": 20, "adaptive": true}`.
 
 A job keeps the split it was admitted with. Reproductions and fix verifications follow their recorded path and do not use a strategy.

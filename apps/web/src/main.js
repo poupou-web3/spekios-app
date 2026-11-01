@@ -13,7 +13,7 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,launchUrlError,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {editOverrides,numericFieldValue,rebaseConfiguration,saveConfiguration,updateConfiguration} from './views/settings.js';
+import {addSavedModel,editOverrides,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 root.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -29,6 +29,7 @@ root.addEventListener('compositionstart',()=>{state.composing=true;});
 root.addEventListener('compositionend',e=>{state.composing=false;captureInput(e.target);setTimeout(render,0);});
 function captureInput(target){
   if(target.id==='steering-focus')return updateSteeringFocus(target.value);
+  if(target.dataset.newModelField)return updateNewModel(target.dataset.newModelField,target.value);
   if(target.dataset.configurationField){if(target.type==='number'&&target.validity?.badInput)return false;const field=target.dataset.configurationField,value=target.type==='checkbox'?target.checked:target.type==='number'?numericFieldValue(target.value):target.value;return updateConfiguration(field,value);}
   if(target.dataset.reviewField)updateReviewDraft(target.dataset.reviewAction,target.dataset.reviewField,target.value);
   if(target.id==='target-url')updateTargetUrl(target.value);
@@ -39,7 +40,7 @@ function captureInput(target){
 root.addEventListener('input',e=>{if(captureInput(e.target))render();});
 root.addEventListener('change',e=>{if(e.target.id==='auto-reproduce'){state.autoReproduce=e.target.checked;sessionStorage.setItem('scout.auto-reproduce',String(state.autoReproduce));render();}if(e.target.dataset.reviewField){updateReviewDraft(e.target.dataset.reviewAction,e.target.dataset.reviewField,e.target.value);if(e.target.dataset.reviewField==='disposition')render();}if(e.target.id==='auth-mode'){state.authMode=e.target.value;if(state.authMode==='public')state.sessionId='';render();}if(e.target.id==='app-session')state.sessionId=e.target.value;if(e.target.id==='viewport-profile'){state.viewportProfile=e.target.value;render();}});
 root.addEventListener('change',e=>{
-  if(e.target.dataset.configurationField){if(captureInput(e.target))render();return;}
+  if(e.target.dataset.configurationField||e.target.dataset.newModelField){if(captureInput(e.target))render();return;}
   const field={'run-mode':'runMode'}[e.target.id];
   if(field){state[field]=e.target.value;render();}
 });
@@ -66,6 +67,9 @@ root.addEventListener('click',async e=>{
   if(action==='logout'){closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
+  // After adding, the model ID field is ready for the next one (or for fixing this one).
+  if(action==='add-saved-model')addModelAndRefocus();
+  if(action==='remove-saved-model'&&removeSavedModel(Number(el.dataset.index)))render();
   if(action==='prev-action'||action==='next-action'){navigateAction(action==='prev-action'?-1:1,el.dataset.id);}
   if(action==='settling-frame'){state.image='frame';state.frameId=el.dataset.id;render();}
   if(action==='outcome-json'){state.drawer={title:'Action completion and diagnostics',raw:{outcome:selectedAction()?.outcome,frames:(state.report.events||[]).filter(e=>e.action_id===state.actionId&&e.event_type==='action.settling_frame').map(e=>e.payload)}};render();}
@@ -86,6 +90,8 @@ root.addEventListener('click',async e=>{
 });
 document.addEventListener('click',e=>{if(e.target.closest?.('.skip-link')){e.preventDefault();const main=document.getElementById('main-content');main?.focus();main?.scrollIntoView({block:'start'});}});
 document.addEventListener('keydown',e=>{
+  // Enter in the add-a-model fields adds the model; it never saves the whole form.
+  if(e.key==='Enter'&&!e.isComposing&&e.target.dataset?.newModelField){e.preventDefault();addModelAndRefocus();return;}
   if(e.key==='Escape'&&state.drawer){e.preventDefault();closeReportExport();state.drawer=null;render();return;}
   if(e.key==='Tab'&&state.drawer){
     const elements=Array.from(root.querySelectorAll('.drawer button:not(:disabled),.drawer a[href],.drawer input:not(:disabled),.drawer select:not(:disabled),.drawer [tabindex="0"]'));
@@ -98,6 +104,9 @@ document.addEventListener('keydown',e=>{
     state.tab=e.key==='Home'?tabs[0]:e.key==='End'?tabs.at(-1):tabs[(i+(e.key==='ArrowRight'?1:tabs.length-1))%tabs.length];render();document.getElementById('run-tab-'+state.tab)?.focus();
   }
 });
+// Blurring first sends the field's pending change before the fields clear; otherwise Chrome fires it
+// during the redraw and puts the old text back. The model ID field is then ready for the next model.
+function addModelAndRefocus(){document.activeElement?.blur?.();addSavedModel();render();document.getElementById('new-model-model')?.focus();}
 window.addEventListener('hashchange',route);
 setInterval(()=>{if(state.connected&&!document.hidden&&!state.drawer&&!state.submitting)void refresh();},5000);
 bindThemeSwitch(root);
