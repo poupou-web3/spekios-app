@@ -101,7 +101,8 @@ th { font-family: var(--mono); font-size: 10px; font-weight: 400; text-transform
 .landing-step-number { position: static; display: block; color: var(--brand-text); font: 11px var(--mono); }
 .landing-step h2 { margin-top: 25px; font-size: 16px; font-weight: 500; }
 .landing-step p { margin-top: 10px; line-height: 1.65; }
-.landing-recent, .workspace-onboarding { max-width: 1120px; margin-inline: auto; }
+.content-landing > .notice, .landing-recent, .workspace-onboarding { max-width: 1120px; margin-inline: auto; }
+.content-landing > .notice { padding-inline: 20px; }
 .landing-recent { margin-top: 16px; }
 .landing-recent .panel-header h2 { font-family: var(--display); font-size: 28px; font-weight: 400; }
 .filter-chip { border-radius: var(--r-sm); font-size: 12px; }

@@ -14,10 +14,15 @@ let refreshing = false, renderIdentity = '', drawerOpener = null, rendering = fa
 export function render(){
   if(!state.connected){login();return;}
   if(state.composing)return;
+  const focused=document.activeElement;
+  // "0." is not a number yet. Replacing the field would delete the decimal the person is typing.
+  if(focused?.type==='number'&&focused.validity?.badInput)return;
   // Replacing a focused field makes Chrome fire its pending change event inside the replacement.
   // A handler that renders from there would replace the same nodes again, so it waits for this pass.
   if(rendering){renderAgain=true;return;}
-  const focused=document.activeElement,focusId=focused?.id,selection=[focused?.selectionStart,focused?.selectionEnd,focused?.selectionDirection];
+  // Number inputs expose no caret. Reading selectionStart throws in some browsers.
+  let selection=null;try{if(typeof focused?.selectionStart==='number')selection=[focused.selectionStart,focused.selectionEnd,focused.selectionDirection];}catch{}
+  const focusId=focused?.id;
   const focusKey=focused?.dataset?.action?{...focused.dataset}:null,identity=[state.view,state.runId,state.tab].join(':');
   const preserved=identity===renderIdentity;
   const details=preserved?Array.from(root.querySelectorAll('details[data-disclosure]')).map(n=>[n.dataset.disclosure,n.open]):[];
@@ -30,7 +35,12 @@ export function render(){
   for(const node of root.querySelectorAll('details[data-disclosure]')){const saved=details.find(([key])=>key===node.dataset.disclosure);if(saved)node.open=saved[1];}
   Array.from(root.querySelectorAll('.action-list,.event-list,.table-wrap,.drawer,.discovery-tree')).forEach((node,i)=>{if(scroll[i]){node.scrollTop=scroll[i][0];node.scrollLeft=scroll[i][1];}});
   const input=focusId?document.getElementById(focusId):focusKey?Array.from(root.querySelectorAll('[data-action]')).find(n=>Object.keys(focusKey).every(key=>n.dataset[key]===focusKey[key])):null;
-  if(input){input.focus({preventScroll:true});if(typeof selection[0]==='number'&&input.setSelectionRange)try{input.setSelectionRange(...selection);}catch{}}
+  if(input){
+    input.focus({preventScroll:true});
+    if(selection){try{input.setSelectionRange(...selection);}catch{}}
+    // A replaced number field focuses with the caret on the first digit, so the next key is inserted in front and the digit is covered.
+    else if(input.type==='number'){const value=input.value;input.value='';input.value=value;}
+  }
   if(state.drawer&&!hadDrawer)root.querySelector?.('.drawer button')?.focus();
   if(!state.drawer&&hadDrawer){
     const opener=drawerOpener?.id?document.getElementById(drawerOpener.id):drawerOpener?.key?Array.from(root.querySelectorAll('[data-action]')).find(n=>Object.keys(drawerOpener.key).every(key=>n.dataset[key]===drawerOpener.key[key])):null;

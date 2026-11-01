@@ -70,6 +70,17 @@ test('refresh rendering preserves a full text selection and marked disclosures',
   ui.node.querySelectorAll=selector=>selector==='details[data-disclosure]'?[details]:selector.includes('.action-list')?[scroll]:[];
   ui.render();ui.render();assert.deepEqual(selection.at(-1),[2,7,'backward']);assert.ok(focus);assert.equal(details.open,true);assert.equal(scroll.scrollTop,120);
 });
+test('replacing a number field puts the caret back after the digits',()=>{
+  const ui=workspace();connect(ui);const writes=[];
+  const input={id:'configuration-max_minutes',type:'number',dataset:{},selectionStart:null,selectionEnd:null,selectionDirection:null,focus(){},setSelectionRange(){throw new Error('number inputs have no caret');},get value(){return this.current;},set value(value){writes.push(value);this.current=value;},current:'30'};
+  ui.document.activeElement=input;ui.document.getElementById=id=>id==='configuration-max_minutes'?input:null;
+  ui.render();assert.deepEqual(writes,['','30']);
+});
+test('an unfinished number stays on screen while it is being typed',()=>{
+  const ui=workspace();connect(ui);ui.node.innerHTML='kept';
+  ui.document.activeElement={type:'number',validity:{badInput:true},selectionStart:null};
+  ui.render();assert.equal(ui.node.innerHTML,'kept');
+});
 test('IME input is captured before the deferred composition-end refresh',()=>{
   const ui=workspace();connect(ui);ui.state.runs=[{run_id:'run',target_url:'https://example.test',lifecycle:'completed',config:{}}];const target={id:'run-search',value:'日本語',dataset:{}};
   ui.handlers.compositionstart[0]({target});ui.handlers.input[0]({target});const before=ui.node.innerHTML;
