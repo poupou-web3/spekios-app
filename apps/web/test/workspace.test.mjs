@@ -9,16 +9,70 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,selectWebsite,workspaceWebsites};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});
-const payloads=(jobs=[])=>({'/v1/runs':{runs:[]},'/v1/browser-jobs':{jobs,workers:[],settings:{}},'/v1/model-providers':{providers:[]},'/v1/browser-access':{requests:[],sessions:[]}});
+const payloads=(jobs=[])=>new Proxy({'/v1/runs':{runs:[]},'/v1/browser-jobs':{jobs,workers:[],settings:{}},'/v1/model-providers':{providers:[]},'/v1/browser-access':{requests:[],sessions:[]}},{get:(data,path)=>data[String(path).split('?')[0]]});
 const connect=ui=>Object.assign(ui.state,{connected:true,token:'local-test-token'});
 const response=value=>({ok:true,status:200,json:async()=>value});
 
+test('website selection scopes history and keeps the overview focused on the selected website',()=>{
+  const ui=workspace();ui.state.runs=[run('a',{target_url:'https://a.test/signup'}),run('a2',{target_url:'https://a.test/pricing'}),run('b')];
+  ui.selectWebsite('https://a.test',{prefill:true});
+  assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['a','a2']);
+  assert.match(ui.home(),/A fresh look at/);assert.match(ui.home(),/website-test-card/);assert.doesNotMatch(ui.home(),/b\.test|run-search/);
+  assert.match(ui.shell(ui.home()),/Test a new URL/);assert.doesNotMatch(ui.shell(ui.home()),/>Recent tests<\/div>/);
+  ui.state.websitePage='tests';assert.match(ui.home(),/id="run-search"/);
+});
+test('queued work and private sign-in prompts follow the selected website',()=>{
+  const ui=workspace();ui.state.jobs=[{job_id:'a',status:'queued',request:{kind:'explore',target_url:'https://a.test/checkout'}},{job_id:'b',status:'running',request:{kind:'explore',target_url:'https://b.test/private'}}];
+  ui.state.access.requests=[{status:'waiting',origin:'https://a.test',access_id:'a-access'},{status:'waiting',origin:'https://b.test',access_id:'b-access'}];
+  ui.selectWebsite('https://a.test');const html=ui.jobBanner();assert.match(html,/a\.test/);assert.doesNotMatch(html,/b\.test|b-access/);
+  assert.equal(ui.workspaceWebsites().filter(s=>s.origin==='https://a.test').length,1);
+});
+test('a scoped URL restores the website and requests its history without dropping the complete website catalog',async()=>{
+  const paths=[],catalog=[{origin:'https://old.test',run_count:120,target_url:'https://old.test/editor'},{origin:'https://new.test',run_count:5,target_url:'https://new.test'}];
+  const ui=workspace({fetch:async path=>{paths.push(path);return response(path.startsWith('/v1/runs?')?{runs:[run('older',{target_url:'https://old.test/editor'})],websites:catalog,total:120,next_offset:50}:payloads()[path]);}});connect(ui);
+  ui.location.hash='#/website/https%3A%2F%2Fold.test/tests';await ui.route();
+  assert.equal(ui.state.websiteOrigin,'https://old.test');assert.equal(ui.state.websitePage,'tests');assert.equal(ui.state.url,'https://old.test/');
+  assert.ok(paths.includes('/v1/runs?origin=https%3A%2F%2Fold.test&offset=0'));assert.equal(ui.state.runNextOffset,50);
+  assert.equal(ui.workspaceWebsites().length,2);assert.match(ui.shell(ui.home()),/120 tests/);assert.match(ui.home(),/data-action="runs-page"/);
+});
+test('the switcher validates new URLs and launches once through the normal job admission flow',async()=>{
+  const posted=[],job={job_id:'00000000-0000-4000-8000-000000000088',status:'queued',request:{kind:'explore',target_url:'https://a.test/pricing'}},data=payloads([job]);
+  class SwitcherFormData extends Map{constructor(form){super(form.fields);}}
+  const ui=workspace({FormData:SwitcherFormData,fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job});}return response(data[path]);}});connect(ui);ready(ui);
+  const submit=url=>ui.handlers.submit[0]({preventDefault(){},target:{id:'website-launch-form',fields:[['url',url]]}});
+  await submit('javascript:alert(1)');assert.equal(posted.length,0);assert.match(ui.state.websiteLaunchError,/web address/);
+  await submit('a.test/pricing');assert.equal(posted.length,1);assert.equal(posted[0].target_url,'https://a.test/pricing');assert.equal(posted[0].auth_mode,'auto');
+  assert.equal(ui.state.websiteOrigin,'https://a.test');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.pending-job'),undefined);
+  assert.equal(ui.workspaceWebsites().filter(s=>s.origin==='https://a.test').length,1);
+});
+test('switching websites during a refresh rejects the old page and immediately fetches the new selection',async()=>{
+  let release,entered;const firstStarted=new Promise(resolve=>entered=resolve),oldPage=new Promise(resolve=>release=resolve),paths=[];
+  const ui=workspace({fetch:async path=>{
+    paths.push(path);
+    if(path.startsWith('/v1/runs?origin=https%3A%2F%2Fa.test')){entered();return oldPage;}
+    return response(path.startsWith('/v1/runs?')?{runs:[run('b')],websites:[{origin:'https://b.test',target_url:'https://b.test'}],total:1}:payloads()[path]);
+  }});connect(ui);ui.selectWebsite('https://a.test');const pending=ui.refresh();await firstStarted;
+  ui.selectWebsite('https://b.test',{prefill:true});await ui.refresh();release(response({runs:[run('a')],websites:[],total:1}));await pending;await new Promise(setImmediate);
+  assert.equal(ui.state.runs[0].target_url,'https://b.test');assert.equal(ui.state.websiteOrigin,'https://b.test');assert.ok(paths.some(path=>path.startsWith('/v1/runs?origin=https%3A%2F%2Fb.test')));
+});
+test('switcher launches from settings return to the website while manual navigation wins a late admission',async()=>{
+  const data=payloads(),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job:{job_id:'new'}}:data[path])});connect(ui);ui.state.view='settings';ui.location.hash='#/settings/models';
+  await ui.submitJob({kind:'explore',target_url:'https://new.test'},{fromSwitcher:true});
+  assert.equal(ui.state.view,'workspace');assert.equal(ui.state.websiteOrigin,'https://new.test');assert.equal(ui.location.hash,'#/workspace');
+  let release,entered;const started=new Promise(resolve=>entered=resolve),other=workspace({fetch:async(path,options)=>{
+    if(options.method==='POST'){entered();return new Promise(resolve=>release=()=>resolve(response({job:{job_id:'late'}})));}return response(data[path]);
+  }});connect(other);other.selectWebsite('https://a.test');
+  const pending=other.submitJob({kind:'explore',target_url:'https://a.test/pricing'},{fromSwitcher:true});await started;
+  other.selectWebsite('https://b.test');other.location.hash='#/website/https%3A%2F%2Fb.test';release();await pending;
+  assert.equal(other.state.websiteOrigin,'https://b.test');assert.equal(other.state.trackedJobId,null);assert.equal(other.location.hash,'#/website/https%3A%2F%2Fb.test');
+});
+
 test('workspace filters combine URL/model search, review status and live/test mode',()=>{
-  const ui=workspace();ui.state.runs=[run('pending'),run('done',{summary:{actions:3,pending_findings:0,confirmed_findings:1}}),run('fixture',{config:{training_status:'excluded_fixture',execution_mode:'protocol_fixture'}}),run('broken',{lifecycle:'failed'}),run('replay',{config:{replay_of:{source_run_id:'pending'},execution_mode:'live'}})];
+  const ui=workspace();ui.state.websitePage='tests';ui.state.runs=[run('pending'),run('done',{summary:{actions:3,pending_findings:0,confirmed_findings:1}}),run('fixture',{config:{training_status:'excluded_fixture',execution_mode:'protocol_fixture'}}),run('broken',{lifecycle:'failed'}),run('replay',{config:{replay_of:{source_run_id:'pending'},execution_mode:'live'}})];
   ui.state.runFilter='needs_review';assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['pending','fixture','broken']);
   ui.state.runMode='live';assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['pending','broken']);
   ui.state.runFilter='attention';assert.equal(ui.workspaceRuns()[0].run_id,'broken');
@@ -26,7 +80,7 @@ test('workspace filters combine URL/model search, review status and live/test mo
   ui.state.search='';ui.state.runFilter='all';ui.state.runMode='test';assert.equal(ui.workspaceRuns()[0].run_id,'fixture');
 });
 test('review totals count original runs and state the latest-fifty scope',()=>{
-  const ui=workspace();ui.state.runs=[run('source'),run('replay',{config:{replay_of:{source_run_id:'source'}},summary:{pending_findings:900,confirmed_findings:900}})];
+  const ui=workspace();ui.state.websitePage='tests';ui.state.runs=[run('source'),run('replay',{config:{replay_of:{source_run_id:'source'}},summary:{pending_findings:900,confirmed_findings:900}})];
   const html=ui.home();assert.match(html,/latest 50 runs/);assert.doesNotMatch(html,/>900<|>901</);assert.match(html,/See source finding/);
   ui.state.runs=[run('legacy',{summary:undefined})];assert.match(ui.home(),/Not loaded/);assert.doesNotMatch(ui.home(),/undefined|NaN/);
 });
@@ -137,7 +191,7 @@ test('an unfinished number stays on screen while it is being typed',()=>{
   ui.render();assert.equal(ui.node.innerHTML,'kept');
 });
 test('IME input is captured before the deferred composition-end refresh',()=>{
-  const ui=workspace();connect(ui);ui.state.runs=[{run_id:'run',target_url:'https://example.test',lifecycle:'completed',config:{}}];const target={id:'run-search',value:'日本語',dataset:{}};
+  const ui=workspace();connect(ui);ui.state.websitePage='tests';ui.state.runs=[{run_id:'run',target_url:'https://example.test',lifecycle:'completed',config:{}}];const target={id:'run-search',value:'日本語',dataset:{}};
   ui.handlers.compositionstart[0]({target});ui.handlers.input[0]({target});const before=ui.node.innerHTML;
   ui.handlers.compositionend[0]({target});assert.equal(ui.state.search,'日本語');assert.equal(ui.node.innerHTML,before);
   target.value='日本語入力';ui.handlers.input[0]({target});assert.equal(ui.state.search,'日本語入力');assert.match(ui.node.innerHTML,/日本語入力/);

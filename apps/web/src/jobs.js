@@ -5,6 +5,7 @@ import {api} from './api.js';
 import {refresh,render} from './app.js';
 import {state} from './state.js';
 import {canStart} from './views/home.js';
+import {selectWebsite} from './website-state.js';
 // Runs that ended before finishing. Each can start again as a new job.
 export const STOPPED=['failed','interrupted','blocked','cancelled'];
 // The request that launched a stopped run or a job that never started, ready to submit again.
@@ -65,17 +66,19 @@ export function followSubmittedJob(){
   location.hash='#/workspace/'+job.run_id;return true;
 }
 export function clearTrackedJob(){state.trackedJobId=null;sessionStorage.removeItem('scout.tracked-job');}
-export async function submitJob(request){
+export async function submitJob(request,{fromSwitcher=false}={}){
   if(state.submitting)return;state.submitting=true;state.error='';state.launchError='';render();
-  const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth,originView=state.view,originRun=state.runId;
+  const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth,originView=state.view,originRun=state.runId,originWebsite=state.websiteOrigin,originWebsitePage=state.websitePage;
   let saved;try{saved=JSON.parse(sessionStorage.getItem('scout.pending-job')||'null');}catch{}
   const spec=saved&&JSON.stringify(saved.request)===JSON.stringify(request)?saved:{request,job_id:crypto.randomUUID()};
   sessionStorage.setItem('scout.pending-job',JSON.stringify(spec));
   try{
     const response=await (await api('/v1/browser-jobs',{job_id:spec.job_id,...request})).json();if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
     sessionStorage.removeItem('scout.pending-job');toast(response.reused?'Showing the existing job.':'Queued. Your test will open here when the browser starts.');
-    if(state.view===originView&&state.runId===originRun){
-      if(originView==='workspace'){
+    if(state.view===originView&&state.runId===originRun&&state.websiteOrigin===originWebsite&&state.websitePage===originWebsitePage){
+      if(originView==='workspace'||fromSwitcher){
+        if(request.kind==='explore'){selectWebsite(request.target_url);state.websiteUrl='';state.websiteLaunchError='';}
+        state.view='workspace';state.websitePage='overview';
         state.trackedJobId=response.job.job_id;sessionStorage.setItem('scout.tracked-job',state.trackedJobId);
         state.runId=null;state.report=null;state.actionId=null;location.hash='#/workspace';
       }

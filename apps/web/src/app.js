@@ -10,7 +10,9 @@ import {home} from './views/home.js';
 import {runView} from './views/run.js';
 import {SETTINGS_SECTIONS,applyConfiguration,settingsView} from './views/settings.js';
 import {mergeSteering} from './views/steering.js';
-let refreshing = false, renderIdentity = '', drawerOpener = null, rendering = false, renderAgain = false;
+import {rememberWorkspacePage,selectWebsite} from './website-state.js';
+import {savedWebsite,websiteOrigin} from './websites.js';
+let refreshing = false, refreshAgain = false, renderIdentity = '', drawerOpener = null, rendering = false, renderAgain = false;
 export function render(){
   if(!state.connected){login();return;}
   if(state.composing)return;
@@ -23,7 +25,7 @@ export function render(){
   // Number inputs expose no caret. Reading selectionStart throws in some browsers.
   let selection=null;try{if(typeof focused?.selectionStart==='number')selection=[focused.selectionStart,focused.selectionEnd,focused.selectionDirection];}catch{}
   const focusId=focused?.id;
-  const focusKey=focused?.dataset?.action?{...focused.dataset}:null,identity=[state.view,state.runId,state.tab,state.settingsSection].join(':');
+  const focusKey=focused?.dataset?.action?{...focused.dataset}:null,identity=[state.view,state.websiteOrigin,state.websitePage,state.runId,state.tab,state.settingsSection].join(':');
   const preserved=identity===renderIdentity;
   const details=preserved?Array.from(root.querySelectorAll('details[data-disclosure]')).map(n=>[n.dataset.disclosure,n.open]):[];
   const scroll=preserved?Array.from(root.querySelectorAll('.action-list,.event-list,.table-wrap,.drawer,.discovery-tree')).map(n=>[n.scrollTop,n.scrollLeft]):[];
@@ -50,28 +52,38 @@ export function render(){
   if(renderAgain){renderAgain=false;render();}
 }
 export async function refresh(){
-  if(refreshing||(!state.token&&!state.developmentAccess&&!state.browserAuth))return;refreshing=true;
+  if(refreshing){refreshAgain=true;return;}if(!state.token&&!state.developmentAccess&&!state.browserAuth)return;refreshing=true;
   const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth;
+  const origin=state.websiteOrigin,offset=state.runOffset;
+  const runsPath='/v1/runs'+(origin?'?origin='+encodeURIComponent(origin)+'&offset='+offset:'');
   try{
-    const [runs,jobs,providers,access]=await Promise.all(['/v1/runs','/v1/browser-jobs','/v1/model-providers','/v1/browser-access'].map(get));
+    const [runs,jobs,providers,access]=await Promise.all([runsPath,'/v1/browser-jobs','/v1/model-providers','/v1/browser-access'].map(get));
     if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;
+    if(origin!==state.websiteOrigin||offset!==state.runOffset)return;
     // Memory is shown only in Settings → Memory & sessions; other views do not poll it.
     if(state.view==='settings'&&state.settingsSection==='data'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
-    state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
+    state.runs=runs.runs;state.websites=runs.websites||[];state.runTotal=runs.total??runs.runs.length;state.runNextOffset=runs.next_offset??null;state.runListOrigin=origin;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
+    if(!state.websiteOrigin&&!state.runId){const first=state.websites[0];if(first){selectWebsite(first.origin,{prefill:!state.url});}}
     if(privateLogin&&!access.requests.some(a=>a.access_id===privateLogin.id&&['waiting','active'].includes(a.status)))await closePrivateLogin(false);
     if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
-    state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();render();followSubmittedJob();
-  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){state.error=error.message;render();}}finally{refreshing=false;}
+    if(state.report?.run&&state.report.run.run_id===state.runId)selectWebsite(state.report.run.target_url);
+    state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();rememberWorkspacePage();render();followSubmittedJob();
+  }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){state.error=error.message;render();}}finally{refreshing=false;if(refreshAgain||origin!==state.websiteOrigin||offset!==state.runOffset){refreshAgain=false;void refresh();}}
 }
 export async function route(){
   const parts=location.hash.replace(/^#\/?/,'').split('/');
   state.view=parts[0]==='settings'?'settings':'workspace';
+  state.websitePage=parts[0]==='website'&&parts[2]==='tests'?'tests':'overview';
+  if(state.websitePage!=='tests')state.runOffset=0;
+  if(parts[0]==='website'){let origin='';try{origin=websiteOrigin(decodeURIComponent(parts[1]||''));}catch{}if(origin)selectWebsite(origin,{prefill:origin!==state.websiteOrigin});}
+  else if(!state.websiteOrigin){const saved=savedWebsite();if(saved)selectWebsite(saved,{prefill:!state.url});}
   // Each settings section is its own page, opened at the top. Unknown sections show the first.
   if(state.view==='settings'){const section=SETTINGS_SECTIONS.some(([key])=>key===parts[1])?parts[1]:SETTINGS_SECTIONS[0][0];if(section!==state.settingsSection){state.settingsSection=section;window.scrollTo?.(0,0);}}
   const id=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'')?parts[1]:null;
   if(state.trackedJobId&&(state.view!=='workspace'||id))clearTrackedJob();
   if(id!==state.runId){state.runId=id;state.report=null;state.reportEtag='';state.actionId=null;state.tab='actions';state.image='after';state.findingFilter='needs_review';clearImages();}
   const action=/^[\da-f-]{36}$/.test(parts[2]||'')?parts[2]:null;if(action){state.actionId=action;state.tab='actions';}
+  if(id&&['findings','flow'].includes(parts[2]))state.tab=parts[2];
   closeReportExport();state.drawer=null;render();await refresh();
   if(state.focusLaunch&&state.view==='workspace'&&!state.runId){state.focusLaunch=false;document.getElementById('target-url')?.focus();}
   if(state.openFindingsRun===state.runId){state.tab='findings';state.findingFilter='needs_review';state.openFindingsRun=null;render();}
