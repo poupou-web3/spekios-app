@@ -9,7 +9,7 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,jobBanner,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});
@@ -61,6 +61,42 @@ test('failed or cancelled admission without a run remains visible to its user',(
   const ui=workspace();ui.state.trackedJobId='job';ui.state.jobs=[{job_id:'job',status:'failed',run_id:null,error:'<script>target failure</script>'}];
   assert.match(ui.jobBanner(),/Your test could not start/);assert.match(ui.jobBanner(),/Job job/);assert.doesNotMatch(ui.jobBanner(),/#\/operations|back office/i);assert.doesNotMatch(ui.jobBanner(),/<script>/);
   ui.state.jobs[0].status='cancelled';assert.match(ui.jobBanner(),/cancelled before launch/);assert.equal(ui.followSubmittedJob(),false);
+});
+const ready=ui=>Object.assign(ui.state,{settings:{provider:'openrouter',model:'model'},providers:{gateway_ready:true,providers:[{provider:'openrouter',configured:true}]},workers:[{available:true}]});
+const click=(ui,action,id)=>ui.handlers.click[0]({target:{closest:selector=>selector==='[data-action]'?{dataset:{action,id},tagName:'BUTTON'}:null}});
+test('a stopped test starts again with the request that launched it',async()=>{
+  const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
+  const old={job_id:'old',status:'failed',run_id:'broken',project_id:'project',settings:{viewportProfile:'mobile'},request:{kind:'explore',target_url:'https://broken.test',auth_mode:'sign_in',auto_reproduce:true}};
+  const broken=run('broken',{lifecycle:'failed'}),session={session_id:'saved',expires_at:'2999-01-01T00:00:00Z'};old.request.session_id='saved';
+  Object.assign(ui.state,{runs:[broken,run('done')],jobs:[old],access:{requests:[],sessions:[session]}});
+  const html=ui.home();assert.match(html,/data-action="restart-run" data-id="broken"/);assert.doesNotMatch(html,/data-action="restart-run" data-id="done"/);
+  assert.equal(ui.restartRequest('run',broken).session_id,'saved');
+  ui.state.submitting=true;assert.match(ui.home(),/data-id="broken" aria-label="Run broken.test again" title="Run again" disabled/);ui.state.submitting=false;
+  session.expires_at='2000-01-01T00:00:00Z';await click(ui,'restart-run','broken');
+  assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'explore',target_url:'https://broken.test',viewport_profile:'mobile',auth_mode:'sign_in',auto_reproduce:true,project_id:'project'});
+  assert.equal(ui.state.trackedJobId,'new');assert.equal(ui.location.hash,'#/workspace');
+});
+test('a run page and an unstarted job offer one restart each',async()=>{
+  const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
+  ui.state.report={run:run('stopped',{lifecycle:'interrupted'}),actions:[],captures:[]};ui.state.runId='stopped';
+  assert.match(ui.runView(),/data-action="restart-run" data-id="stopped" >.*Run again/);
+  ui.state.report.run.lifecycle='completed';assert.doesNotMatch(ui.runView(),/restart-run/);
+  Object.assign(ui.state,{report:null,runId:null,trackedJobId:'job',jobs:[{job_id:'job',status:'failed',run_id:null,request:{kind:'reproduce',source_action_id:'suspect'}}]});
+  assert.match(ui.jobBanner(),/data-action="restart-job" data-id="job" >.*Try again/);
+  await click(ui,'restart-job','job');assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'reproduce',source_action_id:'suspect'});
+});
+test('resumed, queued, older and verification runs restart only where it is safe',()=>{
+  const ui=workspace(),stopped=run('first',{lifecycle:'interrupted'});
+  ui.state.jobs=[{job_id:'job',status:'completed',run_id:'second',previous_run_ids:['first'],request:{kind:'explore',target_url:'https://first.test'}}];
+  assert.equal(ui.restartRequest('run',stopped),null,'the job continued in a later run');
+  ui.state.jobs=[{job_id:'again',status:'queued',settings:{viewportProfile:'desktop'},request:{kind:'explore',target_url:'https://first.test'}}];
+  assert.equal(ui.restartRequest('run',stopped),null,'the same test is already queued');
+  ui.state.jobs[0].settings.viewportProfile='mobile';
+  assert.deepEqual({...ui.restartRequest('run',stopped)},{kind:'explore',target_url:'https://first.test',viewport_profile:'desktop',auth_mode:undefined,auto_reproduce:undefined,app_memory:undefined});
+  const replay=run('replay',{lifecycle:'failed',config:{runtime_version:'explorer-v1',replay_of:{source_run_id:'source',source_action_id:'suspect'}}});
+  assert.deepEqual({...ui.restartRequest('run',replay)},{kind:'reproduce',source_action_id:'suspect'});
+  replay.config.fix_verification={issue_id:'issue'};assert.equal(ui.restartRequest('run',replay),null);
+  assert.equal(ui.restartRequest('run',run('fixture',{lifecycle:'failed',config:{runtime_version:'recorder-v1'}})),null);
 });
 test('refresh rendering preserves a full text selection and marked disclosures',()=>{
   const ui=workspace();connect(ui);const selection=[];let focus=0;
