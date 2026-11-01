@@ -7,7 +7,7 @@ const all = { breadth: { travel_steps: 0 }, depth: { travel_steps: 0 }, rewalk: 
 function simulate(scheduler: StrategyScheduler, actions: number, reward: (mode: StrategyMode) => number = () => 0, best = all, journeys = false) {
   for (let i = 0; i < actions; i++) {
     const { mode } = scheduler.choose(best)!;
-    scheduler.record(mode, { travel: false, reward: reward(mode), newState: journeys, compared: null });
+    scheduler.record(mode, { travel: false, reward: reward(mode), progress: journeys, compared: null });
   }
   return scheduler.summary().actions;
 }
@@ -51,41 +51,57 @@ test('adaptive shares follow what each strategy finds but never drop below a qua
   assert.ok(scheduler.yieldOf('rewalk') > .8 && scheduler.yieldOf('breadth') < .2);
 });
 
-test('a turn continues while travelling and a journey while it keeps reaching new screens nearby', () => {
+test('a turn continues while travelling and a journey while it keeps making progress nearby', () => {
   const scheduler = new StrategyScheduler({ ...DEFAULT_STRATEGY, adaptive: false });
   assert.equal(scheduler.choose(all)!.mode, 'breadth');
-  scheduler.record('breadth', { travel: true, reward: 0, newState: false, compared: null });
+  scheduler.record('breadth', { travel: true, reward: 0, progress: false, compared: null });
   const travelling = scheduler.choose(all)!;
   assert.deepEqual([travelling.mode, travelling.continued], ['breadth', true], 'Travel toward a target keeps the turn.');
-  scheduler.record('breadth', { travel: false, reward: 1, newState: true, compared: null });
+  scheduler.record('breadth', { travel: false, reward: 1, progress: true, compared: null });
   const journey = scheduler.choose(all)!;
   assert.deepEqual([journey.mode, journey.continued], ['depth', false], 'One new control ends a breadth turn.');
   for (let step = 1; step < MAX_JOURNEY_STEPS; step++) {
-    scheduler.record('depth', { travel: false, reward: 1, newState: true, compared: null });
+    scheduler.record('depth', { travel: false, reward: 1, progress: true, compared: null });
     assert.equal(scheduler.choose(all)!.mode, 'depth', `Journey step ${step + 1} continues.`);
   }
-  scheduler.record('depth', { travel: false, reward: 1, newState: true, compared: null });
+  scheduler.record('depth', { travel: false, reward: 1, progress: true, compared: null });
   assert.notEqual(scheduler.choose(all)!.mode, 'depth', 'A journey ends after its step limit.');
   assert.equal(scheduler.summary().longest_journey, MAX_JOURNEY_STEPS);
 
   const stalled = new StrategyScheduler({ breadth: 50, depth: 50, rewalk: 0, adaptive: false });
-  stalled.choose(all); stalled.record('breadth', { travel: false, reward: 0, newState: false, compared: null });
+  stalled.choose(all); stalled.record('breadth', { travel: false, reward: 0, progress: false, compared: null });
   assert.equal(stalled.choose(all)!.mode, 'depth');
-  stalled.record('depth', { travel: false, reward: .3, newState: true, compared: null });
+  stalled.record('depth', { travel: false, reward: .3, progress: true, compared: null });
   assert.equal(stalled.choose({ ...all, depth: { travel_steps: 2 } })!.mode, 'breadth', 'A journey whose next step needs travel ends.');
-  stalled.record('breadth', { travel: false, reward: 0, newState: false, compared: null });
-  stalled.choose(all); stalled.record('depth', { travel: false, reward: 0, newState: false, compared: null });
-  assert.equal(stalled.choose(all)!.continued, false, 'A journey that reached nothing new ends.');
+  stalled.record('breadth', { travel: false, reward: 0, progress: false, compared: null });
+  stalled.choose(all); stalled.record('depth', { travel: false, reward: 0, progress: false, compared: null });
+  assert.equal(stalled.choose(all)!.continued, false, 'A journey that made no progress (a scroll, a known screen) ends.');
+});
+
+test('with an action limit a journey is held to its share of it, at least two steps', () => {
+  const short = new StrategyScheduler({ ...DEFAULT_STRATEGY, adaptive: false }, 6);
+  assert.equal(short.journeyLimit(), 2, 'Thirty percent of six actions rounds up to two.');
+  short.choose(all); short.record('breadth', { travel: false, reward: 1, progress: true, compared: null });
+  assert.equal(short.choose(all)!.mode, 'depth');
+  short.record('depth', { travel: false, reward: 1, progress: true, compared: null });
+  assert.equal(short.choose(all)!.continued, true);
+  short.record('depth', { travel: false, reward: 1, progress: true, compared: null });
+  assert.notEqual(short.choose(all)!.mode, 'depth', 'The journey ends at its share of the limit.');
+  assert.equal(short.summary().journey_limit, 2);
+  assert.equal(new StrategyScheduler({ ...DEFAULT_STRATEGY, adaptive: false }, 30).journeyLimit(), 9);
+  assert.equal(new StrategyScheduler({ ...DEFAULT_STRATEGY, adaptive: false }, 200).journeyLimit(), MAX_JOURNEY_STEPS);
+  assert.equal(new StrategyScheduler({ breadth: 90, depth: 10, rewalk: 0, adaptive: false }, 6).journeyLimit(), 2, 'At least two steps.');
+  assert.equal(new StrategyScheduler(DEFAULT_STRATEGY).journeyLimit(), MAX_JOURNEY_STEPS, 'Without a limit a journey can take twelve steps.');
 });
 
 test('discovery rewards value new screens, changed outcomes and suspects', () => {
-  assert.equal(discoveryReward({ newState: true, newMapState: true, compared: null, suspect: false }), 1);
-  assert.equal(discoveryReward({ newState: true, newMapState: false, compared: null, suspect: false }), .3);
-  assert.equal(discoveryReward({ newState: false, newMapState: false, compared: null, suspect: false }), 0);
-  assert.equal(discoveryReward({ newState: false, newMapState: false, compared: 'same', suspect: false }), .2);
-  assert.equal(discoveryReward({ newState: false, newMapState: false, compared: 'changed', suspect: false }), 1);
-  assert.equal(discoveryReward({ newState: false, newMapState: false, compared: null, suspect: true }), .5);
+  assert.equal(discoveryReward({ progress: true, newMapState: true, compared: null, suspect: false }), 1);
+  assert.equal(discoveryReward({ progress: true, newMapState: false, compared: null, suspect: false }), .3);
+  assert.equal(discoveryReward({ progress: false, newMapState: false, compared: null, suspect: false }), 0);
+  assert.equal(discoveryReward({ progress: false, newMapState: false, compared: 'same', suspect: false }), .2);
+  assert.equal(discoveryReward({ progress: false, newMapState: false, compared: 'changed', suspect: false }), 1);
+  assert.equal(discoveryReward({ progress: false, newMapState: false, compared: null, suspect: true }), .5);
   const scheduler = new StrategyScheduler();
-  scheduler.choose(all); scheduler.record('breadth', { travel: false, reward: 1, newState: true, compared: 'changed' });
+  scheduler.choose(all); scheduler.record('breadth', { travel: false, reward: 1, progress: true, compared: 'changed' });
   assert.deepEqual([scheduler.summary().compared_transitions, scheduler.summary().changed_transitions], [1, 1]);
 });

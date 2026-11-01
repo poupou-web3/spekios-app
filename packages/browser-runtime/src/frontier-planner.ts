@@ -5,7 +5,7 @@ import { jumpableUrl, type MapTransition, type MemorySnapshot } from './app-memo
 import { controlEntry, pageTemplate, transitionKey } from './app-map.js';
 import type { StrategyMode } from './exploration-strategy.js';
 
-export const PLANNER_VERSION = 'frontier-v4';
+export const PLANNER_VERSION = 'frontier-v5';
 // A remembered page whose controls were observed but never ranked by a model.
 export const UNRANKED_MEMORY_SCORE = .3;
 // Actions one top-level area may take before new territory starts sharing
@@ -19,6 +19,8 @@ type Node = {
   signals: Record<string, ChangeSignal>; proposals: Map<string, Proposal>; attempted: Set<string>; declined: boolean; focus_stale: boolean;
   // App-map identity of the screen and of each control on it (http pages only).
   map_key: string | null; entries: Map<string, string>;
+  // The run's first state of the same screen when this is another view of it.
+  screen_state_id: string | null;
 };
 export type RouteStep = {
   from_state_id: string; to_state_id: string; command: BrowserCommand;
@@ -68,9 +70,10 @@ export class FrontierPlanner {
   private root: string | null = null;
   private rootAction: string | null = null;
   private focused = false;
-  // Map states reached and entries acted on in this run, and actions spent
-  // in each top-level area (keyed by its depth-1 state, or 'root').
-  private readonly mapSeen = new Set<string>();
+  // Map states reached (with the run's first state of each) and entries acted
+  // on in this run, and actions spent in each top-level area (keyed by its
+  // depth-1 state, or 'root').
+  private readonly screens = new Map<string, string>();
   private readonly entriesTried = new Set<string>();
   private readonly walked = new Set<string>();
   private readonly branchSpent = new Map<string, number>();
@@ -82,18 +85,26 @@ export class FrontierPlanner {
     const parent = parentId ? this.nodes.get(parentId) : undefined;
     const entries = new Map<string, string>();
     if (mapKey) for (const control of capture.observation.controls ?? []) if (control.role !== 'scroll') entries.set(control.control_id, controlEntry(control).key);
+    // A screen already reached in another view (scrolled, a form partly
+    // filled, a menu closed again) keeps its depth: depth counts screens.
+    const screen = !initial && mapKey ? this.nodes.get(this.screens.get(mapKey) ?? '') : undefined;
     const node: Node = { id, capture, parent_state_id: initial ? null : parentId ?? null,
-      depth: initial ? 0 : (parent?.depth ?? -1) + 1,
+      depth: initial ? 0 : screen ? screen.depth : (parent?.depth ?? -1) + 1,
       reach_estimate: initial ? 1 : (parent?.reach_estimate ?? 1) * likelihood,
-      signals, proposals: new Map(), attempted: new Set(), declined: false, focus_stale: false, map_key: mapKey, entries };
+      signals, proposals: new Map(), attempted: new Set(), declined: false, focus_stale: false, map_key: mapKey, entries,
+      screen_state_id: screen ? screen.screen_state_id ?? screen.id : null };
     this.nodes.set(id, node);
-    if (mapKey) this.mapSeen.add(mapKey);
+    if (mapKey && !this.screens.has(mapKey)) this.screens.set(mapKey, id);
     if (initial) this.root = id;
     return node;
   }
   // Whether this run or an earlier one already reached an equivalent screen.
   mapKnown(key: string) {
-    return this.mapSeen.has(key) || !!this.memory?.map?.states.has(key);
+    return this.screens.has(key) || !!this.memory?.map?.states.has(key);
+  }
+  // Whether this run already reached an equivalent screen.
+  screenSeen(key: string) {
+    return this.screens.has(key);
   }
   // What earlier runs observed for this action on an equivalent screen.
   earlier(fromKey: string, command: BrowserCommand): EarlierOutcome | null {
@@ -105,7 +116,7 @@ export class FrontierPlanner {
   }
   metadata(id: string) {
     const node = this.nodes.get(id)!;
-    return { algorithm: PLANNER_VERSION, parent_state_id: node.parent_state_id, depth: node.depth,
+    return { algorithm: PLANNER_VERSION, parent_state_id: node.parent_state_id, depth: node.depth, screen_state_id: node.screen_state_id,
       path_likelihood_score: node.reach_estimate, probability_calibrated: false };
   }
   available(id: string) {
@@ -237,15 +248,23 @@ export class FrontierPlanner {
         source_action_id: node.capture.action_id, expected_result: 'The previously observed page opens; its current state is checked again.' }];
     };
   }
-  // The top-level area a state belongs to: its depth-1 ancestor.
+  // The top-level area a state belongs to: the screen of its last ancestor
+  // one step from the entry page.
   private branchOf(node: Node): string | null {
-    return node.depth === 0 ? null : this.ancestry(node.id)[1] ?? node.id;
+    let current = node;
+    const seen = new Set([node.id]);
+    while (current.depth > 1 && current.parent_state_id && !seen.has(current.parent_state_id)) {
+      const parent = this.nodes.get(current.parent_state_id);
+      if (!parent || parent.depth === 0) break;
+      seen.add(parent.id); current = parent;
+    }
+    return current.depth === 0 ? null : current.screen_state_id ?? current.id;
   }
   // New territory keeps each top-level area near a fair share of the actions
   // spent so far, with some slack so short runs are not forced to bounce.
   private balance() {
     const total = [...this.branchSpent.values()].reduce((n, v) => n + v, 0);
-    const areas = 1 + [...this.nodes.values()].filter(n => n.depth === 1).length + (this.root && this.nodes.has(this.root) ? this.available(this.root).length : 0);
+    const areas = 1 + [...this.nodes.values()].filter(n => n.depth === 1 && !n.screen_state_id).length + (this.root && this.nodes.has(this.root) ? this.available(this.root).length : 0);
     return { fair: Math.max(BRANCH_SLACK, total / areas) };
   }
   private weigh(path: RankedPath, node: Node, mode: StrategyMode | undefined, fair: number): RankedPath {
@@ -439,20 +458,31 @@ export class FrontierPlanner {
     return result;
   }
   // Coverage at each depth of this run's discovery tree: screens reached and
-  // their usable controls tried. Blocked controls are counted separately.
+  // their usable controls tried. Views of one screen count once, and a
+  // control tried in any of them is tried. Blocked controls are counted
+  // separately.
   coverage() {
-    const origin = new URL(this.targetUrl).origin, levels = new Map<number, { depth: number; states: number; controls: number; tried: number; blocked: number }>();
+    const origin = new URL(this.targetUrl).origin, screens = new Map<string, { depth: number; controls: Map<string, 'tried' | 'blocked' | 'open'> }>();
     for (const node of this.nodes.values()) {
       if (!/^https?:/.test(node.capture.observation.url)) continue;
-      const level = levels.get(node.depth) ?? { depth: node.depth, states: 0, controls: 0, tried: 0, blocked: 0 };
-      level.states++;
+      const id = node.screen_state_id ?? node.id, screen = screens.get(id) ?? { depth: node.depth, controls: new Map() };
       for (const control of node.capture.observation.controls ?? []) {
         if (control.role === 'scroll') continue;
-        if (node.attempted.has(control.control_id)) { level.controls++; level.tried++; }
-        else if (this.localBlockReason(node.id, control.control_id) || blockedReason(control, origin)) level.blocked++;
-        else level.controls++;
+        const status = node.attempted.has(control.control_id) ? 'tried'
+          : this.localBlockReason(node.id, control.control_id) || blockedReason(control, origin) ? 'blocked' : 'open';
+        if (status === 'tried' || !screen.controls.has(control.control_id)) screen.controls.set(control.control_id, status);
       }
-      levels.set(node.depth, level);
+      screens.set(id, screen);
+    }
+    const levels = new Map<number, { depth: number; states: number; controls: number; tried: number; blocked: number }>();
+    for (const screen of screens.values()) {
+      const level = levels.get(screen.depth) ?? { depth: screen.depth, states: 0, controls: 0, tried: 0, blocked: 0 };
+      level.states++;
+      for (const status of screen.controls.values()) {
+        if (status === 'blocked') level.blocked++;
+        else { level.controls++; if (status === 'tried') level.tried++; }
+      }
+      levels.set(screen.depth, level);
     }
     return [...levels.values()].sort((a, b) => a.depth - b.depth)
       .map(l => ({ ...l, coverage: l.controls ? Math.round(l.tried / l.controls * 1000) / 1000 : 1 }));

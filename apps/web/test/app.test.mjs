@@ -37,6 +37,23 @@ test('untrusted page titles, expectations and model outputs remain text',()=>{
   assert.match(coverage,/New territory 1 \(share now 50%\) · Deep journey 0 \(share now 30%\) · Re-walk 1 \(share now 20%\)/);
   assert.match(coverage,/Repeating a recorded transition/);
 });
+test('the discovery tree lists each screen once, with the action that reached it',()=>{
+  const ui=view(),act=(id,name,type='click')=>({action_id:id,ordinal:1,state:'completed',spec:{command:{type,control:{name,role:type==='scroll'?'scroll':'button'}}}});
+  ui.state.report={run:{config:{},lifecycle:'completed'},actions:[act('a1','Allow all cookies'),act('a2','Scroll page down','scroll'),act('a3','Open navigation menu'),act('a4','Documentation')],captures:[],reproductions:[]};
+  const s=(id,url,parent,planning={})=>({state_id:id,url,planning:{depth:0,parent_state_id:parent,...planning}});
+  const graph={states:[s('blank','about:blank',null),s('wall','https://app.test/',null),s('home','https://app.test/','wall',{depth:1}),s('scrolled','https://app.test/','home',{depth:1,screen_state_id:'home'}),s('menu','https://app.test/','scrolled',{depth:2}),s('docs','https://app.test/docs/overview','menu',{depth:3})],
+    edges:[{action_id:'a1',from_state_id:'wall',to_state_id:'home'},{action_id:'a2',from_state_id:'home',to_state_id:'scrolled'},{action_id:'a3',from_state_id:'scrolled',to_state_id:'menu'},{action_id:'a4',from_state_id:'menu',to_state_id:'docs'}],
+    frontier:[{state_id:'home',control_id:'c1',status:'unexplored',control:{role:'button'}},{state_id:'home',control_id:'c2',status:'unexplored',control:{role:'link'}},{state_id:'home',control_id:'down',status:'attempted',control:{role:'scroll'}},
+      {state_id:'scrolled',control_id:'c1',status:'unexplored',control:{role:'button'}},{state_id:'scrolled',control_id:'c2',status:'attempted',control:{role:'link'}}],
+    selections:[{purpose:'explore',selected:{name:'A',reason:'r'},ranked_paths:[]}]};
+  const html=ui.planningView(graph),tree=html.slice(html.indexOf('class="discovery-tree"'));
+  assert.match(tree,/S2<\/span><strong>https:\/\/app.test\/<\/strong><span class="small muted">Entry page/);
+  assert.match(tree,/S3<\/span><strong>Allow all cookies<\/strong><span class="small muted">Same address<\/span><span class="small muted">1 tried · 1 untried<\/span>/,'A control tried in any view of the screen is tried.');
+  assert.match(tree,/Same screen: S4 after Scroll page down<\/p><ul><li><div><span class="pill">S5<\/span><strong>Open navigation menu<\/strong>/,'What a view found hangs under its screen.');
+  assert.doesNotMatch(tree,/S4<\/span>/,'A view is not a node of its own.');
+  assert.match(tree,/S6<\/span><strong>Documentation<\/strong><span class="small muted">\/docs\/overview<\/span>/);
+  assert.match(html,/<tr><td>1<\/td><td>1<\/td><td>1 \/ 2<\/td><td>50%<\/td><td>0<\/td><\/tr>/,'Coverage counts the screen once.');
+});
 test('partial token and cost reports are shown as known subtotals',()=>{
   const ui=view();
   assert.equal(ui.tokenTotal({known_input_tokens:null,known_output_tokens:12}), '≥ 12');

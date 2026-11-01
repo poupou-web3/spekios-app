@@ -400,3 +400,28 @@ test('another item of a list already tried is deprioritized, and coverage is rep
     { depth: 1, states: 1, controls: 2, tried: 0, blocked: 0, coverage: 0 },
   ]);
 });
+
+test('another view of a screen keeps its depth, its area and counts once in coverage',()=>{
+  const home = 'a'.repeat(32), docs = 'b'.repeat(32), menu = 'c'.repeat(32), page = 'd'.repeat(32);
+  const planner = new FrontierPlanner('http://app/');
+  planner.observe('root', capture('http://app/', [button('menu'), button('docs')]), undefined, {}, 1, true, home);
+  planner.observe('scrolled', capture('http://app/', [button('menu'), button('docs')]), 'root', {}, .5, false, home);
+  planner.attempted('scrolled', command('docs'), false);
+  planner.observe('docs', capture('http://app/docs', [button('next')]), 'scrolled', {}, .8, false, docs);
+  planner.observe('docs-scrolled', capture('http://app/docs', [button('next')]), 'docs', {}, 1, false, docs);
+  planner.observe('page', capture('http://app/docs/2', [button('back')]), 'docs-scrolled', {}, .8, false, page);
+  // Closing a menu deep in the tree shows the entry screen again.
+  planner.observe('back', capture('http://app/', [button('menu'), button('docs')]), 'page', {}, .8, false, home);
+  planner.observe('menu-open', capture('http://app/', [button('menu'), button('docs'), button('item')]), 'back', {}, .7, false, menu);
+  const meta = (id: string) => [planner.metadata(id).depth, planner.metadata(id).screen_state_id];
+  assert.deepEqual(['root', 'scrolled', 'docs', 'docs-scrolled', 'page', 'back', 'menu-open'].map(meta),
+    [[0, null], [0, 'root'], [1, null], [1, 'docs'], [2, null], [0, 'root'], [1, null]], 'Depth counts screens, not views.');
+  assert.equal(planner.screenSeen(home), true);
+  assert.equal(planner.screenSeen('e'.repeat(32)), false);
+  planner.plan('page', [proposal('back', .8)]);
+  assert.equal(planner.rank('page', 5, 'breadth')[0].strategy!.branch_state_id, 'docs', 'A view belongs to its screen\'s area.');
+  planner.plan('menu-open', [proposal('item', .8)]);
+  assert.equal(planner.rank('menu-open', 5, 'breadth').find(p => p.control_id === 'item')!.strategy!.branch_state_id, 'menu-open');
+  assert.deepEqual(planner.coverage().map(l => [l.depth, l.states, l.controls, l.tried]), [[0, 1, 2, 1], [1, 2, 4, 0], [2, 1, 1, 0]],
+    'The entry screen and its views are one screen, and docs was tried in one of them.');
+});

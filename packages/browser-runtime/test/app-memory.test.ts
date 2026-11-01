@@ -140,7 +140,9 @@ test('cross-run app memory deepens exploration without replacing evidence', {
       assert.deepEqual([summary.compared_transitions, summary.changed_transitions], [3, 1]);
       assert.deepEqual(summary.settings, {breadth:10,depth:0,rewalk:90,adaptive:false});
       const coverage = result.report.run.config.coverage_by_depth;
-      assert.deepEqual(coverage.map((l: any) => l.depth), [0, 1, 2], 'Plans compared is a new screen one step below the products page.');
+      assert.deepEqual(coverage.map((l: any) => l.depth), [0, 1], 'Plans compared only changes text on the products screen, so it keeps that screen\'s depth.');
+      const plans = result.report.graph.states.find((s: any) => s.planning.screen_state_id);
+      assert.equal(plans.planning.depth, 1, 'Another view of the products screen.');
       assert.deepEqual([coverage[0].states, coverage[0].controls, coverage[0].tried, coverage[0].coverage], [1, 1, 1, 1]);
       const rows = (await store.query(`SELECT to_key FROM app_map_transitions WHERE scope_id=$1 AND action='click' AND control->>'name'='Products'`, [remembered.scope_id])).rows;
       assert.equal(rows.length, 2, 'The map now holds both destinations of Products.');
