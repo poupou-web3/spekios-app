@@ -277,6 +277,7 @@
 .usage-panel tfoot :is(th, td) { padding: 12px 20px; border-top: 1px solid var(--border-strong); font-weight: 600; }
 .usage-panel tfoot th { background: none; color: var(--text); font-family: inherit; font-size: 13px; letter-spacing: 0; text-transform: none; }
 .usage-note { padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+.stat-note a, .usage-note a { color: var(--brand-text); text-decoration: underline; text-underline-offset: 3px; }
 /* Only unsaved edits keep the bar in view while scrolling. */
 .settings-savebar.dirty { position: sticky; bottom: 12px; z-index: 3; border-color: var(--amber-line); }
 .settings-savebar-status { flex: 1 1 360px; min-width: 0; font-size: 13px; }

@@ -387,8 +387,8 @@ test('runs show input, output and total tokens with a cost estimated from model 
     {provider:'meta',model:'muse-spark-1.3',attempts:2,known_input_tokens:1000000,known_output_tokens:250000,known_total_tokens:1250000,incomplete_usage_attempts:0,provider_reported_cost_usd:null,unpriced_attempts:2},
     {provider:'openrouter',model:attack,attempts:1,known_input_tokens:300,known_output_tokens:40,known_total_tokens:340,incomplete_usage_attempts:0,provider_reported_cost_usd:null,unpriced_attempts:1}]};
   ui.state.settings={savedModels:[{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',inputUsdPerMillion:0.5,outputUsdPerMillion:2}]};
-  let html=ui.costStat(usage);assert.match(html,/≥ \$1\.00/);assert.match(html,/No price for &lt;b&gt;x&lt;\/b&gt;\. Add one in Settings → Models\./);
-  html=ui.usagePanel(usage);
+  let html=ui.costStat(usage);assert.match(html,/≥ \$1\.00/);assert.match(html,/No price for &lt;b&gt;x&lt;\/b&gt;\. Add one in <a href="#\/settings\/models">Settings → Models<\/a>\./);assert.doesNotMatch(html,/<b>x<\/b>/);
+  html=ui.usagePanel(usage);assert.match(html,/from <a href="#\/settings\/models">Settings → Models<\/a>/);
   assert.match(html,/Muse Spark[\s\S]*Meta AI · muse-spark-1\.3[\s\S]*1,000,000[\s\S]*250,000[\s\S]*1,250,000[\s\S]*\$0\.50 in · \$2\.00 out per 1M tokens[\s\S]*Your price[\s\S]*\$1\.00/);
   assert.doesNotMatch(html,/<b>x<\/b>/);assert.match(html,/No price/);
   assert.match(html,/All models<\/th><td>3<\/td><td>1,000,300<\/td><td>250,040<\/td><td>1,250,340<\/td>/);

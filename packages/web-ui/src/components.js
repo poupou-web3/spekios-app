@@ -1,4 +1,5 @@
-// Markup helpers shared by both apps. Every value passes through esc() before it reaches HTML.
+// Markup helpers shared by both apps. Values pass through esc() before they reach HTML.
+// stat() skips that for the note only when options.html is set, and the note is already safe markup.
 import {esc} from './format.js';
 export const icon = key => `<svg aria-hidden="true" viewBox="0 0 24 24">${{
   scout:'<circle cx="12" cy="12" r="7"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="1"/>',
@@ -20,7 +21,7 @@ export function pill(value) {
   const map={cancelling:['Stopping…','amber'],completed:['Completed','green'],active:['Running','blue'],running:['Running','blue'],queued:['Queued',''],failed:['Failed','red'],interrupted:['Interrupted','amber'],blocked:['Needs access','amber'],cancelled:['Cancelled',''],waiting:['Needs sign-in','amber'],no_issue_observed:['No issue observed','green'],suspect:['Needs review','amber'],inconclusive:['Inconclusive',''],reproduced:['Reproduced','amber'],not_reproduced:['Not reproduced','green'],prepared:['Preparing',''],dispatched:['Executing','blue'],skipped:['Replanned before acting','amber'],evidence_failed:['Evidence gap','red'],available:['Available','green'],online:['Online','green']};
   const [label,color]=map[value]||[value||'Not assessed',''];return `<span class="pill ${color}">${esc(label)}</span>`;
 }
-export const stat = (label,value,note,key) => `<div class="stat"><div class="stat-label">${esc(label)}${icon(key)}</div><div class="stat-value">${esc(value)}</div><div class="stat-note">${esc(note)}</div></div>`;
+export const stat = (label,value,note,key,options={}) => `<div class="stat"><div class="stat-label">${esc(label)}${icon(key)}</div><div class="stat-value">${esc(value)}</div><div class="stat-note">${options.html?note:esc(note)}</div></div>`;
 export const empty = (title,description,key='layers') => `<div class="empty">${icon(key)}<h3>${esc(title)}</h3><p>${esc(description)}</p></div>`;
 export const json = value => `<pre class="json">${esc(JSON.stringify(value,null,2))}</pre>`;
 export const button = (action,label,key='',extra='') => `<button class="button" data-action="${action}" ${extra}>${key?icon(key):''}${esc(label)}</button>`;
