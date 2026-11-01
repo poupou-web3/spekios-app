@@ -2,10 +2,11 @@
 use crate::{AppState, error, identity::ScopedState, query};
 use axum::{
     Json,
-    extract::Path,
+    extract::{Path, Query},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -30,8 +31,49 @@ const SNAPSHOT_SQL: &str = "SELECT to_jsonb(md5(concat_ws('|'
   ,coalesce((SELECT concat_ws(':', count(*), count(*) FILTER (WHERE c.state='completed'), coalesce(max(c.finished_at)::text,''), coalesce(sum(c.input_tokens),0), coalesce(sum(c.output_tokens),0)) FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=r.workspace_id AND m.user_id=r.user_id),'')
 ))) FROM runtime_runs r WHERE r.run_id=$1 AND r.workspace_id=$2 AND r.user_id=$3";
 
-pub async fn list(ScopedState(state): ScopedState) -> Response {
-    let sql = "SELECT jsonb_build_object('runs',COALESCE(jsonb_agg(to_jsonb(r)||jsonb_build_object('summary',(
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunFilters {
+    pub origin: Option<String>,
+    pub offset: Option<i64>,
+}
+
+pub(crate) fn website_origin(raw: &str) -> Result<String, &'static str> {
+    let url = reqwest::Url::parse(raw).map_err(|_| "invalid_website_origin")?;
+    if raw.len() > 2048
+        || !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.host_str().is_none()
+    {
+        return Err("invalid_website_origin");
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+// Stored targets can include paths, mixed-case hosts and explicit default ports.
+// Keep staging subdomains, schemes and non-default ports in separate workspaces.
+pub(crate) fn website_origin_sql(column: &str) -> String {
+    format!(
+        r"regexp_replace(regexp_replace(lower(substring({column} from '^[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#]+')), '^(https://.*):443$', '\1'), '^(http://.*):80$', '\1')"
+    )
+}
+
+pub async fn list(ScopedState(state): ScopedState, Query(filters): Query<RunFilters>) -> Response {
+    let origin = match filters.origin.as_deref().map(website_origin).transpose() {
+        Ok(origin) => origin,
+        Err(code) => return error(StatusCode::BAD_REQUEST, code),
+    };
+    let offset = filters.offset.unwrap_or(0);
+    if !(0..=100000).contains(&offset) {
+        return error(StatusCode::BAD_REQUEST, "invalid_run_offset");
+    }
+    let sql = "WITH catalog AS (
+      SELECT run_id,target_url,lifecycle,config,created_at,finished_at,error,cancel_id,cancel_requested_at,WEBSITE_ORIGIN AS website_origin
+      FROM runtime_runs WHERE workspace_id=$1 AND user_id=$2
+    ), matching AS (SELECT * FROM catalog WHERE ($3::text IS NULL OR website_origin=$3)),
+    page AS (SELECT * FROM matching ORDER BY created_at DESC,run_id DESC OFFSET $4 LIMIT 50)
+    SELECT jsonb_build_object('runs',COALESCE((SELECT jsonb_agg((to_jsonb(r)-'website_origin')||jsonb_build_object('summary',(
         SELECT jsonb_build_object('actions',count(*),
           'candidates',count(*) FILTER (WHERE a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND r.config->'replay_of'='null'::jsonb),
           'pending_findings',count(*) FILTER (WHERE a.assessment->>'verdict'='suspect' AND r.config->>'runtime_version'='explorer-v1' AND r.config->'replay_of'='null'::jsonb AND COALESCE(v.disposition,'needs_review')='needs_review'),
@@ -47,18 +89,31 @@ pub async fn list(ScopedState(state): ScopedState) -> Response {
           'unpriced_attempts',count(*) FILTER (WHERE c.cost_usd IS NULL),
           'by_model',COALESCE((SELECT jsonb_agg(to_jsonb(u) ORDER BY u.provider,u.model) FROM (SELECT m.provider,m.model,count(*) AS attempts,sum(c.input_tokens) AS known_input_tokens,sum(c.output_tokens) AS known_output_tokens,CASE WHEN count(c.input_tokens)+count(c.output_tokens)>0 THEN coalesce(sum(c.input_tokens),0)+coalesce(sum(c.output_tokens),0) END AS known_total_tokens,count(*) FILTER (WHERE c.usage_status<>'reported') AS incomplete_usage_attempts,sum(c.cost_usd)::text AS provider_reported_cost_usd,count(*) FILTER (WHERE c.cost_usd IS NULL) AS unpriced_attempts FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=$1 AND m.user_id=$2 GROUP BY m.provider,m.model) u),'[]'::jsonb))
         FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=$1 AND m.user_id=$2
-      )) ORDER BY r.created_at DESC,r.run_id),'[]'::jsonb))
-      FROM (SELECT run_id,target_url,lifecycle,config,created_at,finished_at,error,cancel_id,cancel_requested_at
-            FROM runtime_runs WHERE workspace_id=$1 AND user_id=$2 ORDER BY created_at DESC,run_id LIMIT 50) r";
+      )) ORDER BY r.created_at DESC,r.run_id DESC) FROM page r),'[]'::jsonb),
+      'total',(SELECT count(*) FROM matching),'offset',$4::bigint,
+      'next_offset',CASE WHEN (SELECT count(*) FROM matching)>$4+50 THEN $4+50 ELSE NULL END,
+      'websites',COALESCE((SELECT jsonb_agg(to_jsonb(w) ORDER BY w.last_test_at DESC,w.origin) FROM (
+        SELECT website_origin AS origin,count(*) AS run_count,max(created_at) AS last_test_at,
+          (array_agg(target_url ORDER BY created_at DESC,run_id DESC))[1] AS target_url
+        FROM catalog WHERE website_origin IS NOT NULL GROUP BY website_origin
+      ) w),'[]'::jsonb))".replace("WEBSITE_ORIGIN", &website_origin_sql("target_url"));
     match query(
         &state,
-        sql,
-        &[&state.principal.workspace_id, &state.principal.user_id],
+        &sql,
+        &[
+            &state.principal.workspace_id,
+            &state.principal.user_id,
+            &origin,
+            &offset,
+        ],
     )
     .await
     {
         Ok(Some(value)) => Json(value).into_response(),
-        Ok(None) => Json(json!({"runs":[]})).into_response(),
+        Ok(None) => {
+            Json(json!({"runs":[],"websites":[],"total":0,"offset":offset,"next_offset":null}))
+                .into_response()
+        }
         Err(response) => response,
     }
 }
@@ -180,7 +235,35 @@ pub async fn capture(ScopedState(state): ScopedState, Path(id): Path<Uuid>) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::not_modified;
+    use super::{RunFilters, not_modified, website_origin};
+
+    #[test]
+    fn website_identity_is_an_origin_not_an_entry_path() {
+        assert_eq!(
+            website_origin("https://EXAMPLE.com:443/fr/?q=1").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            website_origin("http://localhost:3000/checkout").unwrap(),
+            "http://localhost:3000"
+        );
+        assert_eq!(
+            website_origin("https://[::1]:8443/path").unwrap(),
+            "https://[::1]:8443"
+        );
+        for raw in [
+            "javascript:alert(1)",
+            "ftp://example.com/",
+            "https://user:password@example.com/",
+            "not a URL",
+        ] {
+            assert!(website_origin(raw).is_err(), "{raw}");
+        }
+        assert!(
+            serde_json::from_value::<RunFilters>(serde_json::json!({"workspace_id":"other"}))
+                .is_err()
+        );
+    }
 
     #[test]
     fn unchanged_run_reports_skip_the_body() {

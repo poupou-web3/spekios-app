@@ -28,6 +28,7 @@ pub const MAX_RECHECK_ISSUES: i64 = 25;
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Filters {
+    pub origin: Option<String>,
     pub query: Option<String>,
     pub outcome: Option<String>,
     pub triage: Option<String>,
@@ -36,9 +37,13 @@ pub struct Filters {
 }
 impl Filters {
     fn valid(&self) -> bool {
-        self.query
-            .as_ref()
-            .is_none_or(|s| s.len() <= 200 && !s.chars().any(char::is_control))
+        self.origin
+            .as_deref()
+            .is_none_or(|value| crate::runs::website_origin(value).is_ok())
+            && self
+                .query
+                .as_ref()
+                .is_none_or(|s| s.len() <= 200 && !s.chars().any(char::is_control))
             && self.outcome.as_deref().is_none_or(|s| {
                 matches!(
                     s,
@@ -64,10 +69,16 @@ pub async fn list(ScopedState(state): ScopedState, Query(filters): Query<Filters
     }
     let offset = filters.offset.unwrap_or(0);
     let limit = filters.limit.unwrap_or(20);
-    let sql = "WITH candidates AS (SELECT scout_issue_summary(i) item FROM issues i WHERE workspace_id=$1 AND user_id=$2 AND ($3::text IS NULL OR position(lower($3) in lower(COALESCE(i.snapshot->>'title','')||' '||i.source_target_url))>0)),filtered AS (SELECT item FROM candidates WHERE ($4::text IS NULL OR COALESCE(item->'latest_verification'->>'outcome',CASE WHEN item->'latest_verification'->>'status' IN ('queued','running') THEN 'running' ELSE 'unverified' END)=$4) AND ($7::text IS NULL OR item->>'triage_status'=$7 OR ($7='open' AND item->>'triage_status' IN ('untriaged','needs_review','bug')))) SELECT jsonb_build_object('issues',COALESCE((SELECT jsonb_agg(item ORDER BY item->>'last_seen_at' DESC,item->>'issue_id') FROM (SELECT item FROM filtered ORDER BY item->>'last_seen_at' DESC,item->>'issue_id' OFFSET $5 LIMIT $6) page),'[]'::jsonb),'total',(SELECT count(*) FROM filtered),'offset',$5::bigint,'limit',$6::bigint,'next_offset',CASE WHEN (SELECT count(*) FROM filtered)>$5+$6 THEN $5+$6 ELSE NULL END,'untrusted_app_content',true,'verification_scope','individual_candidate_not_global_resolution')";
+    let origin = filters
+        .origin
+        .as_deref()
+        .map(crate::runs::website_origin)
+        .transpose()
+        .unwrap_or(None);
+    let sql = "WITH candidates AS (SELECT scout_issue_summary(i) item FROM issues i WHERE workspace_id=$1 AND user_id=$2 AND ($8::text IS NULL OR WEBSITE_ORIGIN=$8) AND ($3::text IS NULL OR position(lower($3) in lower(COALESCE(i.snapshot->>'title','')||' '||i.source_target_url))>0)),filtered AS (SELECT item FROM candidates WHERE ($4::text IS NULL OR COALESCE(item->'latest_verification'->>'outcome',CASE WHEN item->'latest_verification'->>'status' IN ('queued','running') THEN 'running' ELSE 'unverified' END)=$4) AND ($7::text IS NULL OR item->>'triage_status'=$7 OR ($7='open' AND item->>'triage_status' IN ('untriaged','needs_review','bug')))) SELECT jsonb_build_object('issues',COALESCE((SELECT jsonb_agg(item ORDER BY item->>'last_seen_at' DESC,item->>'issue_id') FROM (SELECT item FROM filtered ORDER BY item->>'last_seen_at' DESC,item->>'issue_id' OFFSET $5 LIMIT $6) page),'[]'::jsonb),'total',(SELECT count(*) FROM filtered),'offset',$5::bigint,'limit',$6::bigint,'next_offset',CASE WHEN (SELECT count(*) FROM filtered)>$5+$6 THEN $5+$6 ELSE NULL END,'untrusted_app_content',true,'verification_scope','individual_candidate_not_global_resolution')".replace("WEBSITE_ORIGIN", &crate::runs::website_origin_sql("i.source_target_url"));
     match query(
         &state,
-        sql,
+        &sql,
         &[
             &state.principal.workspace_id,
             &state.principal.user_id,
@@ -76,6 +87,7 @@ pub async fn list(ScopedState(state): ScopedState, Query(filters): Query<Filters
             &offset,
             &limit,
             &filters.triage,
+            &origin,
         ],
     )
     .await

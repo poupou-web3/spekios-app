@@ -111,9 +111,12 @@ export function openapi(catalog) {
       responses: { '202': response('Cancellation requested; inspect acknowledgement.'), '200': response('Recorded terminal/cancellation state.'), ...errors },
     });
   }
-  add('/v1/runs', 'get', 'listRuns', 'Runs', 'Read the bounded recent run list');
+  add('/v1/runs', 'get', 'listRuns', 'Runs', 'Read a page of tests and the complete website catalog',{
+    parameters:[query('origin',{type:'string',maxLength:2048},'Exact website origin; paths share a website, staging hosts and ports stay separate.'),query('offset',bounded(0,100000,0),'Page offset. Returns up to 50 tests, total and next_offset.')],
+    description:'The websites array groups all owned runs by origin, including websites outside the current page. Without origin, runs remains the latest workspace run page. Reads never start inference.',
+  });
   add('/v1/issues','get','listPersistentIssues','Issues','Find permanent issues in the authenticated workspace',{
-    parameters:[query('query',{type:'string',maxLength:200},'Substring of title or source URL.'),query('outcome',choice('unverified','running','resolved','still_reproducible','blocked','inconclusive'),'Latest candidate check outcome; never a global fix status.'),query('triage',choice('open','untriaged','needs_review','bug','intended_behavior','duplicate'),'Current triage. open means untriaged, needs review or bug; omit to include known intended behavior and duplicates.'),query('offset',bounded(0,100000,0),'Page offset.'),query('limit',bounded(1,50,20),'Maximum issues.')],
+    parameters:[query('origin',{type:'string',maxLength:2048},'Restrict findings to this exact website origin.'),query('query',{type:'string',maxLength:200},'Substring of title or source URL.'),query('outcome',choice('unverified','running','resolved','still_reproducible','blocked','inconclusive'),'Latest candidate check outcome; never a global fix status.'),query('triage',choice('open','untriaged','needs_review','bug','intended_behavior','duplicate'),'Current triage. open means untriaged, needs review or bug; omit to include known intended behavior and duplicates.'),query('offset',bounded(0,100000,0),'Page offset.'),query('limit',bounded(1,50,20),'Maximum issues.')],
   });
   add('/v1/issues/{issue_id}/triage','post','triageIssue','Issues','Decide whether an issue is a bug, intended behavior or a duplicate',{
     parameters:[pathParameter('issue_id')],

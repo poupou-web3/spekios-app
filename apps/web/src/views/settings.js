@@ -7,7 +7,6 @@ import {themePreference,themeSwitch} from '/assets/ui/theme.js';
 import {api,get} from '../api.js';
 import {render} from '../app.js';
 import {state} from '../state.js';
-import {accessBanner} from './home.js';
 // Server bounds. Exploration limits are optional: empty means no limit.
 export const MAX_ACTIONS=10000,MAX_REPLAY_ACTIONS=100,MAX_SAVED_MODELS=30,MAX_MODEL_LABEL=60,MAX_USD_PER_MILLION=10000;
 // A saved model's own prices, in USD per million tokens; empty uses the known price.
@@ -306,5 +305,5 @@ export function settingsView(){
   const section=settingsSection(),draft=configurationDraft(),changed=changedSections(draft),issue=draft.dirty?configurationIssue(draft.values):null;
   const nav=SETTINGS_SECTIONS.map(([key,title,glyph,summary])=>{const mark=issue?.[0]===key?'<span class="settings-nav-mark error" title="Needs a fix before saving"></span><span class="sr-only">, needs a fix</span>':changed.includes(key)?'<span class="settings-nav-mark" title="Unsaved changes"></span><span class="sr-only">, unsaved changes</span>':'';
     return `<a class="settings-nav-item${key===section?' active':''}" href="#/settings/${key}" ${key===section?'aria-current="page"':''}>${icon(glyph)}<span>${esc(title)}${mark}</span><small>${esc(summary)}</small></a>`;}).join('');
-  return `${accessBanner()}<div class="page-heading"><div><div class="eyebrow">Workspace</div><h1>Settings</h1><p>The models new explorations use, how far they go, what they remember and how Spekios looks in this browser.</p></div></div><div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">${nav}</nav><form id="exploration-configuration-form" class="configuration-form settings-form" aria-labelledby="settings-section-title">${configurationView(section)}</form></div>`;
+  return `<div class="page-heading"><div><div class="eyebrow">Workspace</div><h1>Settings</h1><p>The models new explorations use, how far they go, what they remember and how Spekios looks in this browser.</p></div></div><div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">${nav}</nav><form id="exploration-configuration-form" class="configuration-form settings-form" aria-labelledby="settings-section-title">${configurationView(section)}</form></div>`;
 }

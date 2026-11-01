@@ -1,5 +1,6 @@
 import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
+import {mountWebsitePage} from './website-page.js';
 const $=selector=>document.querySelector(selector);
 // The header theme control is the only shared widget on this page.
 const themeSlot=$('[data-theme-slot]');if(themeSlot)mountThemeSwitch(themeSlot);
@@ -7,6 +8,7 @@ const make=(tag,text,className)=>{const n=document.createElement(tag);if(text!==
 let token=sessionStorage.getItem('scout.workspace-token')||'',development=false,spekios=false,identity=null,detail=null,issueId='',offset=0,nextOffset=null,busy=false,selectedVerification='',draft=null,timer,pageLimit=5;
 let previousOffsets=[];
 let listSnapshot='',listVersion=0,detailVersion=0;
+let issueWebsitePage=null;
 const images=new Set();let imageGeneration=0;
 const uuid=value=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value||'');
 const message=text=>{$('#issue-status').textContent=text;};
@@ -58,6 +60,7 @@ async function copyHandoff(){
 async function list(){
   const version=++listVersion;
   const params=new URLSearchParams({offset:String(offset),limit:'20'});const query=$('#issue-query').value.trim(),filter=$('#issue-outcome').value,triage=$('#issue-triage').value;if(query)params.set('query',query);if(filter)params.set('outcome',filter);if(triage)params.set('triage',triage);
+  if(issueWebsitePage?.origin)params.set('origin',issueWebsitePage.origin);
   const page=await api('/v1/issues?'+params);if(version!==listVersion)return;nextOffset=page.next_offset;$('#issue-total').textContent=String(page.total);$('#issue-prev').disabled=offset===0;$('#issue-next').disabled=nextOffset===null;
   const snapshot=JSON.stringify({page,issueId});if(snapshot===listSnapshot)return;listSnapshot=snapshot;
   const root=$('#issue-list');root.replaceChildren();
@@ -186,7 +189,7 @@ async function loadDetail(reset=true){
   let value;try{value=await api(`/v1/issues/${id}?limit=${pageLimit}`);}catch(e){if(!current())return;if(e.status!==413||pageLimit===1)throw e;pageLimit=1;value=await api(`/v1/issues/${id}?limit=1`);}if(!current())return;
   // A fresh snapshot replaces all history together. Never combine revisions.
   if(!reset&&detail&&detail.issue.revision===value.issue.revision){detail.usage=value.usage;const sourceUsage=$('#source-run-usage');if(sourceUsage)sourceUsage.textContent='Original exploration usage · '+usage(value.usage.source_run);let changed=false;for(const check of detail.verifications.items){const fresh=value.verifications.items.find(v=>v.verification_id===check.verification_id);if(fresh&&JSON.stringify(check)!==JSON.stringify(fresh)){Object.assign(check,fresh);changed=true;}}if(changed)renderHistory();return;}
-  detail=value;releaseImages();$('#issue-empty').hidden=true;$('#issue-detail').hidden=false;if(!detail.verifications.items.some(v=>v.verification_id===selectedVerification))selectedVerification=detail.verifications.items.find(v=>v.result)?.verification_id||'';renderOriginal();renderTriage(changed);renderHistory();renderCandidate();if(changed)await sessions();
+  detail=value;if(issueWebsitePage?.selectForUrl(detail.issue.source_target_url)){offset=0;previousOffsets=[];listSnapshot='';$('#recheck-source').value=issueWebsitePage.origin;const scope=$('[data-website-scope]');if(scope)scope.textContent=issueWebsitePage.label();}releaseImages();$('#issue-empty').hidden=true;$('#issue-detail').hidden=false;if(!detail.verifications.items.some(v=>v.verification_id===selectedVerification))selectedVerification=detail.verifications.items.find(v=>v.result)?.verification_id||'';renderOriginal();renderTriage(changed);renderHistory();renderCandidate();if(changed)await sessions();
 }
 async function more(){
   if(!detail)return;
@@ -197,7 +200,7 @@ async function more(){
   }catch(e){if(issueId!==id||version!==detailVersion)return;if(e.status===409){message('Issue history changed. Loaded a fresh snapshot; load more again for earlier entries.');await loadDetail();}else message(e.message);}
 }
 async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();await refreshRecheck();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
-async function ready(){try{identity=await api('/v1/identity');$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message('Workspace issues · original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
+async function ready(){try{identity=await api('/v1/identity');if(!issueWebsitePage)issueWebsitePage=await mountWebsitePage({page:'issues',request:api});if(issueWebsitePage?.origin){$('#recheck-source').value=issueWebsitePage.origin;const scope=$('[data-website-scope]');if(scope)scope.textContent=issueWebsitePage.label();}$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message((issueWebsitePage?.origin?issueWebsitePage.label()+' · ':'Workspace issues · ')+'Original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
 $('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();const email=$('#issue-email').value.trim(),password=$('#issue-password').value;$('#issue-password').value='';try{await signIn(email,password);token=password;sessionStorage.setItem('scout.workspace-token',token);await ready();}catch(error){message(error.message);}});
 $('#issue-filter').addEventListener('submit',async e=>{e.preventDefault();offset=0;previousOffsets=[];try{await list();}catch(e){message(e.message);}});
 $('#issue-prev').addEventListener('click',async()=>{offset=previousOffsets.pop()??0;await list().catch(e=>message(e.message));});
