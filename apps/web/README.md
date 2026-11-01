@@ -17,7 +17,7 @@ src/
 test/              node --test suites; support.mjs links src/ for the vm sandboxes
 ```
 
-`apps/api/build.rs` lists every `.js` and `.css` file under `src/` at compile time. Adding a module needs no Rust change, but the API must be rebuilt (`just dev`) to serve it.
+`apps/api/build.rs` lists every `.js` and `.css` file under `src/` at compile time. Adding a module needs no Rust change, but the API embeds these files, so serve a UI change with `just reload` (or `just reload-api`). `just dev` is only needed to bring the whole stack up.
 
 Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`.
 

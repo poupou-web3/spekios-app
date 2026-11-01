@@ -56,6 +56,22 @@ deploy-stop:
 reload-env:
     docker compose up -d --no-deps --force-recreate --wait api
 
+# Rebuild the workspace and back office after a UI change. Databases and workers stay up.
+reload:
+    docker compose up -d --build --wait --wait-timeout 120 api backoffice
+    @echo "Scout workspace: http://127.0.0.1:18080"
+    @echo "Scout back office (operators): http://127.0.0.1:18083"
+
+# Rebuild only the workspace API. It embeds apps/web, including the favicon.
+reload-api:
+    docker compose up -d --build --wait --wait-timeout 120 api
+    @echo "Scout workspace: http://127.0.0.1:18080"
+
+# Rebuild only the operator console. Does not rebuild the API.
+reload-backoffice:
+    docker compose up -d --build --no-deps --wait --wait-timeout 60 backoffice
+    @echo "Scout back office (operators): http://127.0.0.1:18083"
+
 # Start the local workspace and print its URL.
 ui: up
     @echo "Scout workspace: http://127.0.0.1:18080"

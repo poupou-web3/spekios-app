@@ -241,6 +241,7 @@ pub fn router(state: AppState) -> Router {
         .route_layer(middleware::from_fn_with_state(state.clone(), authorize_mcp));
     Router::new()
         .route("/", get(ui::index))
+        .route("/favicon.svg", get(ui::favicon))
         .route("/connect", get(ui::connect))
         .route("/issues", get(ui::issues))
         .route("/v1/agent-setup", get(oauth::setup))
