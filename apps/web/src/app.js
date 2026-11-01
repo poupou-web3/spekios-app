@@ -2,7 +2,7 @@
 import {get} from './api.js';
 import {clearImages,loadImages} from './images.js';
 import {clearTrackedJob,followSubmittedJob} from './jobs.js';
-import {closePrivateLogin,privateLogin} from './private-login.js';
+import {syncPrivateAccess} from './private-login.js';
 import {login,shell} from './shell.js';
 import {root,state} from './state.js';
 import {closeReportExport} from './views/export.js';
@@ -58,7 +58,7 @@ export async function refresh(){
     // Memory is shown only in Settings → Memory & sessions; other views do not poll it.
     if(state.view==='settings'&&state.settingsSection==='data'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
-    if(privateLogin&&!access.requests.some(a=>a.access_id===privateLogin.id&&['waiting','active'].includes(a.status)))await closePrivateLogin(false);
+    await syncPrivateAccess(access.requests);
     if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
     state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();render();followSubmittedJob();
   }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){state.error=error.message;render();}}finally{refreshing=false;}

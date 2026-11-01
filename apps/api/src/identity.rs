@@ -455,6 +455,7 @@ mod tests {
         for (method, path) in [
             ("POST", "/v1/browser-jobs"),
             ("GET", "/v1/browser-access/x/screen"),
+            ("GET", "/v1/browser-access/account-identity"),
             ("POST", "/v1/actions/x/reviews"),
             ("GET", "/v1/operations"),
             ("GET", "/v1/model-requests/x"),

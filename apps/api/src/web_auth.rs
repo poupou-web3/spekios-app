@@ -551,6 +551,30 @@ pub(crate) async fn authenticate(
         ..Principal::default()
     }))
 }
+pub(crate) async fn account_email(state: &AppState) -> Result<Option<String>, Response> {
+    let Some(config) = &state.web_auth else {
+        return Ok(None);
+    };
+    if !state.principal.is_manager() {
+        return Err(error(StatusCode::FORBIDDEN, "workspace_manager_required"));
+    }
+    let db = state.database.as_ref().ok_or_else(unavailable)?;
+    let conn = db.read().await.map_err(|_| unavailable())?;
+    let row = conn
+        .query_opt(
+            "SELECT email FROM web_identities WHERE issuer=$1 AND user_id=$2 AND workspace_id=$3 AND email_verified=true",
+            &[&config.issuer, &state.principal.user_id, &state.principal.workspace_id],
+        )
+        .await
+        .map_err(|_| unavailable())?;
+    Ok(row
+        .and_then(|row| row.get::<_, Option<String>>(0))
+        .filter(|email| {
+            email.len() <= 254
+                && email.contains('@')
+                && !email.chars().any(|c| c.is_control() || c.is_whitespace())
+        }))
+}
 pub async fn logout_page() -> Response {
     let mut r = Html("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Sign out · Spekios</title><h1>Sign out of Spekios</h1><form action=\"/logout\" method=\"post\"><button type=\"submit\">Sign out</button></form><p><a href=\"/\">Back to app</a></p></html>").into_response();
     r.headers_mut().insert(
@@ -912,6 +936,61 @@ mod tests {
         let session = response_cookie(&r, "spekios_session");
         let first = body(call(&app, "GET", "/v1/identity", Some(&session), None).await).await;
         assert_ne!(first["workspace_id"], crate::WORKSPACE_ID.to_string());
+        let signup = body(
+            call(
+                &app,
+                "GET",
+                "/v1/browser-access/account-identity",
+                Some(&session),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(
+            signup,
+            json!({"source":"lovable","email":"same@example.test"})
+        );
+        let conn = db.write().await.unwrap();
+        // Identity JSON deliberately omits user/email details. Find this exact
+        // cookie's identity to verify that unverified contact data is not reused.
+        let token = session.split_once('=').unwrap().1;
+        let user = conn
+            .query_one(
+                "SELECT user_id FROM web_sessions WHERE token_sha256=$1",
+                &[&hash(token)],
+            )
+            .await
+            .unwrap()
+            .get::<_, Uuid>(0);
+        conn.execute(
+            "UPDATE web_identities SET email_verified=false WHERE user_id=$1",
+            &[&user],
+        )
+        .await
+        .unwrap();
+        drop(conn);
+        let unverified = body(
+            call(
+                &app,
+                "GET",
+                "/v1/browser-access/account-identity",
+                Some(&session),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(unverified, json!({"source":null,"email":null}));
+        db.write()
+            .await
+            .unwrap()
+            .execute(
+                "UPDATE web_identities SET email_verified=true WHERE user_id=$1",
+                &[&user],
+            )
+            .await
+            .unwrap();
         assert_eq!(
             call(
                 &app,
@@ -984,6 +1063,40 @@ mod tests {
         let second_session = response_cookie(&second_response, "spekios_session");
         let second =
             body(call(&app, "GET", "/v1/identity", Some(&second_session), None).await).await;
+        let second_workspace = Uuid::parse_str(second["workspace_id"].as_str().unwrap()).unwrap();
+        db.write()
+            .await
+            .unwrap()
+            .execute(
+                "UPDATE web_identities SET email='other@example.test' WHERE workspace_id=$1",
+                &[&second_workspace],
+            )
+            .await
+            .unwrap();
+        let first_signup = body(
+            call(
+                &app,
+                "GET",
+                "/v1/browser-access/account-identity",
+                Some(&new_session),
+                None,
+            )
+            .await,
+        )
+        .await;
+        let second_signup = body(
+            call(
+                &app,
+                "GET",
+                "/v1/browser-access/account-identity",
+                Some(&second_session),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(first_signup["email"], "same@example.test");
+        assert_eq!(second_signup["email"], "other@example.test");
         assert_ne!(
             first["workspace_id"], second["workspace_id"],
             "same email never merges identities"

@@ -124,11 +124,22 @@ test('login prompts escape target data and saved sessions are scoped to the sele
   assert.ok(ui.authOptions().includes('value="right"'));
   assert.ok(!ui.authOptions().includes('value="wrong-app"'));
   assert.ok(!ui.authOptions().includes('value="wrong-mode"'));
-  assert.match(ui.accessBanner(),/Explore public pages/);
+  assert.match(ui.accessBanner(),/Skip sign-in for this run/);
   assert.ok(!ui.accessBanner().includes('<script>'));
   assert.match(ui.accessBanner(),/Cancel run/);
   assert.match(ui.savedSessions(),/Remove session/);
   assert.doesNotMatch(ui.savedSessions(),/fixture-only-password|scout_app_session/);
+});
+test('every waiting login prompt can skip sign-in for this run',()=>{
+  const ui=view();
+  for(const reason of ['login_available','login_required','session_expired','user_requested']){
+    ui.state.access={requests:[{access_id:'request',origin:'https://app.test',reason,status:'waiting'}],sessions:[]};
+    assert.match(ui.accessBanner(),/data-action="skip-login"[^>]*data-id="request"[^>]*>.*Skip sign-in for this run/);
+    assert.match(ui.accessBanner(),/data-action="create-account"[^>]*data-id="request"[^>]*>.*Try creating an account/);
+    ui.state.access.requests[0].status='active';
+    assert.doesNotMatch(ui.accessBanner(),/data-action="skip-login"/);
+    assert.doesNotMatch(ui.accessBanner(),/data-action="create-account"/);
+  }
 });
 test('disconnected providers cannot imply readiness and settings show availability without credentials',()=>{
   const ui=view();

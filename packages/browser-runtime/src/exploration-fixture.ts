@@ -9,6 +9,7 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
   const cookies: { path: string; value: string }[] = [];
   const outcomes = new Map<string, 'saved' | 'broken' | 'different_failure' | 'missing_control'>();
   const appSessions=new Set<string>();
+  const createdAccounts:{email:string;name:string;password:string}[]=[];
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://fixture').pathname;
     requests.push(path);
@@ -28,6 +29,17 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
     if (path === '/journeys/disconnect') {req.socket.destroy();return;}
     const session=/scout_app_session=([^;]+)/.exec(req.headers.cookie??'')?.[1];
     const signedIn=!!session&&appSessions.has(session);
+    if(path==='/auth/register'&&req.method==='POST'){
+      let body='';req.on('data',chunk=>{body+=chunk;if(body.length>4096)req.destroy();});
+      req.on('end',()=>{
+        const input=new URLSearchParams(body);
+        if(input.get('email')&&input.get('password')&&input.get('name')&&input.get('terms')){
+          createdAccounts.push({email:input.get('email')!,password:input.get('password')!,name:input.get('name')!});
+          const id=randomUUID();appSessions.add(id);res.writeHead(303,{'Location':'/auth/required','Set-Cookie':`scout_app_session=${id}; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=86400`});
+        }else res.writeHead(303,{'Location':'/auth/register'});
+        body='';res.end();
+      });return;
+    }
     if(path==='/auth/session'&&req.method==='POST'){
       let body='';req.on('data',chunk=>{body+=chunk;if(body.length>4096)req.destroy();});
       req.on('end',()=>{
@@ -82,15 +94,23 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
     }else if(path==='/recovery/tool'){
       content=`<h1>Changing controls</h1><p id='status'>Ready</p>${Array.from({length:6},(_,i)=>`<button onclick="document.querySelector('#status').textContent='Preview ready'">Preview ${i+1}</button>`).join(' ')}<a href='/recovery/leaf-1'>Open leaf 1</a>`;
     }else if(path==='/recovery/covered'){
-      content=`<h1>Covered lower controls</h1>${Array.from({length:6},(_,i)=>`<div style='height:700px'></div><span style='position:relative;display:inline-block'><button onclick="location.href='/forbidden-covered'">Covered preview ${i+1}</button><span style='position:absolute;inset:0;background:#ddd;z-index:2'>Overlay</span></span>`).join('')}<div style='height:700px'></div><a href='/recovery/leaf-1'>Open leaf 1</a>`;
+      content=`<h1>Covered lower controls</h1>${Array.from({length:6},(_,i)=>`<div style='height:100vh'></div><span style='position:relative;display:inline-block'><button onclick="location.href='/forbidden-covered'">Covered preview ${i+1}</button><span style='position:absolute;inset:0;background:#ddd;z-index:2'>Overlay</span></span>`).join('')}<div style='height:100vh'></div><a href='/recovery/leaf-1'>Open leaf 1</a>`;
     }else if(/^\/recovery\/leaf-\d+$/.test(path)){
       content=`<h1>Catalogue leaf ${path.slice(path.lastIndexOf('-')+1)}</h1><p>This branch ends here.</p>`;
+    }else if(path==='/recovery/public-access'){
+      content="<h1>Public workspace</h1><a href='/auth/required'>Open workspace</a><a href='/auth/broken'>Member details</a><a href='/help'>Help</a>";
+    }else if(path==='/auth/register'){
+      content=`<h1>Create an account</h1><p>PRIVATE_SIGNUP_ONLY</p><form action='/auth/register' method='post'>
+        <label>Name <input name='name' required autocomplete='name'></label>
+        <label>Email <input name='email' type='email' required autocomplete='email'></label>
+        <label>Password <input name='password' type='password' required autocomplete='new-password'></label>
+        <label><input type='checkbox' name='terms' required> Accept terms and conditions</label><button>Create account</button></form>`;
     }else if(path==='/auth/login'){
       content=`<h1>Sign in</h1><p>PRIVATE_LOGIN_ONLY — controlled test fixture</p><form action='/auth/session' method='post'>
         <label>Email <input name='email' type='email' autocomplete='username' autofocus></label>
         <label>Password <input name='password' type='password' autocomplete='current-password'></label>
         <label>Verification code <input name='code' autocomplete='one-time-code'></label><button>Sign in</button></form>
-        <a href='https://accounts.google.com/'>Sign in with Google (external, unsupported)</a>
+        <a href='/auth/register'>Create an account</a><a href='https://accounts.google.com/'>Sign in with Google (external, unsupported)</a>
         <style>label{display:block;margin:16px 0}input{font:inherit}</style>`;
     }else if(path==='/auth/optional'&&!signedIn){
       content=`<h1>Public workspace</h1><a href='/auth/login'>Sign in</a><a href='/help'>Help</a>`;
@@ -107,9 +127,9 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
         </form><p id='status'>Ready</p><p>Search: <span id='query'></span> · <span id='category'>All</span> · <span id='stock'>All stock</span></p>
         <style>label{display:block;margin:14px 0}input,select{font:inherit}</style>`;
     } else if (path === '/scrolling/covered') {
-      content = `<h1>Long catalogue</h1><p>Explore the items further down the page.</p><div style='height:700px'></div><span style='position:relative;display:inline-block'><button onclick="location.href='/forbidden-covered'">Reveal details</button><span style='position:absolute;inset:0;background:#ddd;z-index:2'>Overlay</span></span><p id='status'>Details hidden</p><div style='height:900px'></div>`;
+      content = `<h1>Long catalogue</h1><p>Explore the items further down the page.</p><div style='height:100vh'></div><span style='position:relative;display:inline-block'><button onclick="location.href='/forbidden-covered'">Reveal details</button><span style='position:absolute;inset:0;background:#ddd;z-index:2'>Overlay</span></span><p id='status'>Details hidden</p><div style='height:900px'></div>`;
     } else if (path === '/scrolling' || path === '/scrolling/broken' || path === '/scrolling/manual' || path === '/scrolling/manual/broken') {
-      content = `<h1>Long catalogue</h1><p>Explore the items further down the page.</p><div style='height:700px'></div><button ${path.endsWith('/broken')?'':`onclick="document.querySelector('#status').textContent='Details revealed';this.disabled=true"`}>Reveal details</button><p id='status'>Details hidden</p>`;
+      content = `<h1>Long catalogue</h1><p>Explore the items further down the page.</p><div style='height:100vh'></div><button ${path.endsWith('/broken')?'':`onclick="document.querySelector('#status').textContent='Details revealed';this.disabled=true"`}>Reveal details</button><p id='status'>Details hidden</p>`;
     } else if (path === '/atlas') {
       content = `<h1>Atlas</h1><p>Browse the product areas.</p><a href='/atlas/products'>Products</a>`;
     } else if (path === '/atlas/products') {
@@ -163,7 +183,7 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
       </style></head><body>${content}</body></html>`);
   });
   await new Promise<void>(resolve => server.listen(port, host, resolve));
-  return { url: `http://${host}:${(server.address() as AddressInfo).port}`, requests, cookies,
+  return { url: `http://${host}:${(server.address() as AddressInfo).port}`, requests, cookies,createdAccounts,
     setOutcome: (path: string, outcome: 'saved' | 'broken' | 'different_failure' | 'missing_control') => outcomes.set(path, outcome),
     close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) };
 }
