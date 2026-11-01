@@ -10,7 +10,7 @@ import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reprodu
 import {loadVerification,bindVerificationCommand,parseFixAssessment,finishVerification} from './fix-verification.js';
 import { FrontierPlanner, PLANNER_VERSION, type BrowserCommand, type ChangeSignal, type RouteStep } from './frontier-planner.js';
 import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewports.js';
-import { commandFor, INTERACTION_VERSION } from './interaction-contract.js';
+import { plannedCommand, INTERACTION_VERSION } from './interaction-contract.js';
 import { dispatch, observedCommand, revealControl, validateDispatch, type Reveal } from './browser-interactions.js';
 import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyContext, pageContext as context } from './model-context.js';
 import { AppMemory, MAX_RANKING_REUSES, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
@@ -167,6 +167,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     const maxModelRequests = replay ? maxActions : maxActions * (navigation ? 4 : 3) + MAX_CONSECUTIVE_REPLANS_PER_PAGE * 2;
     const recovery = new ExplorationRecovery();
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
+    const skippedMismatches = new Set<string>();
     // Consecutive actions that reached only states already recorded in this run.
     // A new map state is one no run of this app had reached before.
     let idleActions = 0, stateCreated = false, screenCreated = false, mapNovel = false;
@@ -352,6 +353,20 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         WHERE f.state_id=s.state_id AND f.run_id=$1 AND s.url=$2 AND f.control_id=$3 AND f.status='unexplored'`,
         [runId, planner.nodes.get(stateId)!.capture.observation.url, controlId, reason]);
     }
+    // A chosen action that does not fit the live control must not fail the run.
+    // Block it and keep planning. Seeing the same control again means the skip
+    // did not take, so the run stops instead of spinning.
+    async function skipMismatched(controlId: string) {
+      const key = `${lastState}:${controlId}`;
+      if (skippedMismatches.has(key)) { stopReason = 'no_reachable_unexplored_controls'; return false; }
+      skippedMismatches.add(key);
+      await store.transaction(async () => {
+        await blockControl(lastState!, controlId, 'interaction_mismatch');
+        await store.event(runId, 'exploration.interaction_skipped', { state_id: lastState, control_id: controlId,
+          reason: 'Interaction type does not match the observed control. The control was skipped and exploration continued.' });
+      });
+      return true;
+    }
     let browser: Browser | undefined;
     let browserClosing:Promise<void>|undefined, releaseSlot=async()=>{};
     // The sandbox slot is freed only after the browser has disconnected.
@@ -511,7 +526,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               response_schema: {goal:'string',expected_result:'string'} });
             spec = { command: returnStep.command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else if (selected.rewalk) {
-            const command = commandFor(available.find(c => c.control_id === selected.control_id)!, selected.action);
+            const command = plannedCommand(available.find(c => c.control_id === selected.control_id), selected.action);
+            if (!command) { if (await skipMismatched(selected.control_id)) continue; break; }
             const prediction = await predict(command, [last.capture.capture_id], {
               task: 'rewalk_prediction', page: context(last.capture), command: commandContext(command),
               earlier_runs: { observed_result: selected.expected_result.slice(0, 300), last_verdict: selected.rewalk.last_verdict, attempts: selected.rewalk.attempts,
@@ -520,8 +536,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               response_schema: {goal:'string',expected_result:'string'} });
             spec = { command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else {
-            const control = available.find(c => c.control_id === selected.control_id)!;
-            spec = { command: commandFor(control,selected.action), prediction: { source: 'model', request_id: decision!.requestId, decision_id: decision!.decisionId,
+            const control = available.find(c => c.control_id === selected.control_id);
+            const command = plannedCommand(control, selected.action);
+            if (!command) { if (await skipMismatched(selected.control_id)) continue; break; }
+            spec = { command, prediction: { source: 'model', request_id: decision!.requestId, decision_id: decision!.decisionId,
               goal: selected.goal, expected_result: selected.expected_result, context_capture_id: last.capture.capture_id, steering:decision!.steering,
               ...(decision!.reusedFrom ? { reused_ranking: { request_id: decision!.reusedFrom.request_id, run_id: decision!.reusedFrom.run_id } } : {}) }, worker_id: workerId, agent_id: agentId, exploration };
           }
