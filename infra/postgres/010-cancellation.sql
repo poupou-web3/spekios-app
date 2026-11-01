@@ -7,6 +7,8 @@ ALTER TABLE runtime_runs ADD COLUMN IF NOT EXISTS cancel_requested_at timestampt
 ALTER TABLE runtime_actions DROP CONSTRAINT IF EXISTS runtime_actions_state_check;
 ALTER TABLE runtime_actions ADD CONSTRAINT runtime_actions_state_check CHECK (state IN ('prepared','dispatched','completed','interrupted','evidence_failed','skipped','cancelled'));
 ALTER TABLE exploration_decisions DROP CONSTRAINT IF EXISTS exploration_decisions_status_check;
-ALTER TABLE exploration_decisions ADD CONSTRAINT exploration_decisions_status_check CHECK (status IN ('requested','accepted','rejected','failed','interrupted','cancelled'));
+-- Bootstrap replays this file on populated volumes: keep the 'reused' status
+-- introduced in 023-ranking-reuse.sql so existing ranking evidence stays valid.
+ALTER TABLE exploration_decisions ADD CONSTRAINT exploration_decisions_status_check CHECK (status IN ('requested','accepted','rejected','failed','interrupted','cancelled','reused'));
 ALTER TABLE model_requests DROP CONSTRAINT IF EXISTS model_requests_state_check;
 ALTER TABLE model_requests ADD CONSTRAINT model_requests_state_check CHECK (state IN ('queued','preparing','dispatched','completed','failed','interrupted','cancelled'));

@@ -222,6 +222,11 @@ access-test:
 cancellation-test:
     bash scripts/test-cancellation.sh
 
+# Fresh and populated PostgreSQL schema replay in a disposable container.
+# Requires the postgres image built by `just dev` or `docker compose build postgres`.
+schema-test:
+    bash scripts/test-schema-bootstrap.sh
+
 # Human confirmation/dismissal, evidence integrity and review telemetry recovery.
 reviews-test:
     bash scripts/test-finding-reviews.sh
