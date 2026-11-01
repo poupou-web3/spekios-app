@@ -390,7 +390,9 @@ test('Docker addresses default to http and a localhost address shows how to reac
   assert.equal(ui.dockerAddress('[::1]:8080'),'http://host.docker.internal:8080');
   for(const url of ['acme.dev','http://host.docker.internal:4100','larchwood:8084',''])assert.equal(ui.dockerAddress(url),'',url);
   ui.state.url='localhost:4100';
-  assert.match(ui.launchStatus(),/use http:\/\/host\.docker\.internal:4100\./);assert.doesNotMatch(ui.launchStatus(),/SCOUT_ALLOWED_ORIGINS/);
+  assert.match(ui.launchStatus(),/open http:\/\/host\.docker\.internal:4100\./);assert.doesNotMatch(ui.launchStatus(),/SCOUT_ALLOWED_ORIGINS/);
+  assert.equal(ui.explorationRequest(new Map([['url','http://127.0.0.1:18083']])).target_url,'http://host.docker.internal:18083/');
+  assert.equal(ui.explorationRequest(new Map([['url','http://127.0.0.1:18085/shop']])).target_url,'http://host.docker.internal:18085/shop');
   ui.state.url='acme.dev';
   assert.doesNotMatch(ui.launchStatus(),/Docker/);
   // Typing redraws the status line only when the suggestion changes.

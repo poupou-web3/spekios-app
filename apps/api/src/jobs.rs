@@ -609,8 +609,26 @@ fn bounded_setting(name: &str, default: u32, max: u32) -> u32 {
         .unwrap_or(default)
 }
 
+/// The test browser runs in Docker, so a loopback host is that container.
+/// The same port on this computer is host.docker.internal.
+fn reachable_from_browser(mut url: reqwest::Url) -> Result<reqwest::Url, &'static str> {
+    let loopback = match url.host_str() {
+        Some("localhost") | Some("0.0.0.0") | Some("::1") => true,
+        Some(host) => host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback()),
+        None => false,
+    };
+    if loopback {
+        url.set_host(Some("host.docker.internal"))
+            .map_err(|_| "invalid_target_url")?;
+    }
+    Ok(url)
+}
+
 /// Any http or https address can be tested, including local and private apps.
-/// Embedded credentials and other schemes stay rejected.
+/// Embedded credentials and other schemes stay rejected. Loopback hosts are
+/// rewritten to the address the Docker browser can open.
 pub(crate) fn target(value: &str) -> Result<String, &'static str> {
     let url = reqwest::Url::parse(value).map_err(|_| "invalid_target_url")?;
     if value.len() > 2048
@@ -620,7 +638,7 @@ pub(crate) fn target(value: &str) -> Result<String, &'static str> {
     {
         return Err("target_origin_not_allowed");
     }
-    Ok(url.to_string())
+    Ok(reachable_from_browser(url)?.to_string())
 }
 
 /// Earlier runs of this exploration, oldest first, then the run being continued.
@@ -1918,10 +1936,12 @@ mod tests {
                 "http://host.docker.internal:18083/",
                 "http://host.docker.internal:18083/",
             ),
-            ("https://127.0.0.1/", "https://127.0.0.1/"),
+            ("http://127.0.0.1:18083/", "http://host.docker.internal:18083/"),
+            ("http://127.0.0.1:18085/shop", "http://host.docker.internal:18085/shop"),
+            ("https://127.0.0.1/", "https://host.docker.internal/"),
             ("https://10.0.0.8/admin", "https://10.0.0.8/admin"),
             ("https://app.internal/", "https://app.internal/"),
-            ("https://localhost/", "https://localhost/"),
+            ("https://localhost/", "https://host.docker.internal/"),
             ("https://bubblemaps.io:8443/", "https://bubblemaps.io:8443/"),
             ("https://bubblemaps.io/map", "https://bubblemaps.io/map"),
             ("https://www.bubblemaps.io/", "https://www.bubblemaps.io/"),
