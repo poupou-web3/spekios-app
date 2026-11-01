@@ -63,7 +63,7 @@ Each run shows input, output and total tokens, overall and for each model it use
 
 Under **Settings → Models → Your models**, each model has an input and an output price in US dollars per million tokens. OpenRouter's free routes (`openrouter/free` and IDs ending in `:free`) are known to cost nothing; other models start without a price until you enter one. A price you enter replaces the known one for that model.
 
-The run page and run list estimate cost as each model's input tokens times its input price plus its output tokens times its output price. A model with no price uses the cost the provider reported, if any (OpenRouter reports one); otherwise the run page names it as having no price. Estimates use your current prices, so changing a price updates earlier runs too. They are estimates, not a bill.
+The run page and run list estimate cost as each model's input tokens times its input price plus its output tokens times its output price. A model with no price uses the cost the provider reported, if any (OpenRouter reports one); otherwise the run page names it as having no price. Select **Estimated cost**, or **Add a price** in the run's **Model usage** table, to open that model's price in Settings; a model that is not in your list yet opens the add form filled in with it. Estimates use your current prices, so changing a price updates earlier runs too. They are estimates, not a bill.
  Operators can review individual attempts in the back office. Calls may incur charges when using a paid provider; reading existing reports and progress does not request new inference.
 
 ## Subscription authentication

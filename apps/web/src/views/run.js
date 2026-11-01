@@ -12,17 +12,22 @@ import {filteredFindings,findingStatus,humanReviewPill} from './review.js';
 import {steeringPanel} from './steering.js';
 import {modelRequestFailure} from '../report/model-failure.js';
 const modelsSettings='<a href="#/settings/models">Settings → Models</a>';
+import {priceLink} from './settings.js';
 // Saved model prices, or the cost the provider reported, estimate what the run's model calls cost.
+// The card links to the prices: the first model without one, or the model list.
 export function costStat(usage){
-  const estimate=estimateCost(usage,state.settings.savedModels),unpriced=estimate.unpriced.map(m=>esc(m.model));
-  const note=unpriced.length?`No price for ${unpriced.slice(0,2).join(', ')}${unpriced.length>2?` and ${unpriced.length-2} more`:''}. Add one in ${modelsSettings}.`:!estimate.rows.length?'No model calls yet':estimate.rows.every(r=>r.basis==='reported')?'Cost reported by the provider':'From your model prices';
-  return stat('Estimated cost',estimate.usd==null?'No price yet':usd(estimate.usd,estimate.partial),note,'clock',{html:unpriced.length>0});
+  const estimate=estimateCost(usage,state.settings.savedModels),unpriced=estimate.unpriced;
+  const value=estimate.usd==null?'No price yet':usd(estimate.usd,estimate.partial),action=label=>` <span class="stat-action">${label}${icon('arrow')}</span>`;
+  const note=unpriced.length?`No price for ${unpriced.slice(0,2).map(m=>esc(m.model)).join(', ')}${unpriced.length>2?` and ${unpriced.length-2} more`:''}.${action('Add a price')}`:!estimate.rows.length?'No model calls yet':`${estimate.rows.every(r=>r.basis==='reported')?'Cost reported by the provider':'From your model prices'}.${action('Edit prices')}`;
+  const body=`<div class="stat-label">Estimated cost${icon('clock')}</div><div class="stat-value">${esc(value)}</div><div class="stat-note">${note}</div>`;
+  if(!estimate.rows.length)return `<div class="stat">${body}</div>`;
+  return `<a class="stat stat-link" href="${esc(unpriced.length?priceLink(unpriced[0].provider,unpriced[0].model):'#/settings/models')}">${body}</a>`;
 }
 // Tokens and estimated cost for each model the run used, collapsed by default.
 export function usagePanel(usage){
   const estimate=estimateCost(usage,state.settings.savedModels);if(!estimate.rows.length)return '';
   const saved=state.settings.savedModels||[],label=m=>saved.find(s=>s.provider===m.provider&&s.model===m.model)?.label;
-  const cost=r=>r.usd==null?'<span class="muted">No price</span>':`${esc(usd(r.usd,r.partial))}${r.basis==='reported'?'<div class="table-sub">Provider-reported</div>':''}`;
+  const cost=r=>r.usd==null?`<a class="usage-price-link" href="${esc(priceLink(r.provider,r.model))}">Add a price</a>`:`${esc(usd(r.usd,r.partial))}${r.basis==='reported'?'<div class="table-sub">Provider-reported</div>':''}`;
   const total=tokenCounts(usage);
   return `<details class="panel usage-panel" data-disclosure="model-usage"><summary><span class="usage-summary"><strong>Model usage</strong><span class="small muted">${number(estimate.rows.length)} model${estimate.rows.length===1?'':'s'} · ${esc(tokenSplit(usage))} · ${esc(tokenSum(usage))} total · ${esc(estimate.usd==null?'no price yet':usd(estimate.usd,estimate.partial))}</span></span><span class="usage-toggle">Details</span></summary><div class="table-wrap"><table><thead><tr><th>Model</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Total tokens</th><th>Price</th><th>Estimated cost</th></tr></thead><tbody>${estimate.rows.map(r=>`<tr><td><div class="table-title">${esc(label(r)||r.model)}</div><div class="table-sub">${esc(providerName(r.provider))}${label(r)?` · ${esc(r.model)}`:''}</div></td><td>${number(r.attempts)}</td><td>${r.tokens.input==null?'Unknown':number(r.tokens.input)}</td><td>${r.tokens.output==null?'Unknown':number(r.tokens.output)}</td><td>${esc(tokenSum(r))}</td><td class="small">${esc(priceLabel(r.price))}${r.price.source?`<div class="table-sub">${r.price.source==='yours'?'Your price':'Known price'}</div>`:''}</td><td>${cost(r)}</td></tr>`).join('')}</tbody><tfoot><tr><th scope="row">All models</th><td>${number(usage.attempts)}</td><td>${total.input==null?'Unknown':number(total.input)}</td><td>${total.output==null?'Unknown':number(total.output)}</td><td>${esc(tokenSum(usage))}</td><td></td><td>${esc(estimate.usd==null?'Unknown':usd(estimate.usd,estimate.partial))}</td></tr></tfoot></table></div><p class="small muted usage-note">Tokens are what providers reported; “≥” means some calls did not report usage yet. Estimates use each model’s price per million input and output tokens from ${modelsSettings}, or the cost the provider reported when a model has no price. They are not a bill.</p></details>`;
 }

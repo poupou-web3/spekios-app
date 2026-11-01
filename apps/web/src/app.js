@@ -8,7 +8,7 @@ import {root,state} from './state.js';
 import {closeReportExport} from './views/export.js';
 import {home} from './views/home.js';
 import {runView} from './views/run.js';
-import {SETTINGS_SECTIONS,applyConfiguration,settingsView} from './views/settings.js';
+import {SETTINGS_SECTIONS,applyConfiguration,focusPriceTarget,settingsView} from './views/settings.js';
 import {mergeSteering} from './views/steering.js';
 let refreshing = false, renderIdentity = '', drawerOpener = null, rendering = false, renderAgain = false;
 export function render(){
@@ -67,12 +67,16 @@ export async function route(){
   const parts=location.hash.replace(/^#\/?/,'').split('/');
   state.view=parts[0]==='settings'?'settings':'workspace';
   // Each settings section is its own page, opened at the top. Unknown sections show the first.
-  if(state.view==='settings'){const section=SETTINGS_SECTIONS.some(([key])=>key===parts[1])?parts[1]:SETTINGS_SECTIONS[0][0];if(section!==state.settingsSection){state.settingsSection=section;window.scrollTo?.(0,0);}}
+  if(state.view==='settings'){const section=SETTINGS_SECTIONS.some(([key])=>key===parts[1])?parts[1]:SETTINGS_SECTIONS[0][0];if(section!==state.settingsSection){state.settingsSection=section;window.scrollTo?.(0,0);}
+    // #/settings/models/price/<provider|model> opens at that model's prices; the address then drops the target.
+    if(section==='models'&&parts[2]==='price'&&parts[3]){try{state.priceTarget=decodeURIComponent(parts[3]);}catch{state.priceTarget=null;}window.history?.replaceState?.(null,'','#/settings/models');}}
   const id=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'')?parts[1]:null;
   if(state.trackedJobId&&(state.view!=='workspace'||id))clearTrackedJob();
   if(id!==state.runId){state.runId=id;state.report=null;state.reportEtag='';state.actionId=null;state.tab='actions';state.image='after';state.findingFilter='needs_review';clearImages();}
   const action=/^[\da-f-]{36}$/.test(parts[2]||'')?parts[2]:null;if(action){state.actionId=action;state.tab='actions';}
   closeReportExport();state.drawer=null;render();await refresh();
+  // After refresh, so the saved model list is loaded when the page was opened from a link.
+  if(state.view==='settings')focusPriceTarget();
   if(state.focusLaunch&&state.view==='workspace'&&!state.runId){state.focusLaunch=false;document.getElementById('target-url')?.focus();}
   if(state.openFindingsRun===state.runId){state.tab='findings';state.findingFilter='needs_review';state.openFindingsRun=null;render();}
 }

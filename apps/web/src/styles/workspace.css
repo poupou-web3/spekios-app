@@ -266,6 +266,12 @@
 .configuration-override > .button.quiet { margin: 10px 0 0 -8px; }
 .settings-savebar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; margin-top: 20px; padding: 14px 18px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 10px 30px -18px rgb(0 0 0 / 35%); }
 /* Run page: tokens and estimated cost per model */
+a.stat-link { display: block; color: inherit; text-decoration: none; transition: border-color .15s, background-color .15s; }
+a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-soft); }
+.stat-action { display: inline-flex; align-items: center; gap: 4px; color: var(--brand-text); font-weight: 550; white-space: nowrap; }
+.stat-action svg { width: 13px; height: 13px; }
+.usage-price-link { color: var(--brand-text); font-weight: 550; }
+.usage-price-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .usage-panel { margin: -6px 0 20px; }
 .usage-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; cursor: pointer; list-style: none; }
 .usage-panel > summary::-webkit-details-marker { display: none; }

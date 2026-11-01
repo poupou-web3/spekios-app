@@ -34,6 +34,8 @@ export function settingsSectionTitle(){return SETTINGS_SECTIONS.find(([key])=>ke
 const MAX_OVERRIDES=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,MODEL_ID=/^[A-Za-z0-9/:._-]{1,200}$/,CONTROL=/[\x00-\x1f\x7f-\x9f]/;
 // Model IDs never contain "|", so a provider and model ID make one option value.
 const modelChoice=(provider,model)=>`${provider}|${model}`;
+// A link to Settings → Models that opens at one model's prices (see focusPriceTarget).
+export function priceLink(provider,model){return `#/settings/models/price/${encodeURIComponent(modelChoice(provider,model))}`;}
 const freeModel=model=>model==='openrouter/free'||model.endsWith(':free');
 // The saved model list, plus the models in use so they stay available after switching away.
 function modelList(saved,inUse){
@@ -162,6 +164,19 @@ export function removeSavedModel(index){
   const draft=configurationDraft(),m=draft.values.saved_models[index];
   if(draft.saving||!m||modelRoles(draft.values,m).length)return false;
   draft.values.saved_models.splice(index,1);draft.added='';return touched(draft);
+}
+// Moves to the input price of the model a price link named (state.priceTarget), or fills the add form
+// with that model when it is not in the list yet. Returns the id of the field it moved to.
+export function focusPriceTarget(){
+  const target=state.priceTarget;state.priceTarget=null;if(!target)return '';
+  const [provider,...rest]=target.split('|'),model=rest.join('|');
+  if(!MODEL_PROVIDERS.includes(provider)||!MODEL_ID.test(model))return '';
+  const draft=configurationDraft(),index=draft.values.saved_models.findIndex(m=>m.provider===provider&&m.model===model);
+  if(index<0&&draft.saving)return '';
+  if(index<0){draft.adding={...newModel(provider),model};draft.addError='';draft.added='';render();}
+  const id=index<0?'new-model-input_usd_per_million':`saved-${index}-input_usd_per_million`,field=document.getElementById?.(id);
+  field?.scrollIntoView?.({block:'center'});field?.focus?.({preventScroll:true});
+  return id;
 }
 export function editOverrides(add,index){
   const draft=configurationDraft();if(draft.saving)return;

@@ -8,7 +8,7 @@ const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
   const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
-  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,removeSavedModel,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
@@ -210,4 +210,15 @@ test('each saved model can carry its own input and output price, shown over the 
   ui.updateNewModel('output_usd_per_million',5);assert.equal(ui.addSavedModel(),true);
   await ui.saveConfiguration();
   assert.deepEqual(sent.saved_models,[{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',output_usd_per_million:2.5},{provider:'openrouter',model:'openrouter/free'},{provider:'anthropic',model:'bare'},{provider:'openai',model:'paid-model',input_usd_per_million:1.25,output_usd_per_million:5}]);
+});
+
+test('a price link opens a listed model’s input price, or fills the add form with an unlisted model',()=>{
+  const ui=workspace();
+  ui.applyConfiguration({revision:4,settings:{...defaults,savedModels:[{provider:'meta',model:'muse-spark-1.3'},{provider:'openrouter',model:'vendor/x:free'}]}});
+  assert.equal(ui.priceLink('openrouter','vendor/x:free'),'#/settings/models/price/openrouter%7Cvendor%2Fx%3Afree');
+  ui.state.priceTarget='openrouter|vendor/x:free';assert.equal(ui.focusPriceTarget(),'saved-1-input_usd_per_million');assert.equal(ui.state.priceTarget,null,'The target is used once.');
+  assert.equal(ui.focusPriceTarget(),'');
+  ui.state.priceTarget='meta|muse-wonder-1.0';assert.equal(ui.focusPriceTarget(),'new-model-input_usd_per_million');
+  const d=ui.configurationDraft();assert.equal(d.adding.provider,'meta');assert.equal(d.adding.model,'muse-wonder-1.0');assert.equal(d.dirty,false,'Filling the form changes no saved value.');
+  for(const target of ['other|m','meta|a b','meta|<x>','nonsense'])ui.state.priceTarget=target,assert.equal(ui.focusPriceTarget(),'',target);
 });

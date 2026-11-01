@@ -228,3 +228,14 @@ test('a late cookie-authenticated refresh cannot reopen an expired session',asyn
   ui.state.browserAuth=false;ui.state.connected=false;bodies.forEach(resolve=>resolve({runs:[],jobs:[],workers:[],settings:{}}));await pending;
   assert.equal(ui.state.connected,false);
 });
+
+test('a price link routes to Settings → Models, moves to the model’s price and drops the target from the address',async()=>{
+  const focused=[],replaced=[],field={focus(){focused.push('saved-0-input_usd_per_million');},scrollIntoView(){}};
+  const settings={provider:'meta',model:'muse-spark-1.3',savedModels:[{provider:'meta',model:'muse-spark-1.3'}]};
+  const ui=workspace({window:{addEventListener(){},scrollTo(){},history:{replaceState:(_,__,url)=>replaced.push(url)}},fetch:async path=>response({...payloads(),'/v1/browser-jobs':{jobs:[],workers:[],settings,settings_revision:2},'/v1/app-memory':{scopes:[]}}[path]??{})});
+  connect(ui);ui.document.getElementById=id=>id==='saved-0-input_usd_per_million'?field:null;
+  ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();
+  assert.equal(ui.state.view,'settings');assert.equal(ui.state.settingsSection,'models');
+  assert.deepEqual(replaced,['#/settings/models']);assert.deepEqual(focused,['saved-0-input_usd_per_million']);assert.equal(ui.state.priceTarget,null);
+  ui.location.hash='#/settings/models/price/%E0%A4%A';await ui.route();assert.equal(ui.state.priceTarget,null,'A malformed target is ignored.');
+});
