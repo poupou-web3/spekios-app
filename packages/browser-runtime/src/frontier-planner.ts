@@ -443,7 +443,10 @@ export class FrontierPlanner {
       // A journey resumes deeper pages first, by their depth in the app map.
       const depth = this.memory?.map?.depth_by_template.get(pageTemplate(page.url)) ?? 1;
       const factor = mode === 'depth' ? (1 + DEPTH_BONUS * depth) / 2 : 1;
-      const priority = (components.likely_next + components.novelty) * components.reach_weight / 1.3 * factor;
+      // Only the opening page of a continuation is held back. Once the run has
+      // left the entry URL, unfinished pages compete at their ordinary score.
+      const carryOn = memory.prefer_unfinished && this.nodes.get(currentId)?.capture.observation.url === this.targetUrl ? 2 : 0;
+      const priority = (components.likely_next + components.novelty) * components.reach_weight / 1.3 * factor + carryOn;
       const step: RouteStep = { from_state_id: currentId, to_state_id: `memory:${page.url}`, command: { type: 'navigate', url: page.url },
         source_action_id: page.last_action_id ?? '', expected_result: `The previously observed page${page.title ? ` "${page.title}"` : ''} opens.`,
         memory: { url: page.url, title: page.title, open_controls: open.length, source_run_id: page.last_run_id } };
@@ -453,6 +456,7 @@ export class FrontierPlanner {
         ...(mode === 'depth' ? { strategy: { mode, factor, depth } } : mode === 'breadth' ? { strategy: { mode, factor: 1 } } : {}),
         reason: [best.best_likelihood === null ? `Unranked remembered page (default score ${Math.round(UNRANKED_MEMORY_SCORE * 100)}/100)`
           : `Earlier model next-action score ${Math.round(likelihood * 100)}/100`, `${open.length} untried controls remembered from ${memory.prior_runs} earlier run${memory.prior_runs === 1 ? '' : 's'}`,
+          ...(carryOn ? ['continuing an exploration that stopped on this page'] : []),
           'reopen the page; it is observed again before any action'].join('; ') + '.' });
     }
     return result;

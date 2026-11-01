@@ -1,13 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { browserSlots } from '../src/browser-sandbox.js';
-import { BUDGET_USED, CANCELLED, CLAIM_CANDIDATE, CONTINUATION_LIMIT, INTERRUPTED, continuation } from '../src/job-queue.js';
+import { BUDGET_USED, CANCELLED, CLAIM_CANDIDATE, CONTINUATION_LIMIT, INTERRUPTED, continuation, resumeBudget } from '../src/job-queue.js';
 
 const explore = { kind: 'explore', resumes: 0, runId: 'run', cancelId: null, maxActions: 20 };
 
 test('queued work is claimed from every member, one row at a time', () => {
   assert.match(CLAIM_CANDIDATE, /FOR UPDATE SKIP LOCKED/);
   assert.doesNotMatch(CLAIM_CANDIDATE, /owner_user_id|user_id=\$/);
+});
+
+test('a requested continuation spends a new limit and a crash keeps the remaining budget', () => {
+  assert.deepEqual(resumeBudget({ continueFrom: true, maxActions: 20 }, 18), { maxActions: 20, carriedActions: 0 });
+  assert.deepEqual(resumeBudget({ continueFrom: true, maxActions: null }, 400), { maxActions: null, carriedActions: 0 });
+  assert.deepEqual(resumeBudget({ maxActions: 20 }, 18), { maxActions: 2, carriedActions: 18 });
+  assert.deepEqual(resumeBudget({ maxActions: null }, 400), { maxActions: null, carriedActions: 400 });
+  assert.deepEqual(resumeBudget({ maxActions: 20 }, 20), { stop: true });
 });
 
 test('an interrupted exploration continues until its budget or three continuations are used', () => {

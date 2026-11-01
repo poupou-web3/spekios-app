@@ -25,6 +25,17 @@ export type Continuation =
   | { kind: 'requeue' }
   | { kind: 'finish'; status: 'cancelled' | 'interrupted'; error: string };
 
+// A crash continuation keeps spending the original action budget.
+// A person asking to continue spends the new job's own limit from the frontier.
+export function resumeBudget(job: { continueFrom?: boolean; maxActions?: number | null }, carried: number):
+  { maxActions: number | null; carriedActions: number } | { stop: true } {
+  const budget = job.maxActions;
+  const fresh = job.continueFrom === true;
+  const remaining = fresh || budget == null ? (budget == null ? Infinity : budget) : budget - carried;
+  if (!(remaining >= 1)) return { stop: true };
+  return { maxActions: remaining === Infinity ? null : remaining, carriedActions: fresh ? 0 : carried };
+}
+
 export function continuation(job: { kind?: string; resumes: number; runId: string | null; cancelId: string | null; maxActions?: number | null },
   dispatchedThisRun: number, dispatchedEarlier: number): Continuation {
   if (job.cancelId) return { kind: 'finish', status: 'cancelled', error: CANCELLED };

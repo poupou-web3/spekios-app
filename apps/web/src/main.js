@@ -5,7 +5,7 @@ import {bindThemeSwitch} from '/assets/ui/theme.js';
 import {api,get} from './api.js';
 import {bootstrapSession,refresh,render,route} from './app.js';
 import {clearImages} from './images.js';
-import {cancelWork,clearTrackedJob,restartWork,submitJob} from './jobs.js';
+import {cancelWork,clearTrackedJob,continueWork,restartWork,submitJob} from './jobs.js';
 import {closePrivateLogin,openPrivateLogin} from './private-login.js';
 import {login} from './shell.js';
 import {reviewDrafts,root,state,steeringDrafts} from './state.js';
@@ -58,6 +58,7 @@ root.addEventListener('click',async e=>{
   if(action==='cancel-automatic'||action==='retry-automatic')await cancelAutomatic(el.dataset.id);
   if(action==='cancel-run'||action==='cancel-job')await cancelWork(action==='cancel-run'?'run':'job',el.dataset.id);
   if(action==='restart-run'||action==='restart-job')await restartWork(action==='restart-run'?'run':'job',el.dataset.id);
+  if(action==='continue-run')await continueWork(el.dataset.id);
   if(action==='app-login')await openPrivateLogin(el.dataset.id);
   if(action==='create-account')await openPrivateLogin(el.dataset.id,true);
   if(action==='skip-login'){try{await api('/v1/browser-access/'+el.dataset.id+'/skip',{});await refresh();}catch(error){toast(error.message);}}

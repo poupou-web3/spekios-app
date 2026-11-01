@@ -41,6 +41,7 @@ Generate your own new job UUID; the value above is illustrative. The HTTP tool e
 | auth_mode | Optional for explore: auto, sign_in or public. |
 | session_id | Optional owned, compatible app session; cannot be used in public mode. |
 | auto_reproduce | Optional for explore; overrides the admitted default. |
+| continue_from_run_id | Optional for explore. The owned run must be a failed, interrupted or cancelled exploration, and the target URL and viewport must match it. The new job plans from the pages that run recorded and does not repeat a dispatched action. It uses the current model and limits for the additional work. A chain can be continued three times. An already queued continuation of that run is reused. |
 | source_action_id | Required for reproduce; prohibited for explore. |
 
 A reproduction submission contains **job_id**, **kind: reproduce** and **source_action_id**, plus optional correlation labels. It inherits the source attempt’s context; exploration overrides are rejected.

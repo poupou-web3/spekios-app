@@ -219,9 +219,9 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_start_exploration",
-            "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default.",
+            "Queue URL-only exploration. Can interact with and change data on the target site; uses Scout's configured model and may incur usage. job_id is required for safe retries; same UUID and inputs reuse the original admission. No brief required. app_memory=false runs without earlier-run memory for this app; omitted follows the saved default. continue_from_run_id carries on from a failed, interrupted or cancelled exploration instead of starting again at the entry page.",
             schema(
-                json!({"job_id":id_schema(),"project_id":id_schema(),"task_id":id_schema(),"url":{"type":"string","maxLength":2048},"viewport_profile":choice(&["desktop","tablet","mobile"]),"auth_mode":choice(&["auto","sign_in","public"]),"session_id":id_schema(),"auto_reproduce":{"type":"boolean"},"app_memory":{"type":"boolean"}}),
+                json!({"job_id":id_schema(),"project_id":id_schema(),"task_id":id_schema(),"url":{"type":"string","maxLength":2048},"viewport_profile":choice(&["desktop","tablet","mobile"]),"auth_mode":choice(&["auto","sign_in","public"]),"session_id":id_schema(),"auto_reproduce":{"type":"boolean"},"app_memory":{"type":"boolean"},"continue_from_run_id":id_schema()}),
                 &["job_id", "url"],
             ),
             false,

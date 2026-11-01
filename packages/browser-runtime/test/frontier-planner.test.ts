@@ -245,6 +245,27 @@ test('a truncated earlier observation cannot make a control look new',()=>{
   assert.equal(planner.rank('root', 3)[0].components.new_since_earlier_runs, 0);
 });
 
+test('a continuation opens an unfinished page before repeating the entry page',()=>{
+  const snapshot = memory([{url:'http://app/'},{url:'http://app/products',path:.7}], [
+    {url:'http://app/',control_id:'products',attempts:1,last_verdict:'no_issue_observed'},
+    {url:'http://app/products',control_id:'faq',best_likelihood:.4},
+  ]);
+  snapshot.prefer_unfinished = true;
+  const planner = new FrontierPlanner('http://app/', snapshot);
+  start(planner, [button('products')]);
+  planner.plan('root', [proposal('products', .99)]);
+  const ranked = planner.rank('root', 3);
+  assert.equal(ranked[0].control_id, 'faq');
+  assert.match(ranked[0].reason, /continuing an exploration that stopped on this page/);
+  const ordinary = new FrontierPlanner('http://app/', memory([{url:'http://app/'},{url:'http://app/products',path:.7}], [
+    {url:'http://app/',control_id:'products',attempts:1,last_verdict:'no_issue_observed'},
+    {url:'http://app/products',control_id:'faq',best_likelihood:.4},
+  ]));
+  start(ordinary, [button('products')]);
+  ordinary.plan('root', [proposal('products', .99)]);
+  assert.equal(ordinary.rank('root', 3)[0].control_id, 'products');
+});
+
 test('an unfinished remembered page competes as a resume step and is observed again',()=>{
   const planner = new FrontierPlanner('http://app/', memory([{url:'http://app/'},{url:'http://app/products',path:.7}], [
     {url:'http://app/',control_id:'products',attempts:1,last_verdict:'no_issue_observed'},

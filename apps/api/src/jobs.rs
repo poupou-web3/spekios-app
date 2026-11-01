@@ -551,6 +551,8 @@ pub struct Submission {
     #[serde(default)]
     app_memory: Option<bool>,
     #[serde(default)]
+    continue_from_run_id: Option<Uuid>,
+    #[serde(default)]
     issue_id: Option<Uuid>,
     #[serde(default)]
     deployment_ref: Option<String>,
@@ -581,6 +583,7 @@ impl Submission {
             session_id: None,
             auto_reproduce: None,
             app_memory: None,
+            continue_from_run_id: None,
             issue_id: Some(issue_id),
             deployment_ref,
             queue_limit: Some(queue_limit),
@@ -668,6 +671,32 @@ pub(crate) fn target(value: &str, allowed: &[String]) -> Result<String, &'static
     Ok(url.to_string())
 }
 
+/// Earlier runs of this exploration, oldest first, then the run being continued.
+/// A job stores at most three previous runs.
+fn continuation_chain(run_id: Uuid, config: &Value) -> Result<Vec<Uuid>, &'static str> {
+    let mut chain = Vec::new();
+    if let Some(previous) = config
+        .get("resume")
+        .and_then(|resume| resume.get("previous_run_ids"))
+        .filter(|value| !value.is_null())
+    {
+        let list = previous.as_array().ok_or("continuation_run_not_stopped")?;
+        for id in list {
+            let parsed = id
+                .as_str()
+                .and_then(|text| Uuid::parse_str(text).ok())
+                .filter(|id| !id.is_nil())
+                .ok_or("continuation_run_not_stopped")?;
+            chain.push(parsed);
+        }
+    }
+    if chain.len() >= 3 {
+        return Err("continuation_limit_reached");
+    }
+    chain.push(run_id);
+    Ok(chain)
+}
+
 fn prepare_submission(
     input: &Submission,
     defaults: &Value,
@@ -699,6 +728,7 @@ fn prepare_submission(
                 && input.session_id.is_none()
                 && input.auto_reproduce.is_none()
                 && input.app_memory.is_none()
+                && input.continue_from_run_id.is_none()
                 && input.issue_id.is_none()
                 && input.deployment_ref.is_none() =>
         {
@@ -708,7 +738,8 @@ fn prepare_submission(
             if input.source_action_id.is_none()
                 && input.viewport_profile.is_none()
                 && input.auto_reproduce.is_none()
-                && input.app_memory.is_none() =>
+                && input.app_memory.is_none()
+                && input.continue_from_run_id.is_none() =>
         {
             let issue_id = input
                 .issue_id
@@ -735,6 +766,12 @@ fn prepare_submission(
         _ => return Err("invalid_job_kind_or_fields"),
     };
     if input.kind == "explore" {
+        if let Some(id) = input.continue_from_run_id {
+            if id.is_nil() {
+                return Err("invalid_continuation_run");
+            }
+            request["continue_from_run_id"] = json!(id);
+        }
         if let Some(enabled) = input.auto_reproduce {
             settings["autoReproduce"] = json!(enabled);
             // Keep omitted defaults omitted in the idempotency request.
@@ -1194,7 +1231,36 @@ impl Queue {
                     .ascii_serialization();
             if tx.query_opt("SELECT 1 FROM browser_sessions WHERE session_id=$1 AND workspace_id=$2 AND user_id=$3 AND origin=$4 AND execution_mode=$5 AND revoked_at IS NULL AND expires_at>now()",&[&id,&self.principal.workspace_id,&self.principal.user_id,&origin,&mode]).await.map_err(|_|"database_unavailable")?.is_none(){return Err("saved_session_unavailable");}
         }
-        let row = tx.query_one("INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status,agent_id,project_id,task_id) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9) RETURNING to_jsonb(browser_jobs)", &[&input.job_id,&self.principal.workspace_id,&self.principal.user_id,&request,&settings,&mode,&self.principal.agent_id,&input.project_id,&input.task_id]).await.map_err(|_|"database_unavailable")?;
+        let continuation = if let Some(run_id) = input.continue_from_run_id {
+            let row = tx.query_opt("SELECT target_url,lifecycle,config FROM runtime_runs WHERE run_id=$1 AND workspace_id=$2 AND user_id=$3",&[&run_id,&self.principal.workspace_id,&self.principal.user_id]).await.map_err(|_| "database_unavailable")?.ok_or("continuation_run_not_found")?;
+            let stored_url: String = row.get(0);
+            let lifecycle: String = row.get(1);
+            let config: Value = row.get(2);
+            let recorded_viewport = config["viewport_profile"].as_str().unwrap_or("desktop");
+            let requested_viewport = request["viewport_profile"]
+                .as_str()
+                .or_else(|| settings["viewportProfile"].as_str())
+                .unwrap_or("");
+            if request["target_url"] != stored_url || requested_viewport != recorded_viewport {
+                return Err("continuation_target_mismatch");
+            }
+            if !matches!(lifecycle.as_str(), "failed" | "interrupted" | "cancelled")
+                || config["runtime_version"] != "explorer-v1"
+                || !config["replay_of"].is_null()
+                || !config["fix_verification"].is_null()
+            {
+                return Err("continuation_run_not_stopped");
+            }
+            let chain = continuation_chain(run_id, &config)?;
+            if let Some(existing) = tx.query_opt("SELECT to_jsonb(j) FROM browser_jobs j WHERE workspace_id=$1 AND user_id=$2 AND status IN ('queued','running') AND request->>'continue_from_run_id'=$3 ORDER BY created_at,job_id LIMIT 1",&[&self.principal.workspace_id,&self.principal.user_id,&run_id.to_string()]).await.map_err(|_| "database_unavailable")? {
+                return Ok(json!({"job":existing.get::<_,Value>(0),"reused":true}));
+            }
+            chain
+        } else {
+            Vec::new()
+        };
+        let resumes = continuation.len() as i32;
+        let row = tx.query_one("INSERT INTO browser_jobs(job_id,workspace_id,user_id,request,settings,execution_mode,status,agent_id,project_id,task_id,resumes,previous_run_ids) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11) RETURNING to_jsonb(browser_jobs)", &[&input.job_id,&self.principal.workspace_id,&self.principal.user_id,&request,&settings,&mode,&self.principal.agent_id,&input.project_id,&input.task_id,&resumes,&continuation]).await.map_err(|_|"database_unavailable")?;
         let job: Value = row.get(0);
         if let Some((issue, path, _)) = verification_source {
             tx.execute("INSERT INTO issue_verifications(verification_id,issue_id,workspace_id,user_id,job_id,candidate_url,deployment_ref,source_snapshot) VALUES($1,$2,$3,$4,$1,$5,$6,$7)",&[&input.job_id,&input.issue_id.unwrap(),&self.principal.workspace_id,&self.principal.user_id,&request["target_url"].as_str().unwrap(),&request["deployment_ref"].as_str(),&json!({"issue":issue["snapshot"],"source_run_id":issue["source_run_id"],"source_action_id":issue["source_action_id"],"path":path})]).await.map_err(|_|"database_unavailable")?;
@@ -1232,10 +1298,11 @@ pub async fn submit(
         Err(code) => error(
             match code {
                 "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
-                "issue_not_found" => StatusCode::NOT_FOUND,
-                "job_id_conflict" | "provider_not_configured" | "browser_queue_full" => {
-                    StatusCode::CONFLICT
-                }
+                "issue_not_found" | "continuation_run_not_found" => StatusCode::NOT_FOUND,
+                "job_id_conflict"
+                | "provider_not_configured"
+                | "browser_queue_full"
+                | "continuation_limit_reached" => StatusCode::CONFLICT,
                 _ => StatusCode::BAD_REQUEST,
             },
             code,
@@ -1828,6 +1895,50 @@ mod tests {
             assert_eq!(settings["autoReproduce"], enabled);
             assert_eq!(request["auto_reproduce"], enabled);
         }
+    }
+
+    #[test]
+    fn continuation_is_an_explore_field_and_replays_reject_it() {
+        let id = Uuid::new_v4();
+        let mut explore =
+            json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/"});
+        explore["continue_from_run_id"] = json!(id);
+        let (request, _) = prepare_submission(&submission(explore), &defaults()).unwrap();
+        assert_eq!(request["continue_from_run_id"], json!(id));
+        let mut replay =
+            json!({"job_id":Uuid::new_v4(),"kind":"reproduce","source_action_id":Uuid::new_v4()});
+        replay["continue_from_run_id"] = json!(id);
+        assert_eq!(
+            prepare_submission(&submission(replay), &defaults()).unwrap_err(),
+            "invalid_job_kind_or_fields"
+        );
+        let nil = json!({"job_id":Uuid::new_v4(),"kind":"explore","target_url":"http://app:8082/","continue_from_run_id":Uuid::nil()});
+        assert_eq!(
+            prepare_submission(&submission(nil), &defaults()).unwrap_err(),
+            "invalid_continuation_run"
+        );
+    }
+
+    #[test]
+    fn continuation_chain_keeps_at_most_three_runs() {
+        let run = Uuid::new_v4();
+        assert_eq!(continuation_chain(run, &json!({})).unwrap(), vec![run]);
+        let earlier = [Uuid::new_v4(), Uuid::new_v4()];
+        let config = json!({"resume":{"previous_run_ids":[earlier[0], earlier[1]]}});
+        assert_eq!(
+            continuation_chain(run, &config).unwrap(),
+            vec![earlier[0], earlier[1], run]
+        );
+        let full =
+            json!({"resume":{"previous_run_ids":[Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()]}});
+        assert_eq!(
+            continuation_chain(run, &full).unwrap_err(),
+            "continuation_limit_reached"
+        );
+        assert_eq!(
+            continuation_chain(run, &json!({"resume":{"previous_run_ids":["nope"]}})).unwrap_err(),
+            "continuation_run_not_stopped"
+        );
     }
 
     #[test]

@@ -44,7 +44,7 @@ You can close the tab and return to the job. To stop work, use the explicit canc
 
 If the app needs access, respond to the [private sign-in handoff](../private-apps/). Payment, external identity providers and unsupported interactions can leave a branch blocked.
 
-If a test fails, is interrupted, blocked or cancelled, choose **Run again** on the run, or the restart icon next to it in **Recent tests**. It starts a new test with the same URL, screen size and sign-in choice, using your current settings. The original run and its evidence stay as they were.
+If a test fails, is interrupted or cancelled, **Continue exploration** carries on from the pages already recorded. It does not repeat an action that was already sent to the browser, and it uses your current model and limits for the additional work. **Run again** starts a new test at the same address. A blocked test only offers **Run again**, because it still needs access. Both keep the original run and its evidence. The same controls appear as icons in **Recent tests**.
 
 ## Share useful feedback
 

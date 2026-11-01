@@ -35,6 +35,9 @@ export type MapSnapshot = { states: Map<string, { page_template: string; min_dep
   // `${state key}|${entry key}` for every entry an earlier run acted on.
   tried: Set<string>; depth_by_template: Map<string, number>; truncated: boolean };
 export type MemorySnapshot = { version: typeof MEMORY_VERSION; scope_id: string; scope: MemoryScope; prior_runs: number; truncated: boolean;
+  // A requested continuation opens unfinished pages from the stopped run
+  // before it repeats the entry page. Ordinary later runs leave this unset.
+  prefer_unfinished?: boolean;
   pages: Map<string, RememberedPage>; controls: Map<string, RememberedControl>; by_page: Map<string, RememberedControl[]>;
   // Controls whose action was in flight when a run was interrupted. Their
   // outcome is unknown, so a resumed run never tries them again.

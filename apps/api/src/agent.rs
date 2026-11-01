@@ -166,6 +166,7 @@ struct StartArgs {
     session_id: Option<Uuid>,
     auto_reproduce: Option<bool>,
     app_memory: Option<bool>,
+    continue_from_run_id: Option<Uuid>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -641,6 +642,9 @@ async fn dispatch_inner(
             if let Some(id) = a.session_id {
                 checked(id)?;
             }
+            if let Some(id) = a.continue_from_run_id {
+                checked(id)?;
+            }
             let mut data = json!({"job_id":a.job_id,"kind":"explore","target_url":a.url,"project_id":a.project_id,"task_id":a.task_id});
             for (k, v) in [
                 ("viewport_profile", json!(a.viewport_profile)),
@@ -648,6 +652,7 @@ async fn dispatch_inner(
                 ("session_id", json!(a.session_id)),
                 ("auto_reproduce", json!(a.auto_reproduce)),
                 ("app_memory", json!(a.app_memory)),
+                ("continue_from_run_id", json!(a.continue_from_run_id)),
             ] {
                 if !v.is_null() {
                     data[k] = v;
