@@ -104,6 +104,19 @@ test('replay human reviews map source actions without importing unrelated decisi
   const summary=reportSummary(report);assert.equal(summary.isReplay,true);assert.equal(summary.findings.candidates,0);assert.equal(summary.findings.confirmed,0);assert.equal(summary.findings.latestReviews.length,1);assert.equal(summary.findings.sourceReviewReferences.length,1);assert.equal(summary.actions.verdicts.suspect,1);const markdown=reportMarkdown(report,options);assert.match(markdown,/refer to the original finding/);assert.doesNotMatch(markdown,/Unrelated decision/);assert.equal(reportEvidence(report).length,3);
 });
 
+test('a cut-off model plan is explained in the exported report',()=>{
+  const report=fixture(),requestId=id(70);
+  report.run.lifecycle='failed';report.run.error='Model request did not complete; inspect its request ID.';
+  report.events=[{event_id:id(71),run_id:runId,seq:1,event_type:'model.decision_failed',payload:{request_id:requestId,kind:'plan'}}];
+  report.model_requests=[{request_id:requestId,state:'failed',error:'incomplete_or_unsupported_output',provider:'meta',model:'muse-wonder-1.0'}];
+  report.model_calls=[{request_id:requestId,output_tokens:2048,reasoning_tokens:1594,error:'incomplete_or_unsupported_output'}];
+  const markdown=reportMarkdown(report,options);
+  assert.match(markdown,/The model answer was cut off/);
+  assert.match(markdown,/Planning the next action with Meta AI/);
+  assert.match(markdown,/Reasoning used 1,594 of 2,048 output tokens/);
+  assert.match(markdown,/000000000070/);
+  assert.doesNotMatch(markdown,/inspect its request ID/);
+});
 test('zero, unknown and partial usage never invent reported totals or successful coverage',()=>{
   const report=fixture();let summary=reportSummary(report),markdown=reportMarkdown(report,options);assert.equal(summary.usage.attempts,0);assert.equal(summary.usage.inputTokens,null);assert.match(markdown,/No provider attempts are recorded/);assert.match(markdown,/Input tokens \| Unknown/);assert.match(markdown,/Fixture data:\*\* Yes/);
   report.model_usage={attempts:2,known_input_tokens:0,known_output_tokens:9,incomplete_usage_attempts:1,pending_requests:1,provider_reported_cost_usd:'0',unpriced_attempts:1};summary=reportSummary(report);assert.equal(summary.usage.inputTokens,0);assert.equal(summary.usage.costUsd,'0');assert.equal(summary.usage.tokensComplete,false);markdown=reportMarkdown(report,options);assert.match(markdown,/At least 0/);assert.match(markdown,/known subtotal/);

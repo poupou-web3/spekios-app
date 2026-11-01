@@ -76,6 +76,25 @@ test('a stopped test starts again with the request that launched it',async()=>{
   assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'explore',target_url:'https://broken.test',viewport_profile:'mobile',auth_mode:'sign_in',auto_reproduce:true,project_id:'project'});
   assert.equal(ui.state.trackedJobId,'new');assert.equal(ui.location.hash,'#/workspace');
 });
+test('a failed model plan names the request, the provider error and the reasoning budget',()=>{
+  const ui=workspace(),requestId='f4b6e31f-07ee-4ab5-85d8-dcbc224bb977';
+  ui.state.report={run:run('cut-off',{lifecycle:'failed',error:'Model request did not complete; inspect its request ID.'}),actions:[],captures:[],
+    events:[{event_type:'model.decision_failed',payload:{request_id:requestId,kind:'plan'}}],
+    model_requests:[{request_id:requestId,state:'failed',error:'incomplete_or_unsupported_output',provider:'meta',model:'muse-wonder-1.0'}],
+    model_calls:[{request_id:requestId,output_tokens:2048,reasoning_tokens:1594,error:'incomplete_or_unsupported_output'}]};
+  const html=ui.runView();
+  assert.match(html,/The model answer was cut off/);
+  assert.match(html,/Planning the next action with Meta AI \(muse-wonder-1\.0\)/);
+  assert.match(html,/incomplete_or_unsupported_output/);
+  assert.match(html,/Reasoning used/);assert.match(html,/2,048|2048/);assert.match(html,/1,594|1594/);
+  assert.match(html,new RegExp(`Request ${requestId}`));
+  assert.doesNotMatch(html,/inspect its request ID/);
+  ui.state.report.run.error='page.screenshot: Target crashed';
+  assert.match(ui.runView(),/page\.screenshot: Target crashed/);
+  assert.doesNotMatch(ui.runView(),/The model answer was cut off/);
+  ui.state.report.run.error='<script>alert(1)</script>';
+  assert.doesNotMatch(ui.runView(),/<script>alert/);
+});
 test('a run page and an unstarted job offer one restart each',async()=>{
   const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
   ui.state.report={run:run('stopped',{lifecycle:'interrupted'}),actions:[],captures:[]};ui.state.runId='stopped';

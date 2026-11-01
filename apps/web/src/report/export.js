@@ -1,5 +1,7 @@
 // Pure report projection. Fetching, byte verification and ZIP creation live in
 // the bundle module; this module never follows data-supplied URLs or object keys.
+import {modelRequestFailure} from './model-failure.js';
+
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH=/^[0-9a-f]{64}$/i;
 const PNG_KINDS=new Set(['raw_mask','absolute_delta','geometry_mask','settling_frame','replanning_mask']);
@@ -210,7 +212,7 @@ export function reportMarkdown(report,{exportId,generatedAt,bundle=false,evidenc
     ['Navigation model',navigationModel?`${navigationModel.provider} ${navigationModel.model}`:run.config.model_tiers?.navigation_unavailable?`Not used (${run.config.model_tiers.navigation_unavailable})`:'Not configured'],
     ['Navigation-model requests',use.navigation_requests],['Navigation results reassessed by the exploration model',use.escalations],['Fallbacks to the exploration model',use.fallbacks]]),
     'A reused ranking makes no model request; actions chosen from it keep their own prediction, captures and assessment.');
-  if(run.error)sections.push(block('Execution error',run.error));
+  if(run.error){const failure=modelRequestFailure(report);sections.push(block('Execution error',failure?`${failure.title}\n\n${failure.detail}\n\nRequest ${failure.requestId}`:run.error));}
   sections.push('## Coverage and exploration limits',[
     field('Allowed action budget',run.config?.limits&&run.config.limits.max_actions===null?'No limit':run.config?.limits?.max_actions),field('States recorded',Array.isArray(report?.graph?.states)?report.graph.states.length:'Unknown'),field('Transitions recorded',Array.isArray(report?.graph?.edges)?report.graph.edges.length:'Unknown'),field('Unexplored controls',Array.isArray(report?.graph?.frontier)?report.graph.frontier.filter(f=>f.status==='unexplored').length:'Unknown'),field('Blocked controls',Array.isArray(report?.graph?.frontier)?report.graph.frontier.filter(f=>f.status==='blocked').length:'Unknown'),
     'Unvisited flows, unsupported interactions and incomplete observations remain untested. Action-budget use is not coverage percentage. Intent/path scores are uncalibrated estimates.'].join('\n'));
