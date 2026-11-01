@@ -1,4 +1,4 @@
-import {workspaceRequest,requireOk} from '/assets/ui/http.js';
+import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
 const $=selector=>document.querySelector(selector);
 // The header theme control is the only shared widget on this page.
@@ -124,7 +124,7 @@ $('#copy-url').addEventListener('click',()=>setupInfo&&copy(setupInfo.mcp_url,'C
 $('#test-url').addEventListener('input',renderPrompt);
 $('#copy-prompt').addEventListener('click',()=>{const text=prompt();if(text)return copy(text,'Prompt copied. Paste it into your connected agent.');});
 $('#refresh-agents').addEventListener('click',async()=>{try{await list();message('Connection status refreshed. An agent is connected after its first authenticated request.');}catch(e){message(e.message);}});
-$('#manager-form').addEventListener('submit',async event=>{event.preventDefault();clearApproval();token=$('#manager-token').value;$('#manager-token').value='';identity=null;await ready();});
+$('#manager-form').addEventListener('submit',async event=>{event.preventDefault();clearApproval();const email=$('#manager-email').value.trim(),password=$('#manager-password').value;$('#manager-password').value='';try{await signIn(email,password);token=password;sessionStorage.setItem('scout.workspace-token',token);identity=null;await ready();}catch(e){message(e.message);}});
 $('#code-form').addEventListener('submit',async event=>{event.preventDefault();await reviewCode();});
 for(const [id,approve] of [['approve',true],['deny',false]])$('#'+id).addEventListener('click',async()=>{
   const target=approvalTarget;

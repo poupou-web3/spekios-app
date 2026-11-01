@@ -15,8 +15,8 @@
   <div class="connection-heading"><p class="eyebrow">YOUR WORKSPACE. YOUR AGENT.</p><h1 id="connection-title">Bring your agent to Spekios.</h1><p id="connection-description">Connect once. Ask your agent to test a URL, follow the run and bring back findings with evidence.</p></div>
   <div id="connection-status" class="connection-status" role="status" aria-live="polite"></div>
   <section id="manager-login" class="panel connection-signin" hidden>
-    <h2>Open your workspace to continue</h2><p>Use your existing Spekios workspace access. Your agent will receive its own limited connection.</p>
-    <form id="manager-form" class="login-card"><label for="manager-token">Workspace access token</label><input id="manager-token" type="password" autocomplete="off" required minlength="32"><button class="button primary" type="submit">Open workspace</button></form>
+    <h2>Sign in to continue</h2><p>Use your workspace email and password. Your agent will receive its own limited connection.</p>
+    <form id="manager-form" class="login-card"><label for="manager-email">Email</label><input id="manager-email" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="254" placeholder="admin"><label for="manager-password">Password</label><input id="manager-password" type="password" autocomplete="current-password" required minlength="32" maxlength="256"><button class="button primary" type="submit">Sign in</button></form>
   </section>
   <section id="connections" hidden>
     <p id="workspace-label" class="small muted"></p>

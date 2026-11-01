@@ -13,6 +13,18 @@ export function workspaceRequest(path, {token='',body,headers={},timeoutMs=18000
   });
 }
 
+// Confirms the local workspace email and password. The password is the operator
+// token; the caller keeps it as the bearer credential for this browser tab.
+export async function signIn(email, password, fetcher=fetch) {
+  const response = await fetcher('/v1/workspace-login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email, password}),
+    redirect: 'error',
+  });
+  if (!response.ok) throw new Error('Email or password is incorrect.');
+}
+
 export async function requireOk(response) {
   if(response.ok)return response;
   let code='Request failed';

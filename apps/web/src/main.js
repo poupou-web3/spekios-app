@@ -1,5 +1,6 @@
 // Workspace entry: delegated DOM events, polling and startup. Rendering lives in app.js.
 import {toast} from '/assets/ui/components.js';
+import {signIn} from '/assets/ui/http.js';
 import {bindThemeSwitch} from '/assets/ui/theme.js';
 import {api,get} from './api.js';
 import {bootstrapSession,refresh,render,route} from './app.js';
@@ -18,8 +19,8 @@ import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering
 root.addEventListener('submit',async e=>{
   e.preventDefault();
   if(e.target.id==='login-form'){
-    state.token=new FormData(e.target).get('token').trim();state.error='';
-    try{await get('/readyz');sessionStorage.setItem('scout.workspace-token',state.token);state.connected=true;await route();}catch(error){state.error=error.message;login();}
+    const form=new FormData(e.target),email=String(form.get('email')||'').trim(),password=String(form.get('password')||'');state.error='';
+    try{await signIn(email,password);state.token=password;await get('/readyz');sessionStorage.setItem('scout.workspace-token',state.token);state.connected=true;await route();}catch(error){state.token='';state.connected=false;if(!state.error)state.error=error.message==='Workspace access is required.'?'Email or password is incorrect.':error.message;login();}
   }else if(e.target.id==='steering-form'){await submitSteering(e.target.dataset.runId);}else if(e.target.id==='exploration-configuration-form'){await saveConfiguration();}else if(e.target.id==='finding-review-form'){await submitReview(e.target.dataset.sourceAction);}else if(e.target.id==='run-form'){
     const form=new FormData(e.target),request=explorationRequest(form);state.launchError=launchUrlError(request.target_url);
     if(state.launchError){state.url=String(form.get('url')||'').trim();render();document.getElementById('target-url')?.focus();}else await submitJob(request);

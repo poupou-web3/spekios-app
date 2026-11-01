@@ -125,7 +125,7 @@ test('a workspace change while JSON is arriving cannot restore the old manager i
     if(options.headers.Authorization==='Bearer local-manager-fixture')return {ok:true,json:()=>{entered.resolve();return body.promise;}};
     return {ok:true,json:async()=>({principal_kind:'workspace_manager',workspace_name:'New workspace'})};
   }});
-  const old=ui.ui.ready();await entered.promise;ui.get('#manager-token').value='new-manager';await ui.get('#manager-form').handlers.submit({preventDefault(){}});
+  const old=ui.ui.ready();await entered.promise;ui.get('#manager-email').value='admin';ui.get('#manager-password').value='new-manager';await ui.get('#manager-form').handlers.submit({preventDefault(){}});
   body.resolve({principal_kind:'workspace_manager',workspace_name:'Old workspace'});await old;
   assert.match(ui.get('#workspace-label').textContent,/New workspace/);assert.equal(ui.get('#manager-login').hidden,true);
 });
