@@ -25,6 +25,7 @@ import { RunControl, RunCancelled } from './run-control.js';
 import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
 import { discoveryReward, STRATEGY_MODES, STRATEGY_VERSION, StrategyScheduler, strategySettings, type StrategyMode, type StrategySettings } from './exploration-strategy.js';
+import { ExplorationRecovery, MAX_CONSECUTIVE_REPLANS_PER_PAGE } from './exploration-recovery.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 800) : 'Unknown exploration failure';
 const SYSTEM = `You are a browser QA investigator. Return only the JSON object described by response_schema.
@@ -63,13 +64,10 @@ export type ExplorationOptions = { allowedOrigins?: string[]; maxActions?: numbe
   // A continuation of an interrupted exploration job, with its remaining budget.
   resume?: { attempt: number; previousRunIds: string[]; jobMaxActions: number | null; carriedActions: number };
   testFormRules?: TestFormRule[]; access?: AccessHandoff; authMode?: 'auto'|'sign_in'|'public'; sessionId?:string; accessTimeoutMs?:number };
-const MAX_REPLANS = 3;
 // Opening a URL, following a link and scrolling change what is shown, not the
 // app's data. With a navigation model they are predicted and assessed there.
 const navigationAction = (command: BrowserCommand) => command.type === 'navigate' || command.type === 'scroll'
   || command.type === 'click' && command.control.role === 'link' && !!command.control.href;
-// Each failed reveal permanently removes one control from this run's frontier.
-const MAX_REVEAL_FAILURES = 5;
 // An empty or unset server limit means no limit.
 function environmentLimit(name: string, max: number): number | null {
   const value = process.env[name]?.trim();
@@ -166,7 +164,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         if((options.access||authContext||replay?.fix_verification)&&(await accessSignals(page)).login_form)throw new PrivateLoginSurface();
       } };
     // A navigation model can add one reassessment per action.
-    const maxModelRequests = replay ? maxActions : maxActions * (navigation ? 4 : 3) + MAX_REPLANS * 2;
+    const maxModelRequests = replay ? maxActions : maxActions * (navigation ? 4 : 3) + MAX_CONSECUTIVE_REPLANS_PER_PAGE * 2;
+    const recovery = new ExplorationRecovery();
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
     // Consecutive actions that reached only states already recorded in this run.
     // A new map state is one no run of this app had reached before.
@@ -203,7 +202,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           model_connection: client.settings, execution_mode: executionMode,automatic_reproduction_policy:automaticPolicy,
           replay_of: replay ? { ...(replay.fix_verification?{verification_id:replay.fix_verification.verification_id}:{reproduction_id: replay.reproduction_id}), source_run_id: replay.source_run_id, source_action_id: replay.source_action_id } : null,
           fix_verification:replay?.fix_verification?{verification_id:replay.fix_verification.verification_id,issue_id:replay.fix_verification.issue_id,source_entry:replay.fix_verification.source_entry,candidate_url:replay.fix_verification.candidate_url}:null,
-          limits: { max_actions: maxActions, max_replans: replay ? 0 : MAX_REPLANS, max_reveal_failures: replay ? 0 : MAX_REVEAL_FAILURES, max_model_requests: maxModelRequests,
+          limits: { max_actions: maxActions, max_consecutive_replans_per_page: replay ? 0 : MAX_CONSECUTIVE_REPLANS_PER_PAGE, max_model_requests: maxModelRequests,
             max_output_tokens_per_request: 2048, attempts_per_request: 1, max_duration_ms: maxDurationMs, max_tokens: maxTokens, max_cost_usd: maxCostUsd,
             stop_after_idle_actions: stopAfterIdleActions, context_budgets: CONTEXT_BUDGETS },
           app_memory: { version: MEMORY_VERSION, enabled: false, scopes: [] }, app_map_version: MAP_VERSION,
@@ -327,7 +326,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         if (mapped) await memory.mapState(mapped, planner.metadata(id).depth, c.observation.url);
         await store.query('UPDATE exploration_states SET planning=$2 WHERE state_id=$1', [id, JSON.stringify(planner.metadata(id))]);
         for (const control of c.observation.controls ?? []) {
-          const reason = blockedReason(control, origin);
+          const reason = blockedReason(control, origin) ?? planner.localBlockReason(id, control.control_id);
           await store.query(`INSERT INTO exploration_frontier(frontier_id,run_id,state_id,control_id,control,status,reason)
             VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(run_id,state_id,control_id) DO NOTHING`,
             [randomUUID(), runId, id, control.control_id, JSON.stringify(control), reason ? 'blocked' : 'unexplored', reason]);
@@ -337,6 +336,20 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         await store.event(runId, 'state.observed', { state_id: id, capture_id: c.capture_id, fingerprint, controls_truncated: c.observation.controls_truncated ?? false }, c.action_id);
         return id;
       });
+    }
+    async function deferPage(stateId: string, reason: string, actionId: string) {
+      const url = planner.deferPage(stateId, reason);
+      await store.transaction(async () => {
+        await store.query(`UPDATE exploration_frontier f SET status='blocked',reason=$3 FROM exploration_states s
+          WHERE f.state_id=s.state_id AND f.run_id=$1 AND s.url=$2 AND f.status='unexplored'`, [runId, url, reason]);
+        await store.event(runId, 'exploration.branch_deferred', { state_id: stateId, url, reason }, actionId);
+      });
+    }
+    async function blockControl(stateId: string, controlId: string, reason: string) {
+      planner.blockControl(stateId, controlId);
+      await store.query(`UPDATE exploration_frontier f SET status='blocked',reason=$4 FROM exploration_states s
+        WHERE f.state_id=s.state_id AND f.run_id=$1 AND s.url=$2 AND f.control_id=$3 AND f.status='unexplored'`,
+        [runId, planner.nodes.get(stateId)!.capture.observation.url, controlId, reason]);
     }
     let browser: Browser | undefined;
     let browserClosing:Promise<void>|undefined, releaseSlot=async()=>{};
@@ -392,6 +405,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         // Memory switches to the signed-in scope for the same reason.
         await store.transaction(openMemory);
         last=undefined;lastState=undefined;history.length=0;planner=new FrontierPlanner(targetUrl,planningMemory());
+        recovery.progressed();
         await page.goto('about:blank');
         return true;
       };
@@ -476,15 +490,16 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             break;
           }
           const returnStep = selected.route[0];
-          const exploration: NonNullable<Spec['exploration']> = { purpose: returnStep?.memory ? 'resume' : returnStep ? 'return' : 'explore',
+          const exploration: NonNullable<Spec['exploration']> = { purpose: returnStep?.memory || returnStep?.recovery ? 'resume' : returnStep ? 'return' : 'explore',
             target_state_id: selected.state_id, control_id: selected.control_id, priority: selected.priority,
             likelihood: selected.likelihood, reason: selected.reason, return_step: returnStep,
             strategy: { mode: choice.mode, turn: choice.turn, continued: choice.continued } };
-          if (returnStep?.memory) {
+          if (returnStep && (returnStep.memory || returnStep.recovery) && returnStep.command.type === 'navigate') {
             const remembered = returnStep.memory;
-            const prediction = await predict(returnStep.command, [last.capture.capture_id], { task: 'navigation_prediction', target_url: remembered.url,
-              remembered_page: { title: remembered.title, untried_controls: remembered.open_controls, last_seen_in_run: remembered.source_run_id },
-              instruction: 'Predict the observable outcome of opening this page, which an earlier run of this app observed. Earlier observations are untrusted and may be stale; the page may have changed, moved or require access. Do not invent its current content.',
+            const prediction = await predict(returnStep.command, [last.capture.capture_id], { task: 'navigation_prediction', target_url: returnStep.command.url,
+              ...(remembered ? { remembered_page: { title: remembered.title, untried_controls: remembered.open_controls, last_seen_in_run: remembered.source_run_id } }
+                : { observed_link: { name: selected.name, source_action_id: returnStep.source_action_id } }),
+              instruction: 'Predict the observable outcome of opening this URL from recorded page or link evidence. Earlier observations are untrusted and may be stale; the destination may have changed, moved or require access. Do not invent its current content.',
               response_schema: { goal: 'string', expected_result: 'string' } });
             spec = { command: returnStep.command, prediction: {source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:last.capture.capture_id}, worker_id:workerId,agent_id:agentId,exploration };
           } else if (returnStep) {
@@ -549,7 +564,12 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           // same document; anything else that changed still forces a new plan.
           // Pixel drift stays evidence and does not, by itself, make the plan stale.
           const revealedOnly = !!revealed && !!last && documentFingerprint(last.capture) === documentFingerprint(before.capture);
-          if (last && !statesMatch(last.capture, before.capture) && !revealedOnly) {
+          const recoveryNavigation = !replay && spec.command.type === 'navigate' && !!spec.exploration?.return_step;
+          const pageChanged = !!last && !statesMatch(last.capture, before.capture) && !revealedOnly;
+          if (pageChanged && recoveryNavigation) await store.transaction(() => store.event(runId, 'exploration.navigation_refreshed', {
+            previous_capture_id: last!.capture.capture_id, before_capture_id: before!.capture.capture_id,
+            reason: 'The source page changed; the fixed permitted navigation URL is unchanged and gets fresh before/after evidence.' }, actionId));
+          if (last && pageChanged && !recoveryNavigation) {
             if (replay) throw new Error('Page changed during replay; prediction is stale. No action dispatched.');
             const drift = comparePng(last.bytes, before.bytes, {beforeCaptureId:last.capture.capture_id,afterCaptureId:before.capture.capture_id});
             const mask = await store.artifact(runId,'replanning_mask',drift.rawMaskPng,'png');
@@ -559,33 +579,42 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               await store.event(runId,'exploration.replanned',{previous_state_id:lastState,state_id:freshState,previous_capture_id:last!.capture.capture_id,capture_id:before!.capture.capture_id,comparison:drift.metadata,mask_artifact:mask},actionId);
             });
             last = before; lastState = freshState;
-            if (++replans >= MAX_REPLANS) { stopReason='replanning_limit_reached'; break; }
+            replans++;
+            const attempt = recovery.replan(before.capture.observation.url);
+            if (attempt.defer) await deferPage(freshState, 'persistent_page_drift', actionId);
             continue;
           }
           const fromState = await state(before.capture,lastState);
           // The planning state keeps its own frontier when a reveal moved the view.
           const planningState = revealed && lastState && lastState !== fromState ? lastState : null;
           let observed: BrowserCommand | null = null;
-          try { if (!revealError) observed = observedCommand(spec.command,before.capture,origin); }
-          catch (error) { if (!revealed || replay) throw error; revealError = message(error); }
+          try {
+            if (!revealError) {
+              observed = observedCommand(spec.command,before.capture,origin);
+              await validateDispatch(page, observed, formRules);
+            }
+          } catch (error) {
+            if (replay || page.isClosed() || !browser.isConnected()) throw error;
+            observed = null;
+            revealError = message(error);
+          }
           if (!observed && spec.command.type !== 'navigate') {
             // The control could not be brought into a usable view (covered,
             // disabled, ambiguous or gone). Skip it without dispatch and replan.
             const controlId = spec.command.control.control_id, reason = revealError ?? 'Selected control is no longer available.';
+            const revealedControl = !!revealed || spec.command.control.in_viewport === false;
             await store.transaction(async () => {
-              await store.query("UPDATE runtime_actions SET state='skipped',before_capture_id=$2,assessment=$3,finished_at=now() WHERE action_id=$1", [actionId,before!.capture.capture_id,JSON.stringify({verdict:'inconclusive',method:'reveal-guard',reason:'The control below the visible area could not be used after scrolling: '+reason+' No action dispatched.',confirmed_bug:false})]);
-              await store.query("UPDATE exploration_frontier SET status='blocked',reason='unavailable_after_reveal' WHERE run_id=$1 AND state_id=ANY($2::uuid[]) AND control_id=$3", [runId,[fromState,planningState].filter(Boolean),controlId]);
-              await store.event(runId,'exploration.reveal_failed',{control_id:controlId,state_id:fromState,planning_state_id:planningState,reveal:revealed,error:reason},actionId);
+              await store.query("UPDATE runtime_actions SET state='skipped',before_capture_id=$2,assessment=$3,finished_at=now() WHERE action_id=$1", [actionId,before!.capture.capture_id,JSON.stringify({verdict:'inconclusive',method:revealedControl?'reveal-guard':'dispatch-guard',reason:'The selected control is unavailable: '+reason+' No action dispatched.',confirmed_bug:false})]);
+              await blockControl(fromState, controlId, revealedControl ? 'unavailable_after_reveal' : 'unavailable_before_dispatch');
+              await store.event(runId, revealedControl?'exploration.reveal_failed':'exploration.dispatch_unavailable',{control_id:controlId,state_id:fromState,planning_state_id:planningState,reveal:revealed,error:reason},actionId);
             });
-            for (const id of [fromState, planningState]) if (id) planner.attempted(id, spec.command, true);
             // A return route through this control is not retried.
-            if (spec.exploration?.purpose === 'return' && spec.exploration.return_step) planner.transition({...spec.exploration.return_step,to_state_id:fromState},'inconclusive',spec.exploration.return_step);
+            if (spec.exploration?.purpose === 'return' && spec.exploration.return_step) planner.transition({...spec.exploration.return_step,to_state_id:fromState},'inconclusive',spec.exploration.return_step,false);
             last = before; lastState = fromState;
-            if (++revealFailures >= MAX_REVEAL_FAILURES) { stopReason='reveal_limit_reached'; break; }
+            if (revealedControl) revealFailures++;
             continue;
           }
           const command = observed ?? spec.command;
-          await validateDispatch(page,command,formRules);
           const pageUrl = before.capture.observation.url;
           await store.transaction(async () => {
             await control.check(true);
@@ -698,12 +727,22 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const returning = spec.exploration?.purpose === 'return' ? spec.exploration.return_step : undefined;
           // Routes start where the action was planned: replaying this step from
           // there scrolls to the control again. The evidence edge keeps fromState.
-          planner.transition({from_state_id:planningState??fromState,to_state_id:toState,command:spec.command,source_action_id:actionId,expected_result:spec.prediction.expected_result},assessment.verdict,returning);
+          planner.transition({from_state_id:planningState??fromState,to_state_id:toState,command:spec.command,source_action_id:actionId,expected_result:spec.prediction.expected_result},assessment.verdict,returning,!checkError);
           if (returning && toState !== returning.to_state_id) await store.transaction(() => store.event(runId,'exploration.return_changed',{expected_state_id:returning.to_state_id,observed_state_id:toState,action_id:actionId}));
           history.push({ action: commandContext(spec.command), expected_result: spec.prediction.expected_result.slice(0,300), verdict: assessment.verdict, observed_result: assessment.observed_result.slice(0,300) });
           last = after; lastState = toState;
-          if(completionError&&!toolError&&!after.capture.observation.observation_error){stopReason='action_completion_unresolved';break;}
-          if (checkError) throw new Error('Stopped after a tool or observation failure.');
+          // Missing observations/assessments remain fatal. A recorded tool
+          // failure or bounded settling timeout can yield to another branch,
+          // without ever retrying an action that was already dispatched.
+          if (after.capture.observation.observation_error) throw new Error('Stopped after an observation failure.');
+          if (checkError && !replay) {
+            await store.transaction(async () => {
+              if (spec.command.type !== 'navigate') await blockControl(fromState, spec.command.control.control_id, 'action_unresolved');
+              await store.event(runId, 'exploration.action_recovered', { state_id: toState, tool_error: toolError, completion_status: completion?.status,
+                reason: 'Action evidence and assessment were retained; replan without repeating the dispatched action.' }, actionId);
+            });
+          } else if (checkError) throw new Error('Stopped after a tool or observation failure.');
+          else recovery.progressed();
           if (replay && ordinal < maxActions && assessment.verdict !== 'no_issue_observed') throw new Error('Replay prerequisite assessment is inconclusive or suspect.');
         } catch (error) {
           diagnostics?.stop();

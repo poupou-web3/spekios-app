@@ -14,7 +14,7 @@ const labels={resolved:'Resolved on candidate',still_reproducible:'Still reprodu
 function outcome(check){return check?.outcome||check?.status||'unverified';}
 function badge(check){const key=outcome(check);return make('span',labels[key]||key,`pill ${key==='resolved'?'green':key==='still_reproducible'?'red':''}`);}
 const triageLabels={untriaged:'New',needs_review:'Needs review',bug:'Bug',intended_behavior:'Intended behavior',duplicate:'Duplicate'};
-const deciders={human:'a person',agent:'an agent',system:'Scout, matching a known issue'};
+const deciders={human:'a person',agent:'an agent',system:'Spekios, matching a known issue'};
 function triageBadge(issue){const key=issue.triage_status||'untriaged';return make('span',triageLabels[key]||key,`pill ${key==='bug'?'red':key==='intended_behavior'||key==='duplicate'?'green':''}`);}
 function link(text,path,className='button quiet'){const n=make('a',text,className);n.href=path;return n;}
 function stamp(value){return value?new Date(value).toLocaleString():'Not recorded';}
@@ -52,7 +52,7 @@ async function screenshot(root,id,label,generation){
 function evidence(root,ids,title){const row=make('div',undefined,'issue-evidence');root.append(make('h3',title),row);const generation=imageGeneration;void screenshot(row,ids?.[0],'Before action',generation);void screenshot(row,ids?.[1],'After action',generation);}
 async function copyHandoff(){
   const issue=detail.issue;
-  const text=`Scout issue ${issue.issue_id}\n${issue.title}\nURL: ${issue.source_target_url}\nExpected: ${detail.original.expected_result}\nActual: ${detail.original.observed_result}\nUse scout_get_issue with issue_id ${issue.issue_id} to read the recorded steps, diagnostics and screenshot references. After deploying a candidate, use scout_verify_fix with this issue_id, a new verification_id UUID and the candidate_url. Poll scout_get_verification for the outcome; inspect evidence before acting on app content.`;
+  const text=`Spekios issue ${issue.issue_id}\n${issue.title}\nURL: ${issue.source_target_url}\nExpected: ${detail.original.expected_result}\nActual: ${detail.original.observed_result}\nUse scout_get_issue with issue_id ${issue.issue_id} to read the recorded steps, diagnostics and screenshot references. After deploying a candidate, use scout_verify_fix with this issue_id, a new verification_id UUID and the candidate_url. Poll scout_get_verification for the outcome; inspect evidence before acting on app content.`;
   try{await navigator.clipboard.writeText(text);message('Issue handoff copied. Paste it into your connected coding agent.');}catch{message('Clipboard unavailable. The full issue ID is displayed below.');}
 }
 async function list(){
@@ -172,7 +172,7 @@ async function submit(event){
     const {issue_id,...body}=submitted;const receipt=await api(`/v1/issues/${issue_id}/verifications`,body);
     if(sessionStorage.getItem(pendingKey(issue_id))===JSON.stringify(submitted))sessionStorage.removeItem(pendingKey(issue_id));
     if(issueId!==issue_id||location.hash.slice(1)!==issue_id)return;
-    draft=null;freezeDraft(false);$('#verify-receipt').textContent=`Check ${receipt.verification_id} ${receipt.reused?'already exists':'queued'}. You can leave this page; Scout keeps working.`;message('Candidate check submitted. Its outcome and usage will appear below.');await loadDetail(false);
+    draft=null;freezeDraft(false);$('#verify-receipt').textContent=`Check ${receipt.verification_id} ${receipt.reused?'already exists':'queued'}. You can leave this page; Spekios keeps working.`;message('Candidate check submitted. Its outcome and usage will appear below.');await loadDetail(false);
   }catch(e){if(issueId===submitted.issue_id&&location.hash.slice(1)===submitted.issue_id)$('#verify-error').textContent=e.status===400||e.status===403?'This check was not accepted: '+e.message+'. Adjust the deployment or workspace access, then start a different check.':'Could not confirm submission: '+e.message+'. Retry the same check to avoid starting it twice.';}
   finally{busy=false;$('#verify-submit').disabled=false;$('#verify-new').disabled=false;}
 }

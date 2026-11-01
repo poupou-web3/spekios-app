@@ -4,7 +4,7 @@ import type { BrowserCommand, Capture } from './contracts.js';
 import { pageTemplate, transitionKey, type MapState, type StoredProposal } from './app-map.js';
 import type { ModelSettings } from './model-client.js';
 import type { ViewportProfile } from './viewports.js';
-import { blockedReason, type Proposal } from './exploration-policy.js';
+import { blockedReason, sameRegisteredSite, type Proposal } from './exploration-policy.js';
 import { actionRisk } from './interaction-contract.js';
 
 // Cross-run memory is a derived projection of earlier runs, keyed by observed
@@ -59,7 +59,7 @@ const SENSITIVE_PARAMETER = /token|code|key|secret|session|auth|pass|sig|otp|non
 export function jumpableUrl(raw: string, origin: string): boolean {
   let url: URL;
   try { url = new URL(raw); } catch { return false; }
-  if (url.origin !== origin || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.href.length > 2048) return false;
+  if (!sameRegisteredSite(origin, url) || url.href.length > 2048) return false;
   let words: string;
   try { words = decodeURIComponent(url.pathname + ' ' + url.search); } catch { return false; }
   words = words.replace(/[/_?=&.+-]+/g, ' ');
@@ -148,9 +148,9 @@ export class AppMemory {
   async observe(capture: Capture, pathScore: number) {
     const s = this.snapshot, o = capture.observation;
     if (!s || o.observation_error) return;
-    let origin: string;
-    try { origin = new URL(o.url).origin; } catch { return; }
-    if (origin !== s.scope.origin || o.url.length > 2048) return;
+    let page: URL;
+    try { page = new URL(o.url); } catch { return; }
+    if (!sameRegisteredSite(s.scope.origin, page) || o.url.length > 2048) return;
     await this.store.query(`INSERT INTO app_memory_pages(scope_id,url,title,visits,best_path_score,controls_truncated,first_run_id,last_run_id,last_action_id)
       VALUES($1,$2,$3,1,$4,$5,$6,$6,$7)
       ON CONFLICT(scope_id,url) DO UPDATE SET title=EXCLUDED.title,

@@ -19,9 +19,9 @@ consumeFragment();
 const message=value=>{status.textContent=value;};
 const labels={'runs:read':'Read runs, reports and recorded screenshots','runs:write':'Start tests, recheck findings and stop runs','usage:read':'Read workspace token and cost totals'};
 const clients={
-  desktop:{steps:['Open your agent app’s settings and find MCP servers.','Add a Streamable HTTP server named Scout and paste the connection URL above.','Save the server, reconnect if needed, then select Authenticate to open Scout’s approval page.'],help:'https://learn.chatgpt.com/docs/extend/mcp?surface=app'},
-  claude:{steps:['In Claude, open Customize → Connectors → Add custom connector.','Name it Scout and paste the connection URL above. Choose browser sign-in.','If asked for an OAuth client, choose Register automatically. Connect and approve the request in Scout.'],help:'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp'},
-  other:{steps:['Open your agent app’s integrations or MCP settings and add an HTTP server.','Paste the connection URL above. Choose browser authorization / OAuth.','Connect, then review and approve the request in Scout. The client must support dynamic client registration and PKCE.'],help:'https://modelcontextprotocol.io/docs/learn/client-concepts'}
+  desktop:{steps:['Open your agent app’s settings and find MCP servers.','Add a Streamable HTTP server named Spekios and paste the connection URL above.','Save the server, reconnect if needed, then select Authenticate to open Spekios’s approval page.'],help:'https://learn.chatgpt.com/docs/extend/mcp?surface=app'},
+  claude:{steps:['In Claude, open Customize → Connectors → Add custom connector.','Name it Spekios and paste the connection URL above. Choose browser sign-in.','If asked for an OAuth client, choose Register automatically. Connect and approve the request in Spekios.'],help:'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp'},
+  other:{steps:['Open your agent app’s integrations or MCP settings and add an HTTP server.','Paste the connection URL above. Choose browser authorization / OAuth.','Connect, then review and approve the request in Spekios. The client must support dynamic client registration and PKCE.'],help:'https://modelcontextprotocol.io/docs/learn/client-concepts'}
 };
 async function api(path,body){
   const currentToken=token;
@@ -60,12 +60,12 @@ function selectClient(client){
   $('#client-help').href=clients[client].help;
   const local=setupInfo&&!setupInfo.cloud_reachable;
   $('#network-notice').hidden=!local;
-  $('#network-notice').textContent=client==='claude'?'Claude’s account connectors run in the cloud and cannot reach this local address. Use a publicly reachable HTTPS Scout deployment for this option. Local agent apps can connect to this machine.':'This Scout address works for agent apps on this computer. Cloud agents and apps on other devices need a reachable HTTPS Scout deployment.';
+  $('#network-notice').textContent=client==='claude'?'Claude’s account connectors run in the cloud and cannot reach this local address. Use a publicly reachable HTTPS Spekios deployment for this option. Local agent apps can connect to this machine.':'This Spekios address works for agent apps on this computer. Cloud agents and apps on other devices need a reachable HTTPS Spekios deployment.';
 }
 function prompt(){
   const raw=$('#test-url').value.trim();let target='the app URL I provide';
   if(raw){try{const url=new URL(raw);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error();target=url.href;}catch{return null;}}
-  return `Use Scout to test ${target}. Check my workspace identity and relevant previous runs first. Start a new test when needed, check progress, and bring back a report with expected vs. actual behavior and screenshot evidence. If access is needed, ask me to sign in through Scout.`;
+  return `Use Spekios to test ${target}. Check my workspace identity and relevant previous runs first. Start a new test when needed, check progress, and bring back a report with expected vs. actual behavior and screenshot evidence. If access is needed, ask me to sign in through Spekios.`;
 }
 function renderPrompt(){const text=prompt();$('#starter-prompt').textContent=text||'Enter an HTTP or HTTPS app URL without credentials.';$('#copy-prompt').disabled=!text;}
 async function copy(value,label){try{await navigator.clipboard.writeText(value);message(label);}catch{message('Copy is unavailable in this browser. Select and copy the displayed text.');}}

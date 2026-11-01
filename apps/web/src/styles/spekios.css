@@ -1,0 +1,210 @@
+/* Spekios customer theme, adapted from the Lovable project. Shared operator styles stay independent. */
+/* Fonts are distributed under the OFL licenses in ../fonts/. */
+:root {
+  --font: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --display: "Instrument Serif", Georgia, serif;
+  --mono: "Geist Mono", ui-monospace, monospace;
+  --r-sm: 4px; --r-md: 6px; --r-lg: 8px; --r-xl: 12px;
+  --bg: light-dark(oklch(.975 .006 85), #1b1917);
+  --surface: light-dark(oklch(.99 .004 85), #24211e);
+  --surface-2: light-dark(oklch(.945 .008 85), #2b2723);
+  --surface-3: light-dark(oklch(.935 .01 85), #36302a);
+  --sidebar: light-dark(oklch(.97 .006 85), #201d1a);
+  --text: light-dark(oklch(.2 .012 60), #f0ece5);
+  --text-2: light-dark(#48423c, #cec7bd);
+  --muted: light-dark(oklch(.48 .014 60), #b0a69a);
+  --border: light-dark(oklch(.88 .01 80), #403930);
+  --border-strong: light-dark(oklch(.86 .01 80), #655a4d);
+  --brand: light-dark(oklch(.22 .014 60), #eee9e1);
+  --brand-hover: light-dark(#3b342d, #fffaf2);
+  --on-brand: light-dark(oklch(.975 .006 85), #221e19);
+  --signal: light-dark(oklch(.62 .17 42), #f09c77);
+  --brand-text: light-dark(#a54322, #f09c77);
+  --brand-soft: light-dark(oklch(.93 .045 55), #3c2b22);
+  --brand-line: light-dark(#dfb49e, #77513b);
+  --brand-strong: var(--signal);
+  --on-brand-strong: #fffaf5;
+  --mark-bg: transparent; --mark-fg: var(--text);
+  --accent-btn: var(--brand-soft); --accent-btn-line: var(--brand-line); --accent-btn-text: var(--brand-text);
+  --focus: var(--signal);
+  --focus-ring: light-dark(rgb(185 84 47 / 18%), rgb(240 156 119 / 25%));
+  --hero-glow: transparent;
+  --checker: light-dark(#ece9e3, #302b26);
+  --code-bg: light-dark(#f1eee8, #201d1a);
+  --code-text: var(--text-2);
+  --row-hover: light-dark(#f5f2eb, #2d2822);
+  --overlay: rgb(30 25 20 / 50%);
+  --toast-bg: light-dark(#29231e, #f0ece5);
+  --toast-text: light-dark(#faf7f1, #221e19);
+  --shadow-sm: 0 1px 2px rgb(35 28 20 / 3%);
+  --shadow-md: 0 1px 0 light-dark(rgb(255 255 255 / 60%), rgb(255 255 255 / 3%)) inset, 0 24px 60px -30px rgb(35 28 20 / 22%);
+  --shadow-lg: 0 24px 64px rgb(24 18 12 / 25%);
+}
+/* Serif display type marks page-level hierarchy; dense evidence stays in sans/mono. */
+h1, h2, h3 { text-wrap: balance; }
+.eyebrow { font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: .14em; }
+.brand { gap: 9px; font-family: var(--display); font-size: 29px; font-weight: 400; letter-spacing: -.01em; }
+.brand small { font-family: var(--mono); font-size: 8px; font-weight: 400; letter-spacing: .1em; }
+.mark { width: 24px; height: 24px; flex: none; border: 1px solid var(--text); border-radius: 50%; }
+.mark svg { display: none; }
+.mark::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); }
+.boot-mark { border: 1px solid var(--text); border-radius: 50%; font-size: 0; }
+.boot-mark::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--signal); }
+.boot strong { font-family: var(--display); font-size: 30px; font-weight: 400; }
+.button { box-shadow: none; transition: background .15s, border-color .15s; }
+.button.primary, .nav-new { font-weight: 500; }
+.pill, .tag { font-family: var(--mono); font-size: 10.5px; font-weight: 400; }
+.panel { box-shadow: none; }
+.table-wrap { position: relative; }
+.panel-header { padding-block: 20px; }
+.panel-header h2 { font-weight: 500; }
+th { font-family: var(--mono); font-size: 10px; font-weight: 400; text-transform: uppercase; letter-spacing: .06em; }
+.page-heading h1, .connection-heading h1, .issue-heading h1 { font-family: var(--display); font-size: clamp(34px, 4vw, 48px); font-weight: 400; letter-spacing: -.015em; line-height: 1.08; }
+.connection-heading h1 { font-size: clamp(40px, 5vw, 60px); }
+.signal-dot { display: inline-block; width: 6px; height: 6px; margin: 0 8px 1px 0; border-radius: 50%; background: var(--signal); }
+/* An understated navigation frame around the paper workspace. */
+.sidebar { padding-top: 26px; }
+.sidebar .brand { padding-inline: 10px; }
+.sidebar .brand small { display: none; }
+.nav-new { margin-top: 30px; box-shadow: none; }
+.nav-item { min-height: 39px; font-weight: 400; }
+.nav-item.active { background: var(--brand-soft); box-shadow: none; color: var(--brand-text); font-weight: 500; }
+.nav-item.active svg { color: var(--brand-text); }
+.recent { padding-top: 22px; border-top: 1px solid var(--border); }
+.recent-item.selected { background: transparent; color: var(--brand-text); }
+.environment { border-radius: var(--r-md); background: transparent; }
+.topbar { height: 64px; }
+.avatar { background: var(--surface-3); color: var(--text-2); font-weight: 500; }
+.content { padding-top: 36px; }
+/* Launch follows the landing page's left-aligned, editorial hero and fine grid. */
+.content-landing { padding-top: 0; }
+.landing { max-width: 960px; margin: 0 auto 48px; padding: 62px 0 12px; text-align: left; }
+.landing::before { inset: 0 -16px auto; width: auto; height: 310px; transform: none; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse at 45% 0%, #000 5%, transparent 75%); opacity: .5; }
+.landing .eyebrow { margin-bottom: 22px; color: var(--muted); }
+.landing h1 { font-family: var(--display); font-size: clamp(48px, 5.8vw, 72px); line-height: 1.02; font-weight: 400; letter-spacing: -.015em; }
+.landing h1 em { color: var(--signal); font-weight: 400; }
+.landing-lead { max-width: 530px; margin: 22px 0 0; font-size: 16px; line-height: 1.65; text-wrap: pretty; }
+.landing-form { max-width: 720px; margin: 28px 0 0; padding: 6px; border-color: var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-md); }
+.landing-field { padding-left: 10px; }
+.landing-field input { font-size: 14px; }
+.landing-start { border-radius: var(--r-md); }
+.landing-status { justify-content: flex-start; max-width: 720px; margin: 14px 0 0; font-family: var(--mono); font-size: 10.5px; }
+.landing-options { max-width: 720px; margin: 16px 0 0; }
+.landing-options > summary { padding-left: 0; border-color: transparent; border-radius: var(--r-md); background: transparent; font-size: 12px; }
+.landing-options > summary:hover { background: var(--surface-2); }
+.landing-options-change { color: var(--brand-text); font-weight: 500; }
+.landing-options-body { box-shadow: none; }
+.landing-steps { gap: 0; max-width: 960px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-xl); }
+.landing-step { padding: 26px; border: 0; border-radius: 0; }
+.landing-step + .landing-step { border-left: 1px solid var(--border); }
+.landing-step-icon { display: none; }
+.landing-step-number { position: static; display: block; color: var(--brand-text); font: 11px var(--mono); }
+.landing-step h2 { margin-top: 25px; font-size: 16px; font-weight: 500; }
+.landing-step p { margin-top: 10px; line-height: 1.65; }
+.landing-recent, .workspace-onboarding { max-width: 1120px; margin-inline: auto; }
+.landing-recent { margin-top: 16px; }
+.landing-recent .panel-header h2 { font-family: var(--display); font-size: 28px; font-weight: 400; }
+.filter-chip { border-radius: var(--r-sm); font-size: 12px; }
+.summary-value, .stat-value { font-weight: 500; }
+.step-number { font-family: var(--mono); font-weight: 400; }
+.action-row.selected .step-number { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.detail-heading h2 { font-size: 20px; font-weight: 500; }
+/* Account, connection and issue pages belong to the same product. */
+.login { background: var(--bg); }
+.login-card { border-radius: var(--r-xl); padding: 36px; }
+.login-card h1 { font-family: var(--display); font-size: 38px; font-weight: 400; line-height: 1.1; }
+.login-card .brand small { display: none; }
+.connection-top .brand { font-size: 29px; }
+.connection-top .brand small { font-size: 8px; }
+.connection-illustration { background: #241f1b; border-color: #51473c; }
+.connection-illustration .connection-you { background: #302923; border-color: #51473c; color: #f1eae0; }
+.connection-illustration .connection-line { color: #bcafa0; }
+.connection-scout { border: 1px solid #f1eae0; border-radius: 50%; background: transparent; font-size: 0; }
+.connection-scout::before { content: ""; width: 15px; height: 15px; border-radius: 50%; background: var(--signal); }
+.connection-companion h2 { font-family: var(--display); font-size: 32px; font-weight: 400; }
+.connection-list-heading h2 { font-family: var(--display); font-size: 30px; font-weight: 400; }
+@media (max-width: 1100px) {
+  .landing { padding-top: 48px; }
+}
+@media (max-width: 960px) {
+  .sidebar { padding-top: 16px; }
+  .sidebar .brand { padding-inline: 0; }
+  .nav-new { margin: 0; }
+  .topbar { height: 36px; }
+  .content { padding-top: 24px; }
+  .landing { padding-top: 28px; }
+}
+@media (max-width: 760px) {
+  .landing { margin-bottom: 32px; padding-top: 20px; }
+  .landing h1 { font-size: clamp(44px, 8vw, 60px); }
+  .landing-lead { font-size: 15px; }
+  .landing-form { margin-top: 24px; }
+  .landing-options > summary { max-width: 100%; padding-right: 4px; }
+  .landing-steps { gap: 0; }
+  .landing-step { display: block; padding: 22px; }
+  .landing-step + .landing-step { border-left: 0; border-top: 1px solid var(--border); }
+  .landing-step-number { display: block; }
+  .landing-step h2 { margin-top: 12px; }
+  .connection-top .brand small { display: none; }
+  .connection-top .row { gap: 4px; }
+  .login-card { padding: 28px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .button, .landing-start svg { transition: none; }
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/app/fonts/geist-400.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/assets/app/fonts/geist-500.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(/assets/app/fonts/geist-600.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/assets/app/fonts/geist-700.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/app/fonts/geist-mono-400.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/assets/app/fonts/geist-mono-500.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/app/fonts/instrument-serif-400-italic.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/app/fonts/instrument-serif-400.ttf) format('truetype');
+}

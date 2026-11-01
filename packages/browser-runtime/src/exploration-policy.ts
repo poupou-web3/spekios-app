@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { Page } from 'playwright';
+import { getDomain } from 'tldts';
 import { hash, jsonBytes } from './store.js';
 import type { Capture, ControlAction, ObservedControl } from './contracts.js';
 import { actionRisk, controlAction } from './interaction-contract.js';
@@ -32,15 +33,39 @@ function networkOrigin(url: URL): string | null {
   return null;
 }
 
+// bubblemaps.io, v2.bubblemaps.io and intel.bubblemaps.io share one registered
+// domain. github.io and co.uk stay separate sites. Private and single-label
+// hosts have no registered domain, so they stay on an exact origin.
+export function registeredDomain(hostname: string): string | null {
+  const host = hostname.replace(/\.$/, '').toLowerCase();
+  if (!publicHostname(host)) return null;
+  const domain = getDomain(host, { detectIp: true, allowPrivateDomains: true });
+  return domain && domain.includes('.') ? domain : null;
+}
+
+// Exact origin always matches, including a private fixture port. A public
+// http(s) document may also move to another host of the same registered
+// domain on the same scheme and default port.
+export function sameRegisteredSite(pageOrigin: string, target: URL): boolean {
+  if (target.username || target.password || !['http:', 'https:'].includes(target.protocol)) return false;
+  let page: URL;
+  try { page = new URL(pageOrigin); } catch { return false; }
+  if (target.origin === page.origin) return true;
+  if (target.protocol !== page.protocol || target.port || page.port) return false;
+  const left = registeredDomain(page.hostname);
+  const right = registeredDomain(target.hostname);
+  return left !== null && left === right;
+}
+
 // Subresources follow the page the operator opened: its own origin, public
 // HTTPS, and public WSS. Sibling APIs, fonts and hosted backends are part of
-// that page. The top-level document stays on the entry origin. A public page
-// does not gain the operator's private allowlist.
+// that page. The top-level document stays on the entry site's registered
+// domain. A public page does not gain the operator's private allowlist.
 export function permitBrowserRequest(pageOrigin: string, rawUrl: string, scope: 'main' | 'subresource', allowedOrigins: readonly string[] = []): boolean {
   let url: URL;
   try { url = new URL(rawUrl); } catch { return false; }
   if (url.username || url.password) return false;
-  if (scope === 'main') return url.href === 'about:blank' || networkOrigin(url) === pageOrigin;
+  if (scope === 'main') return url.href === 'about:blank' || networkOrigin(url) === pageOrigin || sameRegisteredSite(pageOrigin, url);
   if (url.protocol === 'data:' || url.protocol === 'blob:') return true;
   if (url.href === 'about:blank' || url.href === 'about:srcdoc') return true;
   if (networkOrigin(url) === pageOrigin || publicWebOrigin(url)) return true;
@@ -182,7 +207,7 @@ export function blockedReason(control: ObservedControl, origin: string): string 
   if (control.href) {
     try {
       const url = new URL(control.href);
-      if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin || url.username || url.password) return 'outside_allowed_origin';
+      if (!sameRegisteredSite(origin, url)) return 'outside_allowed_origin';
       if (url.href.length > 2048) return 'target_too_long';
     } catch { return 'invalid_target'; }
   }

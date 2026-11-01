@@ -41,6 +41,11 @@ test('model output cannot add tools, invent controls or forge evidence', () => {
   assert.equal(blockedReason({...control,name:'Delete all'},'http://fixture'), 'potentially_destructive_or_external_action');
   assert.equal(blockedReason({...control,submits_form:true},'http://fixture'), 'form_submission_requires_handoff');
   assert.equal(blockedReason({...control,role:'link',href:'http://postgres:5432/'},'http://fixture'), 'outside_allowed_origin');
+  assert.equal(blockedReason({...control,role:'link',href:'https://v2.bubblemaps.io/'},'https://bubblemaps.io'), null);
+  assert.equal(blockedReason({...control,role:'link',href:'https://intel.bubblemaps.io/'},'https://bubblemaps.io'), null);
+  assert.equal(blockedReason({...control,role:'link',href:'https://notbubblemaps.io/'},'https://bubblemaps.io'), 'outside_allowed_origin');
+  assert.equal(blockedReason({...control,role:'link',href:'https://bubblemaps.io.evil.com/'},'https://bubblemaps.io'), 'outside_allowed_origin');
+  assert.equal(blockedReason({...control,role:'link',href:'https://b.github.io/'},'https://a.github.io'), 'outside_allowed_origin');
   assert.throws(() => validateTarget('http://name:secret@fixture/', ['http://fixture']), /explicitly allowed origin/);
   assert.throws(() => validateTarget('http://unconfigured/', ['http://fixture']), /explicitly allowed origin/);
   assert.equal(validateTarget('https://bubblemaps.io/map', ['http://fixture']), 'https://bubblemaps.io/map');
@@ -48,7 +53,7 @@ test('model output cannot add tools, invent controls or forge evidence', () => {
   assert.throws(() => validateTarget('https://127.0.0.1/', ['http://fixture']), /explicitly allowed origin/);
   assert.throws(() => validateTarget('https://app.internal/', ['http://fixture']), /explicitly allowed origin/);
 });
-test('public pages load public subresources and stay on the entry document', () => {
+test('public pages load public subresources and stay on the entry site', () => {
   const page = 'https://v2.bubblemaps.io';
   const allow = ['http://exploration-fixture:8082', 'http://127.0.0.1:3000', page];
   for (const url of [page + '/assets/app.js', 'https://api.bubblemaps.io/screener/tokens', 'https://shop.bubblemaps.io/token-ads',
@@ -63,7 +68,12 @@ test('public pages load public subresources and stay on the entry document', () 
     assert.equal(permitBrowserRequest(page, url, 'subresource', allow), false, url);
   assert.equal(permitBrowserRequest(page, page + '/map', 'main', allow), true);
   assert.equal(permitBrowserRequest(page, 'about:blank', 'main', allow), true);
-  for (const url of ['https://api.bubblemaps.io/', 'https://accounts.google.com/o/oauth2/auth', 'data:text/html,hi', 'http://exploration-fixture:8082/'])
+  for (const url of ['https://api.bubblemaps.io/', 'https://intel.bubblemaps.io/', 'https://bubblemaps.io/'])
+    assert.equal(permitBrowserRequest(page, url, 'main', allow), true, url);
+  assert.equal(permitBrowserRequest('https://www.example.co.uk', 'https://shop.example.co.uk/', 'main', allow), true);
+  for (const url of ['https://accounts.google.com/o/oauth2/auth', 'https://notbubblemaps.io/', 'https://bubblemaps.io.evil.com/',
+    'https://b.github.io/', 'https://evil.co.uk/', 'http://intel.bubblemaps.io/', 'https://intel.bubblemaps.io:8443/',
+    'data:text/html,hi', 'http://exploration-fixture:8082/'])
     assert.equal(permitBrowserRequest(page, url, 'main', allow), false, url);
   const fixture = 'http://exploration-fixture:8082';
   assert.equal(permitBrowserRequest(fixture, fixture + '/journeys/result', 'subresource', allow), true);
@@ -222,13 +232,14 @@ test('model-driven browser loop preserves evidence, graph and uncertainty', {
       assert.equal(result.report.run.config.replans,1);
       assert.ok(result.report.events.some(e=>e.event_type==='exploration.replanned'));
     });
-    await t.test('persistent page drift stops after three retained replans without dispatching stale controls',async()=>{
+    await t.test('persistent page drift defers the unstable branch after three retained replans without dispatching stale controls',async()=>{
       const result=await run('/working',{hooks:{screenshot:async(page,phase,ordinal)=>{
         if(phase==='before'&&ordinal>1)await page.evaluate(value=>{document.querySelector('#status')!.textContent=`Update ${value}`;},ordinal);
         return image(page);
       }}});
       assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
-      assert.equal(result.report.run.config.stop_reason,'replanning_limit_reached');
+      assert.equal(result.report.run.config.stop_reason,'no_reachable_unexplored_controls');
+      assert.ok(result.report.events.some(e=>e.event_type==='exploration.branch_deferred'));
       assert.equal(result.report.actions.filter(a=>a.dispatched_at).length,1);
       assert.equal(result.report.actions.filter(a=>a.state==='skipped').length,3);
       assert.equal(result.report.graph.edges.length,1);
