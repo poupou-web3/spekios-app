@@ -72,7 +72,7 @@ root.addEventListener('click',async e=>{
   if(action==='cancel-automatic'||action==='retry-automatic')await cancelAutomatic(el.dataset.id);
   if(action==='cancel-run'||action==='cancel-job')await cancelWork(action==='cancel-run'?'run':'job',el.dataset.id);
   if(action==='restart-run'||action==='restart-job')await restartWork(action==='restart-run'?'run':'job',el.dataset.id);
-  if(action==='app-login'){state.drawer=null;render();await openPrivateLogin(el.dataset.id);}
+  if(action==='app-login'||action==='create-account'){state.drawer=null;render();await openPrivateLogin(el.dataset.id,action==='create-account');}
   if(action==='skip-login'){try{await api('/v1/browser-access/'+el.dataset.id+'/skip',{});await refresh();}catch(error){toast(error.message);}}
   if(action==='cancel-login'){const access=state.access.requests.find(a=>a.access_id===el.dataset.id);if(access)await cancelWork('run',access.run_id);}
   if(action==='revoke-session'){try{await api('/v1/browser-sessions/'+el.dataset.id+'/revoke',{});if(state.sessionId===el.dataset.id)state.sessionId='';await refresh();toast('Saved session removed. A running browser remains signed in until it closes.');}catch(error){toast(error.message);}}

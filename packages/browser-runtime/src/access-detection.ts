@@ -21,4 +21,4 @@ export async function accessSignals(page:Page):Promise<AccessSignals>{
 }
 export class AccessStopped extends Error {constructor(readonly reason:string){super(reason);}}
 export class PrivateLoginSurface extends Error {constructor(){super('Private login surface: observation omitted; human sign-in is required.');}}
-export class AccessContextChanged extends Error {constructor(){super('Human sign-in changed the app context. Navigation assessment is omitted; exploration restarts from fresh authenticated evidence.');}}
+export class AccessContextChanged extends Error {constructor(){super('App authentication changed the app context. Navigation assessment is omitted; exploration restarts from fresh authenticated evidence.');}}

@@ -13,7 +13,7 @@ import { viewportProfile, viewportProfiles, type ViewportProfile } from './viewp
 import { plannedCommand, INTERACTION_VERSION } from './interaction-contract.js';
 import { dispatch, observedCommand, revealControl, validateDispatch, type Reveal } from './browser-interactions.js';
 import { CONTEXT_BUDGETS, commandContext, controlContext, fitContext, historyContext, pageContext as context } from './model-context.js';
-import { AppMemory, MAX_RANKING_REUSES, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
+import { AppMemory, jumpableUrl, MAX_RANKING_REUSES, MEMORY_VERSION, resumeSnapshot, type MemoryScope, type MemorySnapshot } from './app-memory.js';
 import { MAP_VERSION, mapState, RANKING_VERSION, rankingEntries, restoreRanking, screenSignature, transitionKey } from './app-map.js';
 import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged } from './access-detection.js';
 import { AuthVault } from './auth-session.js';
@@ -152,6 +152,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
   const fixtureEvidence = replay?.training_status === 'excluded_fixture' || executionMode === 'protocol_fixture' || origin === 'http://exploration-fixture:8082';
   let authContext:AccessResult=replay?.auth_context??(options.sessionId?{context_id:options.sessionId,session_id:options.sessionId,verification:'saved_session_reused'}:null);
   let handoffs=0;
+  let authMode=options.authMode??'auto';
   const authContexts:NonNullable<AccessResult>[]=[];
     const runId = randomUUID(), workerId = randomUUID(), agentId = randomUUID(), startedAt = Date.now();
     return store.locked('run:' + runId, async () => {
@@ -200,7 +201,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         [runId, store.workspaceId, store.userId, targetUrl, JSON.stringify({ runtime_version: 'explorer-v1', expectation_source: replay ? 'recorded_replay' : 'model',
           worker_id: workerId, agent_id: agentId, submitted_by_agent_id:store.submittedByAgentId,project_id:store.projectId,task_id:store.taskId,visibility:'team_private', viewport, viewport_profile: profile, device_scale: 1, video: false, planner_version: PLANNER_VERSION, steering_version: replay?null:'focus-v1',
           interaction_version:INTERACTION_VERSION,...CAPTURE_POLICY,completion_version:COMPLETION_VERSION,completion_limits:COMPLETION_LIMITS,test_form_rules:formRules,
-          model_connection: client.settings, execution_mode: executionMode,automatic_reproduction_policy:automaticPolicy,
+          model_connection: client.settings, execution_mode: executionMode,automatic_reproduction_policy:automaticPolicy,auth_mode:authMode,
           replay_of: replay ? { ...(replay.fix_verification?{verification_id:replay.fix_verification.verification_id}:{reproduction_id: replay.reproduction_id}), source_run_id: replay.source_run_id, source_action_id: replay.source_action_id } : null,
           fix_verification:replay?.fix_verification?{verification_id:replay.fix_verification.verification_id,issue_id:replay.fix_verification.issue_id,source_entry:replay.fix_verification.source_entry,candidate_url:replay.fix_verification.candidate_url}:null,
           limits: { max_actions: maxActions, max_consecutive_replans_per_page: replay ? 0 : MAX_CONSECUTIVE_REPLANS_PER_PAGE, max_model_requests: maxModelRequests,
@@ -404,17 +405,18 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       const recordContext=async()=>{
         if(authContext&&!authContexts.some(c=>c.context_id===authContext!.context_id))authContexts.push(authContext);
         await store.transaction(async()=>{
-          await store.query('UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1',[runId,JSON.stringify({auth_contexts:authContexts,auth_mode:options.authMode??'auto',auth_recording:'private_login_omitted'})]);
+          await store.query('UPDATE runtime_runs SET config=config || $2::jsonb WHERE run_id=$1',[runId,JSON.stringify({auth_contexts:authContexts,auth_mode:authMode,auth_recording:'private_login_omitted'})]);
           await store.event(runId,'access.context',{context_id:authContext?.context_id??null,session_id:authContext?.session_id??null,verification:authContext?.verification??'public',planner_reset:true});
         });
       };
       const handoff=async(reason:AccessReason)=>{
-        if(!options.access||options.authMode==='public'||replay)throw new AccessStopped('login_required');
+        if(authMode==='public')return false;
+        if(!options.access||replay)throw new AccessStopped('login_required');
         if(++handoffs>3)throw new AccessStopped('login_handoff_limit');
         await control.check();
         const result=await options.access.request(page,runId,options.jobId,targetUrl,executionMode,reason,options.accessTimeoutMs,control.signal,store);
         await control.check();
-        if(!result)return false;
+        if(!result){authMode='public';return false;}
         authContext=result;await recordContext();
         // Authentication changes the available tree. Preserve old evidence, but
         // never reuse its plans or return routes for a different account context.
@@ -424,6 +426,19 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         recovery.progressed();
         await page.goto('about:blank');
         return true;
+      };
+      let publicRecovery: {url:string;stateId:string;actionId:string}|undefined;
+      const failedPublicUrls=new Set<string>();
+      const recoverPublic=async(actionId:string,source=last)=>{
+        const candidate=[source?.capture,...Array.from(planner.nodes.values()).reverse().map(n=>n.capture)]
+          .find(c=>c&&!c.observation.auth_context_id&&jumpableUrl(c.observation.url,origin)&&!failedPublicUrls.has(c.observation.url));
+        if(!candidate)throw new AccessStopped('login_required');
+        const url=candidate.observation.url;
+        const stateId=Array.from(planner.nodes.values()).find(n=>n.capture.capture_id===candidate.capture_id)?.id??lastState??'';
+        publicRecovery={url,stateId,actionId};
+        await store.transaction(()=>store.event(runId,'access.public_recovery',{source_action_id:actionId,url}));
+        // Leave the private surface before ordinary before/after recording resumes.
+        await page.goto('about:blank');
       };
       if(authContext)await recordContext();
 
@@ -437,7 +452,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           if (maxTokens !== null && Number(usage.known_input_tokens ?? 0) + Number(usage.known_output_tokens ?? 0) >= maxTokens) { stopReason = 'token_budget_reached'; break; }
           if (maxCostUsd !== null && Number(usage.provider_reported_cost_usd ?? 0) >= maxCostUsd) { stopReason = 'cost_budget_reached'; break; }
         }
-        if(options.access&&!replay&&(await accessSignals(page)).login_form)await handoff(authContext?'session_expired':'login_required');
+        if(options.access&&!replay&&(await accessSignals(page)).login_form){
+          if(!await handoff(authContext?'session_expired':'login_required'))await recoverPublic(last?.capture.action_id??runId);
+        }
         if (!replay && modelRequests >= maxModelRequests - 1) { stopReason = 'model_request_budget_reached'; break; }
         let spec: Spec;
         let selectionRecord: Record<string,unknown> | undefined;
@@ -446,6 +463,15 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           spec = { command: replayStep.command, prediction: { source: 'recorded_replay', source_prediction_id: replayStep.source_prediction_id,
             source_model_request_id: replayStep.source_model_request_id, goal: replayStep.goal, expected_result: replayStep.expected_result,
             context_capture_id: last?.capture.capture_id ?? null }, worker_id: workerId, agent_id: agentId, replay_source_action_id: replayStep.source_action_id };
+        } else if(publicRecovery){
+          const resume=publicRecovery;publicRecovery=undefined;
+          const command:BrowserCommand={type:'navigate',url:resume.url};
+          const decision=await predict(command,[],{task:'navigation_prediction',target_url:resume.url,
+            instruction:'Predict reopening this previously observed public page after skipping a login gate. Do not assume transient UI state is restored.',
+            response_schema:{goal:'string',expected_result:'string'}});
+          spec={command,prediction:{source:'model',request_id:decision.requestId,decision_id:decision.decisionId,...decision.result,context_capture_id:null},worker_id:workerId,agent_id:agentId,
+            exploration:{purpose:'resume',target_state_id:resume.stateId,control_id:'',priority:1,likelihood:1,reason:'Continue public exploration after a login gate.',
+              return_step:{from_state_id:resume.stateId,to_state_id:resume.stateId,command,source_action_id:resume.actionId,expected_result:decision.result.expected_result,reopen:true}}};
         } else if (!last) {
           const decision = await predict({ type: 'navigate', url: targetUrl }, [], { task: 'navigation_prediction', target_url: targetUrl,
             instruction: 'Predict the observable outcome of opening this URL. You have not observed the page yet; do not invent its content.',
@@ -656,9 +682,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           completion=await settleAction(store,page,runId,actionId,diagnostics,hooks);
           if(options.access&&!replay&&executed===1){
             const signals=await accessSignals(page);
-            if(!signals.login_form&&(options.authMode==='sign_in'||(options.authMode!=='public'&&!signals.signed_in&&signals.login_option))){
+            if(!signals.login_form&&(authMode==='sign_in'||(authMode!=='public'&&!signals.signed_in&&signals.login_option))){
               diagnostics.stop();
-              if(await handoff(options.authMode==='sign_in'?'user_requested':'login_available'))throw new AccessContextChanged();
+              if(await handoff(authMode==='sign_in'?'user_requested':'login_available'))throw new AccessContextChanged();
             }
           }
           after = await capture(store, page, runId, actionId, 'after', ordinal, null, hooks);
@@ -844,7 +870,15 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           if(error instanceof AccessContextChanged)continue;
           if(error instanceof PrivateLoginSurface&&!replay&&options.access){
             if(executed>=maxActions)throw new AccessStopped('login_required_action_budget');
-            await handoff(authContext?'session_expired':'login_required');
+            if(!await handoff(authContext?'session_expired':'login_required')){
+              if(spec.command.type==='navigate')failedPublicUrls.add(spec.command.url);
+              if(spec.command.type!=='navigate'){
+                for(const id of new Set([lastState,spec.exploration?.target_state_id].filter((id):id is string=>!!id))){
+                  await blockControl(id,spec.command.control.control_id,'login_required_public_run');
+                }
+              }
+              await recoverPublic(actionId,before??last);
+            }
             continue;
           }
           throw error;
