@@ -2,7 +2,7 @@
 {
   "title": "Connect a model provider",
   "description": "Configure OpenAI, Anthropic, OpenRouter or Meta AI API access, understand free-only routing, saved defaults and nullable token/cost accounting.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-01",
   "sidebar": {
     "order": 3
   }
@@ -37,7 +37,7 @@ Provider model availability, rate limits and pricing can change. Scout checks fr
 
 ## Save nonsecret defaults
 
-In the workspace, open **Settings → Models**. Under **Your models**, add each model ID you want to switch between, with an optional name: for example two Meta AI models, `muse-wonder-1.0` and another current Meta model ID. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Models whose provider has no key on this server are marked **Not configured**. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
+In the workspace, open **Settings → Models**. Under **Your models**, pick a listed model or type another model ID. Listed models already have a name and a standard price: Meta AI (including Muse Spark), Claude and ChatGPT on their own providers, and those same models plus DeepSeek, Mistral and GLM on OpenRouter. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Models whose provider has no key on this server are marked **Not configured**. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
 
 Defaults are append-only revisions. A newly admitted job freezes its effective settings; retries preserve the original admission. Your model list is saved with the defaults, but jobs do not freeze it.
 
@@ -51,7 +51,7 @@ Free-only mode applies to OpenRouter. It is normalized off for direct OpenAI, An
 
 ## Meta AI
 
-Set the explorer provider to **meta** and the model to **muse-wonder-1.0**, or another current Meta model ID. The gateway sends non-streaming [Responses API](https://dev.meta.ai/docs/protocols/responses) requests to `https://api.meta.ai/v1/responses` with bearer authentication. `META_API_KEY` is the token Meta’s docs call `MODEL_API_KEY`; an empty `META_API_KEY` falls back to `MODEL_API_KEY`. Requests set `store` to false, so prompts and screenshots are not retained by Meta. They also set `reasoning.effort` to `low`: Muse Wonder's reasoning tokens come out of the same `max_output_tokens` budget as the JSON answer, and a deeper pass can truncate that answer. Token totals come from the response. Meta does not report a dollar price in that usage object, so cost stays unknown. Meta calls use Meta’s own API billing.
+Set the explorer provider to **meta** and the model to **muse-wonder-1.0**, or another current Meta model ID. The gateway sends non-streaming [Responses API](https://dev.meta.ai/docs/protocols/responses) requests to `https://api.meta.ai/v1/responses` with bearer authentication. `META_API_KEY` is the token Meta’s docs call `MODEL_API_KEY`; an empty `META_API_KEY` falls back to `MODEL_API_KEY`. Requests set `store` to false, so prompts and screenshots are not retained by Meta. They also set `reasoning.effort` to `low`: Muse Wonder's reasoning tokens come out of the same `max_output_tokens` budget as the JSON answer, and a deeper pass can truncate that answer. Token totals come from the response. Meta does not report a dollar price in that usage object. A listed Meta model still has a standard price in Settings, which the workspace uses to estimate cost. Meta calls use Meta’s own API billing.
 
 ## Usage accounting
 
@@ -61,7 +61,7 @@ Each run shows input, output and total tokens, overall and for each model it use
 
 ## Estimate cost
 
-Under **Settings → Models → Your models**, each model has an input and an output price in US dollars per million tokens. OpenRouter's free routes (`openrouter/free` and IDs ending in `:free`) are known to cost nothing; other models start without a price until you enter one. A price you enter replaces the known one for that model.
+Under **Settings → Models → Your models**, each model has an input and an output price in US dollars per million tokens. Listed models and OpenRouter's free routes (`openrouter/free` and IDs ending in `:free`) have a known price: the vendor's standard list rate for a direct connection, or the prompt and completion rate OpenRouter publishes for that model ID. Any other model starts without a price until you enter one. A price you enter replaces the known one for that model. Some models charge more for a very long prompt, and DeepSeek's published rate is higher at peak hours; the known price is the standard rate.
 
 The run page and run list estimate cost as each model's input tokens times its input price plus its output tokens times its output price. A model with no price uses the cost the provider reported, if any (OpenRouter reports one); otherwise the run page names it as having no price. Select **Estimated cost**, or **Add a price** in the run's **Model usage** table, to open that model's price in Settings; a model that is not in your list yet opens the add form filled in with it. Estimates use your current prices, so changing a price updates earlier runs too. They are estimates, not a bill.
  Operators can review individual attempts in the back office. Calls may incur charges when using a paid provider; reading existing reports and progress does not request new inference.

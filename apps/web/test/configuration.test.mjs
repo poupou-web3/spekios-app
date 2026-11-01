@@ -8,7 +8,7 @@ const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
   const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
-  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,addCatalogModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
@@ -55,7 +55,7 @@ test('models are picked from a saved list that holds several models per provider
   assert.equal(ui.removeSavedModel(index('openrouter/free')),true);assert.equal(index('openrouter/free'),-1);
   assert.equal(ui.configurationError(d.values),'');
   await ui.saveConfiguration();
-  assert.deepEqual(sent.saved_models,[{provider:'meta',model:'muse-wonder-1.0',label:'Muse Wonder'},{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark'},{provider:'openai',model:'muse-spark-1.3'}]);
+  assert.deepEqual(sent.saved_models,[{provider:'meta',model:'muse-wonder-1.0',label:'Muse Wonder',input_usd_per_million:4,output_usd_per_million:20},{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',input_usd_per_million:1.25,output_usd_per_million:4.25},{provider:'openai',model:'muse-spark-1.3'}],'A listed model ID brings its standard price; the same ID on another provider does not.');
   assert.equal(sent.provider,'meta');assert.equal(sent.model,'muse-spark-1.3');assert.deepEqual(sent.navigation_model,{provider:'meta',model:'muse-wonder-1.0'});
 });
 test('settings open one section at a time, mark unsaved sections and link errors to the section that needs a fix',()=>{
@@ -203,7 +203,9 @@ test('each saved model can carry its own input and output price, shown over the 
   assert.match(html,/model-price-note missing">No price yet\. Estimates use the cost the provider reports, if any\./);
   ui.updateConfiguration('saved.0.output_usd_per_million','2.5');assert.equal(d.dirty,true);assert.equal(ui.configurationError(d.values),'');
   ui.updateConfiguration('saved.0.input_usd_per_million',-1);assert.match(ui.configurationError(d.values),/Muse Spark: prices are empty or from 0 to 10,000/);
-  ui.updateConfiguration('saved.0.input_usd_per_million',null);assert.match(ui.configurationView('models'),/Add the other price to estimate cost\./,'An estimate needs both prices.');
+  ui.updateConfiguration('saved.0.input_usd_per_million',null);assert.match(ui.configurationView('models'),/Your price/,'The known input price covers the empty side.');
+  ui.updateConfiguration('saved.2.output_usd_per_million',1);assert.match(ui.configurationView('models'),/Add the other price to estimate cost\./,'An estimate needs both prices when neither side is known.');
+  ui.updateConfiguration('saved.2.output_usd_per_million',null);
   assert.equal(ui.updateConfiguration('saved.0.provider','openai'),false,'Only prices are edited in a row.');
   ui.updateNewModel('provider','openai');ui.updateNewModel('model','paid-model');ui.updateNewModel('input_usd_per_million',1.25);ui.updateNewModel('output_usd_per_million','x');
   assert.equal(ui.addSavedModel(),false);assert.match(d.addError,/Prices are empty or from 0/);
@@ -219,6 +221,35 @@ test('a price link opens a listed model’s input price, or fills the add form w
   ui.state.priceTarget='openrouter|vendor/x:free';assert.equal(ui.focusPriceTarget(),'saved-1-input_usd_per_million');assert.equal(ui.state.priceTarget,null,'The target is used once.');
   assert.equal(ui.focusPriceTarget(),'');
   ui.state.priceTarget='meta|muse-wonder-1.0';assert.equal(ui.focusPriceTarget(),'new-model-input_usd_per_million');
-  const d=ui.configurationDraft();assert.equal(d.adding.provider,'meta');assert.equal(d.adding.model,'muse-wonder-1.0');assert.equal(d.dirty,false,'Filling the form changes no saved value.');
+  const d=ui.configurationDraft();assert.equal(d.adding.provider,'meta');assert.equal(d.adding.model,'muse-wonder-1.0');assert.equal(d.adding.label,'Muse Wonder');assert.equal(d.adding.input_usd_per_million,4);assert.equal(d.adding.output_usd_per_million,20);assert.equal(d.dirty,false,'Filling the form changes no saved value.');
   for(const target of ['other|m','meta|a b','meta|<x>','nonsense'])ui.state.priceTarget=target,assert.equal(ui.focusPriceTarget(),'',target);
+});
+
+test('a listed model is added with its name and standard price, including OpenRouter routes',async()=>{
+  let sent;const ui=workspace(async(path,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}},201);});
+  ui.state.providers={providers:[{provider:'meta',configured:true},{provider:'openrouter',configured:true}]};
+  ui.updateNewModel('provider','meta');
+  let html=ui.configurationView('models');
+  assert.match(html,/data-action="add-catalog-model" data-provider="meta" data-model="muse-spark-1\.3"/);
+  assert.match(html,/Muse Spark 1\.3<\/span><small>\$1\.25 in · \$4\.25 out/);
+  assert.match(html,/Meta may use what you send to train models\./);
+  assert.doesNotMatch(html,/data-provider="openrouter" data-model="z-ai\/glm-5\.3-flash"/,'GLM is offered on OpenRouter.');
+  assert.equal(ui.addCatalogModel('meta','muse-spark-1.3'),true);
+  const d=ui.configurationDraft();
+  const spark=d.values.saved_models.find(m=>m.model==='muse-spark-1.3');
+  assert.equal(spark.label,'Muse Spark 1.3');assert.equal(spark.input_usd_per_million,1.25);assert.equal(spark.output_usd_per_million,4.25);
+  assert.doesNotMatch(ui.configurationView('models'),/data-model="muse-spark-1\.3"/,'A listed model already in the list is not offered again.');
+  assert.equal(ui.addCatalogModel('meta','muse-spark-1.3'),false);assert.match(d.addError,/already in your list/);
+  assert.equal(ui.addCatalogModel('meta','not-listed'),false);
+  ui.updateNewModel('provider','openrouter');ui.updateNewModel('model','');
+  html=ui.configurationView('models');
+  assert.match(html,/catalog-family-name">DeepSeek/);assert.match(html,/catalog-family-name">Mistral/);assert.match(html,/catalog-family-name">GLM/);
+  assert.match(html,/data-model="z-ai\/glm-5\.3-flash"[\s\S]*\$0\.0285 in · \$0\.0923 out/);
+  assert.match(html,/data-model="anthropic\/claude-sonnet-5\.5"/);assert.match(html,/data-model="openai\/gpt-5\.5"/);
+  assert.equal(ui.addCatalogModel('openrouter','deepseek/deepseek-v4.1-flash-1017'),true);
+  ui.updateNewModel('provider','anthropic');ui.updateNewModel('model','claude-haiku-5-5');
+  assert.equal(d.adding.label,'Claude Haiku 5.5');assert.equal(d.adding.input_usd_per_million,0.1);assert.equal(d.adding.output_usd_per_million,0.5);
+  await ui.saveConfiguration();
+  assert.deepEqual(sent.saved_models.find(m=>m.model==='muse-spark-1.3'),{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark 1.3',input_usd_per_million:1.25,output_usd_per_million:4.25});
+  assert.deepEqual(sent.saved_models.find(m=>m.model==='deepseek/deepseek-v4.1-flash-1017'),{provider:'openrouter',model:'deepseek/deepseek-v4.1-flash-1017',label:'DeepSeek V4.1 Flash 1017',input_usd_per_million:0.15,output_usd_per_million:0.6});
 });

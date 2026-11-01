@@ -1,6 +1,7 @@
 // Workspace settings, one section per page (#/settings/<section>): models, exploration, limits,
 // memory and sessions, appearance. One draft spans the sections and the save bar follows it.
 import {button,icon,toast} from '/assets/ui/components.js';
+import {catalogEntry,catalogModels} from '/assets/ui/catalog.js';
 import {MODEL_PROVIDERS,date,esc,number,providerName,short} from '/assets/ui/format.js';
 import {knownPrice} from '/assets/ui/usage.js';
 import {themePreference,themeSwitch} from '/assets/ui/theme.js';
@@ -136,10 +137,29 @@ export function updateConfiguration(field,value){
   if(field==='provider'&&value!=='openrouter')draft.values.free_only=false;
   draft.values[field]=value;return touched(draft);
 }
+// Typing a listed model fills its name and price. A name or price the user already set stays.
+// Switching away from a listed model clears only the values that still match that listing.
+function syncCatalogDefaults(adding,before){
+  const previous=catalogEntry(before.provider,before.model),entry=catalogEntry(adding.provider,adding.model);
+  const label=String(adding.label??''),labelWasCatalog=!label.trim()||!!previous&&label===previous.label;
+  const pricesWereCatalog=adding.input_usd_per_million==null&&adding.output_usd_per_million==null||!!previous&&adding.input_usd_per_million===previous.input&&adding.output_usd_per_million===previous.output;
+  let changed=false;
+  if(entry){
+    if(labelWasCatalog&&adding.label!==entry.label){adding.label=entry.label;changed=true;}
+    if(pricesWereCatalog&&(adding.input_usd_per_million!==entry.input||adding.output_usd_per_million!==entry.output)){adding.input_usd_per_million=entry.input;adding.output_usd_per_million=entry.output;changed=true;}
+  }else if(previous){
+    if(label===previous.label){adding.label='';changed=true;}
+    if(pricesWereCatalog&&(adding.input_usd_per_million!=null||adding.output_usd_per_million!=null)){adding.input_usd_per_million=null;adding.output_usd_per_million=null;changed=true;}
+  }
+  return changed;
+}
 export function updateNewModel(field,value){
   // A replaced field's late change event repeats the value it already sent; it must not clear messages.
   const draft=configurationDraft();if(draft.saving||!Object.hasOwn(draft.adding,field)||draft.adding[field]===value)return false;
-  const redraw=field==='provider'||!!draft.addError||!!draft.added;draft.adding[field]=value;draft.addError='';draft.added='';return redraw;
+  const redraw=field==='provider'||!!draft.addError||!!draft.added,before={provider:draft.adding.provider,model:draft.adding.model};
+  draft.adding[field]=value;draft.addError='';draft.added='';
+  const synced=(field==='provider'||field==='model')&&syncCatalogDefaults(draft.adding,before);
+  return redraw||synced;
 }
 export function newModelError(values,adding){
   const model=adding.model.trim(),label=adding.label.trim();
@@ -159,6 +179,12 @@ export function addSavedModel(){
   draft.values.saved_models.push({provider,model,label,...Object.fromEntries(PRICE_FIELDS.map(([key])=>[key,commitNumber(draft.adding[key]??null)]))});draft.adding=newModel(provider);touched(draft);
   draft.added=`Added ${label||model}. Choose it as the exploration or navigation model above, then save.`;return true;
 }
+// One step from the listed-model buttons: name and standard price are already filled in.
+export function addCatalogModel(provider,model){
+  const entry=catalogEntry(provider,model),draft=configurationDraft();if(draft.saving||!entry)return false;
+  draft.adding={provider:entry.provider,model:entry.model,label:entry.label,input_usd_per_million:entry.input,output_usd_per_million:entry.output};
+  draft.addError='';draft.added='';return addSavedModel();
+}
 // Models in use stay listed: choose another model first.
 export function removeSavedModel(index){
   const draft=configurationDraft(),m=draft.values.saved_models[index];
@@ -173,7 +199,7 @@ export function focusPriceTarget(){
   if(!MODEL_PROVIDERS.includes(provider)||!MODEL_ID.test(model))return '';
   const draft=configurationDraft(),index=draft.values.saved_models.findIndex(m=>m.provider===provider&&m.model===model);
   if(index<0&&draft.saving)return '';
-  if(index<0){draft.adding={...newModel(provider),model};draft.addError='';draft.added='';render();}
+  if(index<0){draft.adding={...newModel(provider),model};syncCatalogDefaults(draft.adding,{provider,model:''});draft.addError='';draft.added='';render();}
   const id=index<0?'new-model-input_usd_per_million':`saved-${index}-input_usd_per_million`,field=document.getElementById?.(id);
   field?.scrollIntoView?.({block:'center'});field?.focus?.({preventScroll:true});
   return id;
@@ -238,8 +264,17 @@ function modelOptions(list,selected){
     return `<optgroup label="${esc(providerName(provider))}${providerReady(provider)===false?' · not configured on this server':''}">${group.map(m=>{const value=modelChoice(m.provider,m.model);return `<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(m.label?`${m.label} (${m.model})`:m.model)}</option>`;}).join('')}</optgroup>`;
   }).join('');
 }
-// Model IDs the provider docs name, offered while typing. Any other current ID can be typed.
-const SUGGESTED_MODELS={openrouter:['openrouter/free'],meta:['muse-wonder-1.0']},PLACEHOLDERS={openrouter:'openrouter/free or vendor/model:free',meta:'muse-wonder-1.0, or another Meta model'};
+const PLACEHOLDERS={openrouter:'openrouter/free or vendor/model',meta:'muse-spark-1.3',anthropic:'claude-sonnet-5-5',openai:'gpt-6.1-sol'};
+const rate=n=>{const precise=Number(n).toFixed(4).replace(/0+$/,'').replace(/\.$/,'');const [whole,frac='']=precise.split('.');return `$${frac.length>=2?precise:`${whole}.${frac.padEnd(2,'0')}`}`;};
+// Listed models for the provider in the form. One click adds the name and the standard price.
+function catalogPicker(provider,saved,full){
+  const items=catalogModels(provider).filter(entry=>!saved.some(m=>m.provider===entry.provider&&m.model===entry.model));if(!items.length)return '';
+  const families=[...new Set(items.map(entry=>entry.family))];
+  const button=entry=>`<button type="button" class="button catalog-model" data-action="add-catalog-model" data-provider="${esc(entry.provider)}" data-model="${esc(entry.model)}"${full?' disabled':''}${entry.note?` title="${esc(entry.note)}"`:''}><span>${esc(entry.label)}</span><small>${rate(entry.input)} in · ${rate(entry.output)} out</small>${entry.note?`<small class="catalog-note">${esc(entry.note)}</small>`:''}</button>`;
+  const groups=families.map(family=>{const buttons=items.filter(entry=>entry.family===family).map(button).join('');return families.length>1?`<div class="catalog-family"><span class="catalog-family-name">${esc(family)}</span><div class="catalog-models">${buttons}</div></div>`:`<div class="catalog-models">${buttons}</div>`;}).join('');
+  const where=provider==='openrouter'?' DeepSeek, Mistral and GLM are listed here, along with Meta, Claude and ChatGPT.':'';
+  return `<div class="model-catalog"><h4 id="model-catalog-title">Listed models</h4><p class="small muted">For the provider selected above. The name and standard price are filled in; change a price on the row if you need to.${where}</p>${groups}</div>`;
+}
 function modelsSection(v){
   const nav=v.navigation_model,exploration=v.model.trim()?modelChoice(v.provider,v.model.trim()):'',navigation=nav.provider?modelChoice(nav.provider,nav.model.trim()):'';
   const unready=[...new Set([v.provider,...(nav.provider?[nav.provider]:[])])].filter(p=>providerReady(p)===false);
@@ -252,10 +287,10 @@ function modelsSection(v){
     const note=!complete?own?'Add the other price to estimate cost.':'No price yet. Estimates use the cost the provider reports, if any.':own?'Your price':'Known price';
     return `<li class="model-row"><div class="model-row-main"><span class="model-row-name">${esc(m.label||m.model)}</span><span class="model-row-id">${esc(providerName(m.provider))}${m.label?` · <code>${esc(m.model)}</code>`:''}</span><span class="model-row-tags">${roles.map(role=>`<span class="pill blue model-role">${role}</span>`).join('')}${m.provider==='openrouter'&&freeModel(m.model)?'<span class="tag">FREE</span>':''}${ready===false?'<span class="pill amber">Not configured</span>':''}</span></div><div class="model-row-prices" role="group" aria-label="Prices for ${esc(m.label||m.model)}">${prices(`saved-${i}`,'data-configuration-field',`saved.${i}.`,m,known)}<small class="model-price-note${complete?'':' missing'}">${esc(note)}</small></div><div class="model-row-actions">${roles.length?'<span class="small muted">In use</span>':`<button type="button" class="button quiet" data-action="remove-saved-model" data-index="${i}" aria-label="Remove ${esc(m.label||m.model)} from your models">${icon('close')}Remove</button>`}</div></li>`;}).join('');
   const draft=configurationDraft(),a=draft.adding;
-  const add=`<div class="model-add" role="group" aria-labelledby="model-add-title"><h4 id="model-add-title">Add a model</h4><div class="model-add-fields"><label for="new-model-provider"><span>Provider</span><select id="new-model-provider" data-new-model-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${a.provider===p?'selected':''}>${providerName(p)}${providerReady(p)===false?' (not configured)':''}</option>`).join('')}</select></label><label for="new-model-model"><span>Model ID</span><input id="new-model-model" data-new-model-field="model" value="${esc(a.model)}" maxlength="200" autocomplete="off" spellcheck="false" placeholder="${esc(PLACEHOLDERS[a.provider]||'The ID your provider uses')}" list="new-model-suggestions"${draft.addError?' aria-invalid="true" aria-describedby="new-model-error"':''}><datalist id="new-model-suggestions">${(SUGGESTED_MODELS[a.provider]||[]).filter(id=>!v.saved_models.some(m=>m.provider===a.provider&&m.model===id)).map(id=>`<option value="${esc(id)}"></option>`).join('')}</datalist></label><label for="new-model-label"><span>Name <small class="small">optional</small></span><input id="new-model-label" data-new-model-field="label" value="${esc(a.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in model menus"></label>${prices('new-model','data-new-model-field','',a,knownPrice(a.provider,String(a.model).trim()))}<button type="button" class="button" data-action="add-saved-model" ${v.saved_models.length>=MAX_SAVED_MODELS?'disabled':''}>${icon('plus')}Add model</button></div>${draft.addError?`<p id="new-model-error" class="settings-feedback error" role="alert">${esc(draft.addError)}</p>`:draft.added?`<p class="small muted model-add-status" role="status">${esc(draft.added)}</p>`:''}</div>`;
+  const add=`<div class="model-add" role="group" aria-labelledby="model-add-title"><h4 id="model-add-title">Add a model</h4><div class="model-add-fields"><label for="new-model-provider"><span>Provider</span><select id="new-model-provider" data-new-model-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${a.provider===p?'selected':''}>${providerName(p)}${providerReady(p)===false?' (not configured)':''}</option>`).join('')}</select></label><label for="new-model-model"><span>Model ID</span><input id="new-model-model" data-new-model-field="model" value="${esc(a.model)}" maxlength="200" autocomplete="off" spellcheck="false" placeholder="${esc(PLACEHOLDERS[a.provider]||'The ID your provider uses')}" list="new-model-suggestions"${draft.addError?' aria-invalid="true" aria-describedby="new-model-error"':''}><datalist id="new-model-suggestions">${catalogModels(a.provider).filter(entry=>!v.saved_models.some(m=>m.provider===a.provider&&m.model===entry.model)).map(entry=>`<option value="${esc(entry.model)}">${esc(entry.label)}</option>`).join('')}</datalist></label><label for="new-model-label"><span>Name <small class="small">optional</small></span><input id="new-model-label" data-new-model-field="label" value="${esc(a.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in model menus"></label>${prices('new-model','data-new-model-field','',a,knownPrice(a.provider,String(a.model).trim()))}<button type="button" class="button" data-action="add-saved-model" ${v.saved_models.length>=MAX_SAVED_MODELS?'disabled':''}>${icon('plus')}Add model</button></div>${catalogPicker(a.provider,v.saved_models,v.saved_models.length>=MAX_SAVED_MODELS)}${draft.addError?`<p id="new-model-error" class="settings-feedback error" role="alert">${esc(draft.addError)}</p>`:draft.added?`<p class="small muted model-add-status" role="status">${esc(draft.added)}</p>`:''}</div>`;
   const providers=(state.providers.providers||[]).map(p=>`<li><span>${esc(providerName(p.provider))}</span><span class="pill ${p.configured?'green':''}">${p.configured?'Available':'Not configured'}</span></li>`).join('');
   return card('models-in-use','Models in use','New explorations use these. Queued and running jobs keep the models they started with.',inUse)
-    +card('models-list','Your models',`Add the model IDs you want to switch between, up to ${MAX_SAVED_MODELS}. Prices in US dollars per million input and output tokens estimate what runs cost; leave a price empty to use the known one. API keys stay in the server configuration.`,`${rows?`<ul class="model-list">${rows}</ul>`:'<p class="small muted">No models yet. Add one below.</p>'}${add}`,`<span class="small muted">${number(v.saved_models.length)} of ${MAX_SAVED_MODELS}</span>`)
+    +card('models-list','Your models',`Add the model IDs you want to switch between, up to ${MAX_SAVED_MODELS}. Listed models include a name and a standard price. Prices are US dollars per million input and output tokens; leave a price empty to use the known one. API keys stay in the server configuration.`,`${rows?`<ul class="model-list">${rows}</ul>`:'<p class="small muted">No models yet. Add one below.</p>'}${add}`,`<span class="small muted">${number(v.saved_models.length)} of ${MAX_SAVED_MODELS}</span>`)
     +card('models-cost','Cost controls','',`${toggle('free_only','Restrict OpenRouter to free model IDs',v.free_only,v.provider!=='openrouter')}<p class="small muted">${v.provider==='openrouter'?'Use openrouter/free or a model ending in :free, for exploration and navigation. Provider availability and rate limits still apply.':'Applies when the exploration model is on OpenRouter. Direct OpenAI, Anthropic and Meta AI calls use their own API billing.'}</p>${toggle('reuse_rankings','Reuse a screen’s ranking from earlier runs when it hasn’t changed',v.reuse_rankings)}<p class="small muted">Skips the planning request on a screen whose address pattern, text and controls match one an earlier run ranked with the same model. Needs app memory. A ranking is reused up to 10 times, then asked for again. Screens where the model chose to type text, and runs with a testing focus, always get a fresh ranking.</p>`)
     +card('models-providers','Provider access',`Your Spekios administrator manages provider credentials; they are never shown here.${state.providers.test_mode?' This server currently returns simulated model responses.':''}`,providers?`<ul class="provider-status">${providers}</ul>`:'<p class="small muted">No provider status is available yet. Refresh the workspace.</p>');
 }

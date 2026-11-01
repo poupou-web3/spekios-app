@@ -1,5 +1,6 @@
 // Model usage shared by the workspace and the back office. Input and output tokens are counted
 // apart and added up; cost is estimated from per-model prices in USD per million tokens.
+import {catalogEntry} from './catalog.js';
 import {number} from './format.js';
 
 // Usage objects carry known_input_tokens, known_output_tokens and (newer servers) known_total_tokens.
@@ -16,13 +17,13 @@ const tokenCount=value=>value==null?'unknown':number(value);
 export function tokenSplit(usage){const t=tokenCounts(usage);return `${tokenCount(t.input)} in · ${tokenCount(t.output)} out`;}
 export function tokenSum(usage){const t=tokenCounts(usage);return t.total==null?'Unknown':(t.partial?'≥ ':'')+number(t.total);}
 
-// Prices are only listed when they are certain: OpenRouter's free routes cost nothing. Add a model
-// here as 'provider|model': {input, output} in USD per million tokens; a saved model's own price wins.
-const KNOWN_PRICES={};
+// OpenRouter's free routes cost nothing. Other known prices come from the model catalog.
+// A saved model's own price wins.
 export function knownPrice(provider,model){
   const id=String(model??'');
   if(provider==='openrouter'&&(id==='openrouter/free'||id.endsWith(':free')))return {input:0,output:0};
-  return KNOWN_PRICES[`${provider}|${id}`]||null;
+  const entry=catalogEntry(provider,id);
+  return entry?{input:entry.input,output:entry.output}:null;
 }
 // The price used for a model: each of input and output from the saved model when set, else known.
 export function modelPrice(provider,model,saved=[]){
