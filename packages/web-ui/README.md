@@ -6,6 +6,7 @@ Shared browser kit for the two Scout frontends: the customer workspace (`apps/we
 src/
   format.js       escaping, numbers, dates, run names, provider labels
   components.js   icon, pill, stat, empty, json, button, kv, toast
+  usage.js        input / output / total tokens, model prices and estimated cost
   http.js         authenticated same-origin requests (workspaceRequest, requireOk)
   theme.js        System / Light / Dark preference and its control
   theme-init.js   classic <head> script: applies a saved theme before first paint

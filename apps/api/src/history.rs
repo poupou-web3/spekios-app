@@ -83,6 +83,7 @@ pub async fn sessions(state: &AppState, mut filters: Filters) -> Response {
         'candidates',(SELECT count(*) FROM runtime_actions a WHERE a.run_id=r.run_id AND a.assessment->>'verdict'='suspect'),
         'known_input_tokens',(SELECT sum(c.input_tokens) FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=$1 AND m.user_id=$2),
         'known_output_tokens',(SELECT sum(c.output_tokens) FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=$1 AND m.user_id=$2),
+        'known_total_tokens',(SELECT CASE WHEN count(c.input_tokens)+count(c.output_tokens)>0 THEN coalesce(sum(c.input_tokens),0)+coalesce(sum(c.output_tokens),0) END FROM model_calls c JOIN model_requests m USING(request_id) WHERE m.run_id=r.run_id AND m.workspace_id=$1 AND m.user_id=$2),
         'report',jsonb_build_object('tool','scout_get_report','arguments',jsonb_build_object('run_id',r.run_id))) ORDER BY r.created_at DESC,r.run_id DESC) FROM page r),'[]'::jsonb))";
     match query(
         state,

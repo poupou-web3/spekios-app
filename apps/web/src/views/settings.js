@@ -2,13 +2,16 @@
 // memory and sessions, appearance. One draft spans the sections and the save bar follows it.
 import {button,icon,toast} from '/assets/ui/components.js';
 import {MODEL_PROVIDERS,date,esc,number,providerName,short} from '/assets/ui/format.js';
+import {knownPrice} from '/assets/ui/usage.js';
 import {themePreference,themeSwitch} from '/assets/ui/theme.js';
 import {api,get} from '../api.js';
 import {render} from '../app.js';
 import {state} from '../state.js';
 import {accessBanner} from './home.js';
 // Server bounds. Exploration limits are optional: empty means no limit.
-export const MAX_ACTIONS=10000,MAX_REPLAY_ACTIONS=100,MAX_SAVED_MODELS=30,MAX_MODEL_LABEL=60;
+export const MAX_ACTIONS=10000,MAX_REPLAY_ACTIONS=100,MAX_SAVED_MODELS=30,MAX_MODEL_LABEL=60,MAX_USD_PER_MILLION=10000;
+// A saved model's own prices, in USD per million tokens; empty uses the known price.
+const PRICE_FIELDS=[['input_usd_per_million','inputUsdPerMillion','Input'],['output_usd_per_million','outputUsdPerMillion','Output']];
 // A number input's value is canonical ("0") while a decimal is still being typed ("0.0"). Keep that text.
 export function numericFieldValue(raw){
   if(raw==='')return null;const n=Number(raw);return Number.isFinite(n)&&String(n)===raw?n:raw;
@@ -35,8 +38,8 @@ const freeModel=model=>model==='openrouter/free'||model.endsWith(':free');
 // The saved model list, plus the models in use so they stay available after switching away.
 function modelList(saved,inUse){
   const list=[],seen=new Set();
-  const add=(provider,model,label)=>{const id=String(model??'').trim();if(!MODEL_PROVIDERS.includes(provider)||!id||seen.has(modelChoice(provider,id)))return;seen.add(modelChoice(provider,id));list.push({provider,model:id,label:String(label??'').trim()});};
-  for(const m of Array.isArray(saved)?saved:[])add(m?.provider,m?.model,m?.label);
+  const add=(provider,model,label,prices={})=>{const id=String(model??'').trim();if(!MODEL_PROVIDERS.includes(provider)||!id||seen.has(modelChoice(provider,id)))return;seen.add(modelChoice(provider,id));list.push({provider,model:id,label:String(label??'').trim(),...Object.fromEntries(PRICE_FIELDS.map(([key])=>[key,prices[key]??null]))});};
+  for(const m of Array.isArray(saved)?saved:[])add(m?.provider,m?.model,m?.label,m);
   for(const [provider,model] of inUse)add(provider,model,'');
   return list;
 }
@@ -58,10 +61,12 @@ export function configurationValues(settings=state.settings){
   const provider=settings.provider||'openrouter',navigation_model={provider:settings.navigationModel?.provider||'',model:settings.navigationModel?.model||''};
   return {provider,model:settings.model||'',...Object.fromEntries(LIMITS.map(([key,camel])=>[key,settings[camel]??null])),
     stop_after_idle_actions:settings.stopAfterIdleActions===undefined?50:settings.stopAfterIdleActions,limit_overrides:(settings.limitOverrides||[]).map(overrideRow),exploration_strategy:{...DEFAULT_STRATEGY,...settings.explorationStrategy},reuse_rankings:settings.reuseRankings!==false,navigation_model,
-    saved_models:modelList(settings.savedModels,[[provider,settings.model],[navigation_model.provider,navigation_model.model]]),viewport_profile:settings.viewportProfile||'desktop',free_only:settings.provider==='openrouter'&&settings.freeOnly===true,auto_reproduce:settings.autoReproduce===true,max_auto_reproductions:settings.maxAutoReproductions??2,max_auto_replay_actions:settings.maxAutoReplayActions??12,app_memory:settings.appMemory!==false};
+    saved_models:modelList((Array.isArray(settings.savedModels)?settings.savedModels:[]).map(m=>({...m,...Object.fromEntries(PRICE_FIELDS.map(([key,camel])=>[key,m?.[camel]??null]))})),[[provider,settings.model],[navigation_model.provider,navigation_model.model]]),viewport_profile:settings.viewportProfile||'desktop',free_only:settings.provider==='openrouter'&&settings.freeOnly===true,auto_reproduce:settings.autoReproduce===true,max_auto_reproductions:settings.maxAutoReproductions??2,max_auto_replay_actions:settings.maxAutoReplayActions??12,app_memory:settings.appMemory!==false};
 }
 // The add-a-model fields start on the first provider this server can use.
-const newModel=()=>({provider:MODEL_PROVIDERS.find(p=>providerReady(p))||MODEL_PROVIDERS[0],model:'',label:''});
+const newModel=(provider=MODEL_PROVIDERS.find(p=>providerReady(p))||MODEL_PROVIDERS[0])=>({provider,model:'',label:'',input_usd_per_million:null,output_usd_per_million:null});
+// Empty, or a number of US dollars per million tokens. Text stays while a decimal is typed.
+const priceError=value=>value!==null&&value!==''&&!(Number.isFinite(finite(value))&&finite(value)>=0&&finite(value)<=MAX_USD_PER_MILLION);
 export function configurationDraft(){
   const values=configurationValues(),fingerprint=JSON.stringify(values),old=state.configurationDraft;
   if(!old||!old.dirty&&!old.saving&&(old.revision!==state.settingsRevision||old.fingerprint!==fingerprint)){
@@ -84,6 +89,7 @@ export function configurationIssue(values){
   const listed=new Set();
   for(const m of values.saved_models){
     if(!MODEL_PROVIDERS.includes(m.provider)||CONTROL.test(m.model)||!MODEL_ID.test(m.model.trim())||CONTROL.test(m.label)||[...m.label.trim()].length>MAX_MODEL_LABEL)return ['models',`Your model list has an entry that cannot be saved: ${m.model}. Remove it.`];
+    if(PRICE_FIELDS.some(([key])=>priceError(m[key])))return ['models',`${m.label||m.model}: prices are empty or from 0 to ${number(MAX_USD_PER_MILLION)} US dollars per million tokens.`];
     if(listed.has(modelChoice(m.provider,m.model.trim())))return ['models',`${m.model} is listed twice for ${providerName(m.provider)}.`];listed.add(modelChoice(m.provider,m.model.trim()));
   }
   if(!['desktop','tablet','mobile'].includes(values.viewport_profile))return ['exploration','Choose a supported viewport.'];
@@ -118,6 +124,9 @@ export function updateConfiguration(field,value){
     else{if(value&&!chosen)return false;draft.values.navigation_model=chosen?{provider:chosen.provider,model:chosen.model}:{provider:'',model:''};}
     return touched(draft);
   }
+  // A saved model's prices are edited in its row.
+  const saved=/^saved\.(\d+)\.(input_usd_per_million|output_usd_per_million)$/.exec(field);
+  if(saved){const m=draft.values.saved_models[Number(saved[1])];if(!m)return false;m[saved[2]]=value;draft.added='';return touched(draft);}
   const override=/^override\.(\d+)\.(\w+)$/.exec(field);
   const nested=override?draft.values.limit_overrides[Number(override[1])]:/^strategy\.\w+$/.test(field)?draft.values.exploration_strategy:/^navigation\.\w+$/.test(field)?draft.values.navigation_model:null,key=override?override[2]:field.slice(field.indexOf('.')+1);
   if(override||nested){if(!nested||!Object.hasOwn(nested,key))return false;nested[key]=value;return touched(draft);}
@@ -137,6 +146,7 @@ export function newModelError(values,adding){
   if(CONTROL.test(adding.model)||!MODEL_ID.test(model))return 'Enter a model ID using letters, numbers, / : . _ or - (up to 200 characters).';
   if(CONTROL.test(label)||[...label].length>MAX_MODEL_LABEL)return `Keep the name to ${MAX_MODEL_LABEL} characters on one line.`;
   if(values.saved_models.some(m=>m.provider===adding.provider&&m.model===model))return `${model} is already in your list for ${providerName(adding.provider)}.`;
+  if(PRICE_FIELDS.some(([key])=>priceError(adding[key])))return `Prices are empty or from 0 to ${number(MAX_USD_PER_MILLION)} US dollars per million tokens.`;
   if(values.saved_models.length>=MAX_SAVED_MODELS)return `Your list holds up to ${MAX_SAVED_MODELS} models. Remove one first.`;
   return '';
 }
@@ -144,7 +154,7 @@ export function addSavedModel(){
   const draft=configurationDraft();if(draft.saving)return false;
   draft.addError=newModelError(draft.values,draft.adding);if(draft.addError)return false;
   const {provider}=draft.adding,model=draft.adding.model.trim(),label=draft.adding.label.trim();
-  draft.values.saved_models.push({provider,model,label});draft.adding={provider,model:'',label:''};touched(draft);
+  draft.values.saved_models.push({provider,model,label,...Object.fromEntries(PRICE_FIELDS.map(([key])=>[key,commitNumber(draft.adding[key]??null)]))});draft.adding=newModel(provider);touched(draft);
   draft.added=`Added ${label||model}. Choose it as the exploration or navigation model above, then save.`;return true;
 }
 // Models in use stay listed: choose another model first.
@@ -176,7 +186,7 @@ export async function saveConfiguration(){
   const token=state.token,developmentAccess=state.developmentAccess,sameSession=()=>token===state.token&&developmentAccess===state.developmentAccess;
   const numbers=Object.fromEntries([...LIMITS.map(([key])=>[key,commitNumber(draft.values[key])]),['max_auto_reproductions',commitNumber(draft.values.max_auto_reproductions)],['max_auto_replay_actions',commitNumber(draft.values.max_auto_replay_actions)]]);
   const exploration_strategy={...draft.values.exploration_strategy};for(const [key] of STRATEGY)exploration_strategy[key]=commitNumber(exploration_strategy[key]);
-  const saved_models=modelList(draft.values.saved_models,inUseModels(draft.values)).map(({provider,model,label})=>label?{provider,model,label}:{provider,model});
+  const saved_models=modelList(draft.values.saved_models,inUseModels(draft.values)).map(m=>({provider:m.provider,model:m.model,...(m.label?{label:m.label}:{}),...Object.fromEntries(PRICE_FIELDS.map(([key])=>[key,commitNumber(m[key])]).filter(([,price])=>price!==null))}));
   const body={request_id:draft.requestId,expected_revision:draft.revision,...draft.values,...numbers,exploration_strategy,saved_models,model:draft.values.model.trim(),limit_overrides:draft.values.limit_overrides.map(overridePayload),
     navigation_model:draft.values.navigation_model.provider?{provider:draft.values.navigation_model.provider,model:draft.values.navigation_model.model.trim()}:null};
   try{
@@ -219,13 +229,18 @@ function modelsSection(v){
   const nav=v.navigation_model,exploration=v.model.trim()?modelChoice(v.provider,v.model.trim()):'',navigation=nav.provider?modelChoice(nav.provider,nav.model.trim()):'';
   const unready=[...new Set([v.provider,...(nav.provider?[nav.provider]:[])])].filter(p=>providerReady(p)===false);
   const inUse=`<div class="configuration-grid"><label for="configuration-exploration_model"><span>Exploration model</span><select id="configuration-exploration_model" data-configuration-field="exploration_model" aria-describedby="exploration-model-help">${exploration?'':'<option value="" selected disabled>Choose a model</option>'}${modelOptions(v.saved_models,exploration)}</select><small id="exploration-model-help" class="small">Plans each action, clicks, fills forms and judges what happened.</small></label><label for="configuration-navigation_choice"><span>Navigation model</span><select id="configuration-navigation_choice" data-configuration-field="navigation_choice" aria-describedby="navigation-model-help"><option value="" ${navigation?'':'selected'}>Same as exploration model</option>${modelOptions(v.saved_models,navigation)}</select><small id="navigation-model-help" class="small">Optional cheaper model for opening pages, following links and scrolling.</small></label></div>${unready.length?`<p class="settings-feedback notice" role="status">${esc(unready.map(providerName).join(' and '))} ${unready.length>1?'are':'is'} not configured on this server, so new tests cannot start with ${unready.length>1?'these models':'this model'}. Choose a model from an available provider, or ask your Spekios administrator to add the key.</p>`:''}<p class="small muted settings-note">Clicks on buttons, form entry and submissions always use the exploration model. A navigation result that isn’t clean, or that comes with browser errors or failed requests, is assessed again by the exploration model.</p>`;
-  const rows=v.saved_models.map((m,i)=>{const roles=modelRoles(v,m),ready=providerReady(m.provider);
-    return `<li class="model-row"><div class="model-row-main"><span class="model-row-name">${esc(m.label||m.model)}</span><span class="model-row-id">${esc(providerName(m.provider))}${m.label?` · <code>${esc(m.model)}</code>`:''}</span></div><div class="model-row-tags">${roles.map(role=>`<span class="pill blue model-role">${role}</span>`).join('')}${m.provider==='openrouter'&&freeModel(m.model)?'<span class="tag">FREE</span>':''}${ready===false?'<span class="pill amber">Not configured</span>':''}${roles.length?'':`<button type="button" class="button quiet" data-action="remove-saved-model" data-index="${i}" aria-label="Remove ${esc(m.label||m.model)} from your models">${icon('close')}Remove</button>`}</div></li>`;}).join('');
+  // Price fields show the known price as a placeholder; typing a value overrides it for this model.
+  const prices=(id,attr,prefix,values,known)=>PRICE_FIELDS.map(([key,,label],side)=>{const fallback=known?.[side?'output':'input'];return `<label for="${id}-${key}"><span>${label} <small>$ / 1M tokens</small></span><input id="${id}-${key}" ${attr}="${prefix}${key}" type="number" min="0" max="${MAX_USD_PER_MILLION}" step="any" inputmode="decimal" value="${values[key]==null?'':esc(values[key])}" placeholder="${fallback==null?'Not set':esc(fallback)}"></label>`;}).join('');
+  const rows=v.saved_models.map((m,i)=>{const roles=modelRoles(v,m),ready=providerReady(m.provider),known=knownPrice(m.provider,m.model),set=key=>m[key]!==null&&m[key]!=='',own=PRICE_FIELDS.some(([key])=>set(key));
+    // An estimate needs both prices: each one the model's own, or the known price.
+    const complete=PRICE_FIELDS.every(([key],side)=>set(key)||known?.[side?'output':'input']!=null);
+    const note=!complete?own?'Add the other price to estimate cost.':'No price yet. Estimates use the cost the provider reports, if any.':own?'Your price':'Known price';
+    return `<li class="model-row"><div class="model-row-main"><span class="model-row-name">${esc(m.label||m.model)}</span><span class="model-row-id">${esc(providerName(m.provider))}${m.label?` · <code>${esc(m.model)}</code>`:''}</span><span class="model-row-tags">${roles.map(role=>`<span class="pill blue model-role">${role}</span>`).join('')}${m.provider==='openrouter'&&freeModel(m.model)?'<span class="tag">FREE</span>':''}${ready===false?'<span class="pill amber">Not configured</span>':''}</span></div><div class="model-row-prices" role="group" aria-label="Prices for ${esc(m.label||m.model)}">${prices(`saved-${i}`,'data-configuration-field',`saved.${i}.`,m,known)}<small class="model-price-note${complete?'':' missing'}">${esc(note)}</small></div><div class="model-row-actions">${roles.length?'<span class="small muted">In use</span>':`<button type="button" class="button quiet" data-action="remove-saved-model" data-index="${i}" aria-label="Remove ${esc(m.label||m.model)} from your models">${icon('close')}Remove</button>`}</div></li>`;}).join('');
   const draft=configurationDraft(),a=draft.adding;
-  const add=`<div class="model-add" role="group" aria-labelledby="model-add-title"><h4 id="model-add-title">Add a model</h4><div class="model-add-fields"><label for="new-model-provider"><span>Provider</span><select id="new-model-provider" data-new-model-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${a.provider===p?'selected':''}>${providerName(p)}${providerReady(p)===false?' (not configured)':''}</option>`).join('')}</select></label><label for="new-model-model"><span>Model ID</span><input id="new-model-model" data-new-model-field="model" value="${esc(a.model)}" maxlength="200" autocomplete="off" spellcheck="false" placeholder="${esc(PLACEHOLDERS[a.provider]||'The ID your provider uses')}" list="new-model-suggestions"${draft.addError?' aria-invalid="true" aria-describedby="new-model-error"':''}><datalist id="new-model-suggestions">${(SUGGESTED_MODELS[a.provider]||[]).filter(id=>!v.saved_models.some(m=>m.provider===a.provider&&m.model===id)).map(id=>`<option value="${esc(id)}"></option>`).join('')}</datalist></label><label for="new-model-label"><span>Name <small class="small">optional</small></span><input id="new-model-label" data-new-model-field="label" value="${esc(a.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in model menus"></label><button type="button" class="button" data-action="add-saved-model" ${v.saved_models.length>=MAX_SAVED_MODELS?'disabled':''}>${icon('plus')}Add model</button></div>${draft.addError?`<p id="new-model-error" class="settings-feedback error" role="alert">${esc(draft.addError)}</p>`:draft.added?`<p class="small muted model-add-status" role="status">${esc(draft.added)}</p>`:''}</div>`;
+  const add=`<div class="model-add" role="group" aria-labelledby="model-add-title"><h4 id="model-add-title">Add a model</h4><div class="model-add-fields"><label for="new-model-provider"><span>Provider</span><select id="new-model-provider" data-new-model-field="provider">${MODEL_PROVIDERS.map(p=>`<option value="${p}" ${a.provider===p?'selected':''}>${providerName(p)}${providerReady(p)===false?' (not configured)':''}</option>`).join('')}</select></label><label for="new-model-model"><span>Model ID</span><input id="new-model-model" data-new-model-field="model" value="${esc(a.model)}" maxlength="200" autocomplete="off" spellcheck="false" placeholder="${esc(PLACEHOLDERS[a.provider]||'The ID your provider uses')}" list="new-model-suggestions"${draft.addError?' aria-invalid="true" aria-describedby="new-model-error"':''}><datalist id="new-model-suggestions">${(SUGGESTED_MODELS[a.provider]||[]).filter(id=>!v.saved_models.some(m=>m.provider===a.provider&&m.model===id)).map(id=>`<option value="${esc(id)}"></option>`).join('')}</datalist></label><label for="new-model-label"><span>Name <small class="small">optional</small></span><input id="new-model-label" data-new-model-field="label" value="${esc(a.label)}" maxlength="${MAX_MODEL_LABEL}" autocomplete="off" placeholder="Shown in model menus"></label>${prices('new-model','data-new-model-field','',a,knownPrice(a.provider,String(a.model).trim()))}<button type="button" class="button" data-action="add-saved-model" ${v.saved_models.length>=MAX_SAVED_MODELS?'disabled':''}>${icon('plus')}Add model</button></div>${draft.addError?`<p id="new-model-error" class="settings-feedback error" role="alert">${esc(draft.addError)}</p>`:draft.added?`<p class="small muted model-add-status" role="status">${esc(draft.added)}</p>`:''}</div>`;
   const providers=(state.providers.providers||[]).map(p=>`<li><span>${esc(providerName(p.provider))}</span><span class="pill ${p.configured?'green':''}">${p.configured?'Available':'Not configured'}</span></li>`).join('');
   return card('models-in-use','Models in use','New explorations use these. Queued and running jobs keep the models they started with.',inUse)
-    +card('models-list','Your models',`Add the model IDs you want to switch between, up to ${MAX_SAVED_MODELS}. Only the provider and model ID are saved; API keys stay in the server configuration.`,`${rows?`<ul class="model-list">${rows}</ul>`:'<p class="small muted">No models yet. Add one below.</p>'}${add}`,`<span class="small muted">${number(v.saved_models.length)} of ${MAX_SAVED_MODELS}</span>`)
+    +card('models-list','Your models',`Add the model IDs you want to switch between, up to ${MAX_SAVED_MODELS}. Prices in US dollars per million input and output tokens estimate what runs cost; leave a price empty to use the known one. API keys stay in the server configuration.`,`${rows?`<ul class="model-list">${rows}</ul>`:'<p class="small muted">No models yet. Add one below.</p>'}${add}`,`<span class="small muted">${number(v.saved_models.length)} of ${MAX_SAVED_MODELS}</span>`)
     +card('models-cost','Cost controls','',`${toggle('free_only','Restrict OpenRouter to free model IDs',v.free_only,v.provider!=='openrouter')}<p class="small muted">${v.provider==='openrouter'?'Use openrouter/free or a model ending in :free, for exploration and navigation. Provider availability and rate limits still apply.':'Applies when the exploration model is on OpenRouter. Direct OpenAI, Anthropic and Meta AI calls use their own API billing.'}</p>${toggle('reuse_rankings','Reuse a screen’s ranking from earlier runs when it hasn’t changed',v.reuse_rankings)}<p class="small muted">Skips the planning request on a screen whose address pattern, text and controls match one an earlier run ranked with the same model. Needs app memory. A ranking is reused up to 10 times, then asked for again. Screens where the model chose to type text, and runs with a testing focus, always get a fresh ranking.</p>`)
     +card('models-providers','Provider access',`Your Spekios administrator manages provider credentials; they are never shown here.${state.providers.test_mode?' This server currently returns simulated model responses.':''}`,providers?`<ul class="provider-status">${providers}</ul>`:'<p class="small muted">No provider status is available yet. Refresh the workspace.</p>');
 }

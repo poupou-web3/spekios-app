@@ -34,7 +34,7 @@ async function api(path,body){
 function usage(value){
   if(!value)return 'Usage not available yet.';
   const amount=(v)=>v===null||v===undefined?'unknown':Number(v).toLocaleString();
-  return `${amount(value.attempts)} model calls · reported tokens: ${amount(value.known_input_tokens)} in / ${amount(value.known_output_tokens)} out · reported cost: ${value.provider_reported_cost_usd==null?'unknown':'$'+value.provider_reported_cost_usd} · ${amount(value.incomplete_usage_attempts)} incomplete usage / ${amount(value.unpriced_attempts)} unpriced calls${value.pending_requests?' · usage still pending':''}`;
+  return `${amount(value.attempts)} model calls · reported tokens: ${amount(value.known_input_tokens)} in / ${amount(value.known_output_tokens)} out / ${amount(value.known_total_tokens??(value.known_input_tokens==null&&value.known_output_tokens==null?null:Number(value.known_input_tokens??0)+Number(value.known_output_tokens??0)))} total · reported cost: ${value.provider_reported_cost_usd==null?'unknown':'$'+value.provider_reported_cost_usd} · ${amount(value.incomplete_usage_attempts)} incomplete usage / ${amount(value.unpriced_attempts)} unpriced calls${value.pending_requests?' · usage still pending':''}`;
 }
 function releaseImages(){imageGeneration++;for(const url of images)URL.revokeObjectURL(url);images.clear();}
 async function screenshot(root,id,label,generation){

@@ -156,9 +156,10 @@ export class Store {
     const modelCalls = (await this.query('SELECT c.* FROM model_calls c JOIN model_requests r USING(request_id) WHERE r.run_id=$1 ORDER BY c.started_at,c.call_id', [runId])).rows;
     const modelPayloads = (await this.query("SELECT p.payload_id,p.call_id,p.kind,p.object_key,p.sha256,p.byte_length,p.uploaded_at FROM model_payloads p JOIN model_calls c USING(call_id) JOIN model_requests r USING(request_id) WHERE r.run_id=$1 ORDER BY p.call_id,p.kind", [runId])).rows;
     const modelUsage = !run.config.model_connection && !modelRequests.length
-      ? { status: 'not_connected', input_tokens: null, output_tokens: null }
+      ? { status: 'not_connected', input_tokens: null, output_tokens: null, total_tokens: null }
       : (await this.query(`SELECT jsonb_build_object('status','connected','as_of',now(),'attempts',count(*),
         'known_input_tokens',sum(input_tokens),'known_output_tokens',sum(output_tokens),
+        'known_total_tokens',CASE WHEN count(input_tokens)+count(output_tokens)>0 THEN coalesce(sum(input_tokens),0)+coalesce(sum(output_tokens),0) END,
         'incomplete_usage_attempts',count(*) FILTER (WHERE usage_status<>'reported'),
         'provider_reported_cost_usd',sum(cost_usd)::text,'unpriced_attempts',count(*) FILTER (WHERE cost_usd IS NULL),
         'pending_requests',(SELECT count(*) FROM model_requests WHERE run_id=$1 AND state IN ('queued','preparing','dispatched')),

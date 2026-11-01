@@ -70,7 +70,7 @@ a.pill:hover { text-decoration: underline; text-underline-offset: 3px; }
 .stat-label svg { width: 16px; height: 16px; color: var(--brand-text); opacity: .75; }
 .stat-value { margin: 8px 0 4px; overflow-wrap: anywhere; font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .stat-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
-.review-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.review-stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .review-stats .stat { padding: 14px 16px; }
 .review-stats .stat-value { font-size: 22px; }
 .table-wrap { overflow: auto; overscroll-behavior-x: contain; }

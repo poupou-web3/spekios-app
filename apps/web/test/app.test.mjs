@@ -9,7 +9,7 @@ function view(overrides={}) {
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console,...overrides};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,launchUrlError,accessBanner,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,settingsView,costStat,usagePanel,runUsage,actionDetail,drawer,planningView,tokenTotal,costTotal,refresh,render,authOptions,normalizeTargetUrl,launchUrlError,accessBanner,savedSessions,runStatus,cancelButton,runView,reviewView,reviewDraft,updateReviewDraft,submitReview,findingStatus,filteredFindings,confirmable,automaticEnabled,automaticOptions,explorationRequest,automaticPanel,automaticTaskActive,cancelAutomatic};',sandbox);
   return sandbox.testing;
 }
 test('untrusted page titles, expectations and model outputs remain text',()=>{
@@ -358,4 +358,24 @@ test('the run heading says whether earlier runs guided it and names reopened rem
   delete report.run.config.app_memory;assert.doesNotMatch(ui.runView(),/earlier run|Fresh exploration/,'Runs recorded before memory show no label.');
   report.actions[0].spec={...report.actions[0].spec,command:{type:'navigate',url:'https://app.test/products'},exploration:{purpose:'resume'}};
   assert.match(ui.runView(),/Open remembered page/);
+});
+
+test('runs show input, output and total tokens with a cost estimated from model prices',()=>{
+  const ui=view(),attack='<b>x</b>';
+  const usage={attempts:3,known_input_tokens:1000300,known_output_tokens:250040,known_total_tokens:1250340,incomplete_usage_attempts:0,pending_requests:0,by_model:[
+    {provider:'meta',model:'muse-spark-1.3',attempts:2,known_input_tokens:1000000,known_output_tokens:250000,known_total_tokens:1250000,incomplete_usage_attempts:0,provider_reported_cost_usd:null,unpriced_attempts:2},
+    {provider:'openrouter',model:attack,attempts:1,known_input_tokens:300,known_output_tokens:40,known_total_tokens:340,incomplete_usage_attempts:0,provider_reported_cost_usd:null,unpriced_attempts:1}]};
+  ui.state.settings={savedModels:[{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',inputUsdPerMillion:0.5,outputUsdPerMillion:2}]};
+  let html=ui.costStat(usage);assert.match(html,/≥ \$1\.00/);assert.match(html,/No price for &lt;b&gt;x&lt;\/b&gt;\. Add one in Settings → Models\./);
+  html=ui.usagePanel(usage);
+  assert.match(html,/Muse Spark[\s\S]*Meta AI · muse-spark-1\.3[\s\S]*1,000,000[\s\S]*250,000[\s\S]*1,250,000[\s\S]*\$0\.50 in · \$2\.00 out per 1M tokens[\s\S]*Your price[\s\S]*\$1\.00/);
+  assert.doesNotMatch(html,/<b>x<\/b>/);assert.match(html,/No price/);
+  assert.match(html,/All models<\/th><td>3<\/td><td>1,000,300<\/td><td>250,040<\/td><td>1,250,340<\/td>/);
+  ui.state.settings.savedModels.push({provider:'openrouter',model:attack,inputUsdPerMillion:0,outputUsdPerMillion:0});
+  assert.match(ui.costStat(usage),/\$1\.00<\/div>[\s\S]*From your model prices/);
+  assert.equal(ui.usagePanel({attempts:0,by_model:[]}),'','No calls, no usage table.');
+  const row=ui.runUsage(usage);assert.match(row,/1,250,340/);assert.match(row,/1,000,300 in · 250,040 out/);assert.match(row,/\$1\.00 estimated/);
+  assert.match(ui.runUsage({attempts:0}),/No model calls/);assert.match(ui.runUsage(undefined),/—/);
+  ui.state.runs=[{run_id:'11111111-1111-4111-8111-111111111111',target_url:'https://a.test',lifecycle:'completed',config:{},model_usage:usage,summary:{actions:3}}];
+  assert.match(ui.home(),/<th>Model usage<\/th>[\s\S]*1,250,340/);
 });

@@ -29,7 +29,7 @@ root.addEventListener('compositionstart',()=>{state.composing=true;});
 root.addEventListener('compositionend',e=>{state.composing=false;captureInput(e.target);setTimeout(render,0);});
 function captureInput(target){
   if(target.id==='steering-focus')return updateSteeringFocus(target.value);
-  if(target.dataset.newModelField)return updateNewModel(target.dataset.newModelField,target.value);
+  if(target.dataset.newModelField){if(target.type==='number'&&target.validity?.badInput)return false;return updateNewModel(target.dataset.newModelField,target.type==='number'?numericFieldValue(target.value):target.value);}
   if(target.dataset.configurationField){if(target.type==='number'&&target.validity?.badInput)return false;const field=target.dataset.configurationField,value=target.type==='checkbox'?target.checked:target.type==='number'?numericFieldValue(target.value):target.value;return updateConfiguration(field,value);}
   if(target.dataset.reviewField)updateReviewDraft(target.dataset.reviewAction,target.dataset.reviewField,target.value);
   if(target.id==='target-url')updateTargetUrl(target.value);

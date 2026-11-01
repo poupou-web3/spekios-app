@@ -82,7 +82,9 @@ fn valid_provider(provider: &str) -> bool {
 }
 /// A model kept in the settings page's list to choose from. It names a
 /// provider and model ID; credentials stay in the server configuration and
-/// jobs never freeze the list.
+/// jobs never freeze the list. Optional prices in USD per million input and
+/// output tokens override the workspace's known prices when usage is
+/// estimated; absent or null keeps the known price.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SavedModel {
@@ -90,24 +92,40 @@ struct SavedModel {
     model: String,
     #[serde(default)]
     label: Option<String>,
+    #[serde(default)]
+    input_usd_per_million: Option<f64>,
+    #[serde(default)]
+    output_usd_per_million: Option<f64>,
 }
 const MAX_SAVED_MODELS: usize = 30;
 const MAX_MODEL_LABEL_CHARS: usize = 60;
+const MAX_USD_PER_MILLION: f64 = 10_000.0;
 impl SavedModel {
     fn normalize(&self) -> Result<Value, &'static str> {
         let model = self.model.trim();
         let label = self.label.as_deref().unwrap_or("").trim();
+        let price = |p: Option<f64>| {
+            p.is_none_or(|p| p.is_finite() && (0.0..=MAX_USD_PER_MILLION).contains(&p))
+        };
         if !valid_provider(&self.provider)
             || self.model.chars().any(char::is_control)
             || !valid_model(model)
             || label.chars().any(char::is_control)
             || label.chars().count() > MAX_MODEL_LABEL_CHARS
+            || !price(self.input_usd_per_million)
+            || !price(self.output_usd_per_million)
         {
             return Err("invalid_saved_model");
         }
         let mut saved = json!({"provider":self.provider,"model":model});
         if !label.is_empty() {
             saved["label"] = json!(label);
+        }
+        if let Some(price) = self.input_usd_per_million {
+            saved["inputUsdPerMillion"] = json!(price);
+        }
+        if let Some(price) = self.output_usd_per_million {
+            saved["outputUsdPerMillion"] = json!(price);
         }
         Ok(saved)
     }
@@ -1586,6 +1604,25 @@ mod tests {
                 normalize_settings(input).is_err(),
                 "Rejected {saved_models}"
             );
+        }
+        let mut priced = settings_input();
+        priced["saved_models"] = json!([
+            {"provider":"meta","model":"muse-spark-1.3","input_usd_per_million":0.5,"output_usd_per_million":2},
+            {"provider":"openai","model":"m","input_usd_per_million":null,"output_usd_per_million":0}
+        ]);
+        assert_eq!(
+            normalize_settings(priced).unwrap().settings["savedModels"],
+            json!([
+                {"provider":"meta","model":"muse-spark-1.3","inputUsdPerMillion":0.5,"outputUsdPerMillion":2.0},
+                {"provider":"openai","model":"m","outputUsdPerMillion":0.0}
+            ]),
+            "A missing or null price keeps the known price; zero is a price."
+        );
+        for price in [json!(-0.01), json!(10_000.01), json!("1")] {
+            let mut input = settings_input();
+            input["saved_models"] =
+                json!([{"provider":"openai","model":"m","output_usd_per_million":price}]);
+            assert!(normalize_settings(input).is_err(), "Rejected price {price}");
         }
         let mut same_id = settings_input();
         same_id["saved_models"] =

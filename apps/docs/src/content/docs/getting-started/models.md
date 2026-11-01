@@ -57,7 +57,14 @@ Set the explorer provider to **meta** and the model to **muse-wonder-1.0**, or a
 
 Scout records each model request and attempt, including failed/retried attempts and late usage after cancellation. Tokens and costs come from provider-reported metadata. An absent value stays unknown rather than becoming zero.
 
-Inspect a run's model token total, the [usage API](../../api/models-usage/) or **scout_usage**. Operators can review individual attempts in the back office. Calls may incur charges when using a paid provider; reading existing reports and progress does not request new inference.
+Each run shows input, output and total tokens, overall and for each model it used. Inspect them on the run page, in the run list, the [usage API](../../api/models-usage/) or **scout_usage**.
+
+## Estimate cost
+
+Under **Settings → Models → Your models**, each model has an input and an output price in US dollars per million tokens. OpenRouter's free routes (`openrouter/free` and IDs ending in `:free`) are known to cost nothing; other models start without a price until you enter one. A price you enter replaces the known one for that model.
+
+The run page and run list estimate cost as each model's input tokens times its input price plus its output tokens times its output price. A model with no price uses the cost the provider reported, if any (OpenRouter reports one); otherwise the run page names it as having no price. Estimates use your current prices, so changing a price updates earlier runs too. They are estimates, not a bill.
+ Operators can review individual attempts in the back office. Calls may incur charges when using a paid provider; reading existing reports and progress does not request new inference.
 
 ## Subscription authentication
 

@@ -56,7 +56,7 @@ Open **Settings** in the workspace. Supported fields are:
 
 | Preference | Accepted values |
 | --- | --- |
-| Your models (**Models**) | Up to 30 models to choose from, each a provider, a model ID and an optional name of up to 60 characters. A provider can have several models, such as two Meta AI models; each provider and model ID is listed once. The models in use stay listed. Jobs do not freeze the list |
+| Your models (**Models**) | Up to 30 models to choose from, each a provider, a model ID, an optional name of up to 60 characters and optional input and output prices in USD per million tokens (0–10,000; empty keeps the known price) used for cost estimates. A provider can have several models, such as two Meta AI models; each provider and model ID is listed once. The models in use stay listed. Jobs do not freeze the list |
 | Exploration model (**Models**) | A model from the list: OpenRouter, OpenAI, Anthropic or Meta AI, with an ID of up to 200 characters using letters, numbers, `/ : . _ -`; surrounding spaces are trimmed |
 | Navigation model (**Models**) | Optional cheaper model from the list for opening pages, following links and scrolling; otherwise the exploration model does everything |
 | Limits | Optional maximum actions (1–10,000), minutes (1–10,080), reported tokens and reported cost; empty means no limit. Stop after 50 consecutive actions with nothing new, unless turned off |

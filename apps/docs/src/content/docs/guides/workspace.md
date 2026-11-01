@@ -18,6 +18,8 @@ Use **Inspect action** to see exact typed parameters and linked evidence. Compar
 
 The **Flow** view shows states, transitions, frontier and planner decisions. Ranking scores describe selection order, not a measured probability of real-user behavior.
 
+The run page shows input, output and total model tokens and an estimated cost; **Model usage** under the summary breaks them down by model. The run list shows the same for each run. See [estimate cost](../../getting-started/models/#estimate-cost).
+
 ## Findings and reviews
 
 Filters help find runs and original candidates by review state. An independent replay is shown as evidence about the original action, not as a second unrelated bug.
@@ -28,7 +30,7 @@ Use [finding review](../findings/) to record a human conclusion and rationale. E
 
 Settings has one page per section, listed beside the content (or as tabs on a narrow screen). Each has its own address, such as `#/settings/limits`. Edits in any section stay until you save or discard them; the save bar names the sections with unsaved changes and links to any that need a fix.
 
-- **Models:** your list of model IDs (several per provider if you like), the exploration and navigation models chosen from it, free-only and ranking reuse, and which providers the server can use. Credentials are never shown.
+- **Models:** your list of model IDs (several per provider if you like) with their input and output prices, the exploration and navigation models chosen from it, free-only and ranking reuse, and which providers the server can use. Credentials are never shown.
 - **Exploration:** default viewport, exploration strategy and automatic rechecks.
 - **Limits:** run limits and overrides for projects and models.
 - **Memory & sessions:** app memory on or off, remembered apps you can forget, and saved app sessions with removal controls.

@@ -30,13 +30,13 @@ test('defaults validate the same supported models, limits and free-only restrict
 test('models are picked from a saved list that holds several models per provider, such as two Meta models',async()=>{
   let sent;const ui=workspace(async(path,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}},201);});
   ui.state.providers={providers:[{provider:'openrouter',configured:true},{provider:'meta',configured:true},{provider:'openai',configured:false}]};
-  assert.deepEqual(plain(ui.configurationValues().saved_models),[{provider:'openrouter',model:'openrouter/free',label:''}],'The model in use is always listed.');
+  assert.deepEqual(plain(ui.configurationValues().saved_models),[{provider:'openrouter',model:'openrouter/free',label:'',input_usd_per_million:null,output_usd_per_million:null}],'The model in use is always listed.');
   assert.equal(ui.configurationDraft().dirty,false);
   const add=(provider,model,label='')=>{ui.updateNewModel('provider',provider);ui.updateNewModel('model',model);ui.updateNewModel('label',label);return ui.addSavedModel();};
   assert.equal(add('meta',' muse-wonder-1.0 ','Muse Wonder'),true);assert.equal(add('meta','muse-spark-1.3','Muse Spark'),true);
   const d=ui.configurationDraft();assert.equal(d.dirty,true);assert.deepEqual(plain(ui.changedSections()),['models']);
   assert.deepEqual(plain(d.values.saved_models.filter(m=>m.provider==='meta').map(m=>m.model)),['muse-wonder-1.0','muse-spark-1.3']);
-  assert.match(d.added,/Added Muse Spark/);assert.deepEqual(plain(d.adding),{provider:'meta',model:'',label:''},'The fields clear and keep the provider for the next model.');
+  assert.match(d.added,/Added Muse Spark/);assert.deepEqual(plain(d.adding),{provider:'meta',model:'',label:'',input_usd_per_million:null,output_usd_per_million:null},'The fields clear and keep the provider for the next model.');
   for(const [provider,model,label,message] of [['meta','muse-spark-1.3','',/already in your list/],['meta','a b','',/letters, numbers/],['meta','','',/model ID/],['meta','ok','x'.repeat(61),/60 characters/]]){
     assert.equal(add(provider,model,label),false);assert.match(d.addError,message);
   }
@@ -190,4 +190,24 @@ test('ranking reuse and a navigation model are saved defaults; one model stays t
   await ui.saveConfiguration();
   assert.deepEqual(sent.navigation_model,{provider:'openrouter',model:'vendor/lite:free'});assert.equal(sent.reuse_rankings,false);
   ui.updateConfiguration('navigation.provider','');await ui.saveConfiguration();assert.equal(sent.navigation_model,null,'No provider sends null: one model.');
+});
+
+test('each saved model can carry its own input and output price, shown over the known price and sent with the list',async()=>{
+  let sent;const ui=workspace(async(path,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}},201);});
+  ui.applyConfiguration({revision:4,settings:{...defaults,savedModels:[{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',inputUsdPerMillion:0.5,outputUsdPerMillion:2},{provider:'openrouter',model:'openrouter/free'},{provider:'anthropic',model:'bare'}]}});
+  const d=ui.configurationDraft();
+  assert.deepEqual(plain(d.values.saved_models.map(m=>[m.model,m.input_usd_per_million,m.output_usd_per_million])),[['muse-spark-1.3',0.5,2],['openrouter/free',null,null],['bare',null,null]]);
+  let html=ui.configurationView('models');
+  assert.match(html,/id="saved-0-input_usd_per_million"[^>]*value="0.5"/);assert.match(html,/Your price/);
+  assert.match(html,/id="saved-1-output_usd_per_million"[^>]*value="" placeholder="0"/,'A free OpenRouter model shows its known price.');assert.match(html,/Known price/);
+  assert.match(html,/model-price-note missing">No price yet\. Estimates use the cost the provider reports, if any\./);
+  ui.updateConfiguration('saved.0.output_usd_per_million','2.5');assert.equal(d.dirty,true);assert.equal(ui.configurationError(d.values),'');
+  ui.updateConfiguration('saved.0.input_usd_per_million',-1);assert.match(ui.configurationError(d.values),/Muse Spark: prices are empty or from 0 to 10,000/);
+  ui.updateConfiguration('saved.0.input_usd_per_million',null);assert.match(ui.configurationView('models'),/Add the other price to estimate cost\./,'An estimate needs both prices.');
+  assert.equal(ui.updateConfiguration('saved.0.provider','openai'),false,'Only prices are edited in a row.');
+  ui.updateNewModel('provider','openai');ui.updateNewModel('model','paid-model');ui.updateNewModel('input_usd_per_million',1.25);ui.updateNewModel('output_usd_per_million','x');
+  assert.equal(ui.addSavedModel(),false);assert.match(d.addError,/Prices are empty or from 0/);
+  ui.updateNewModel('output_usd_per_million',5);assert.equal(ui.addSavedModel(),true);
+  await ui.saveConfiguration();
+  assert.deepEqual(sent.saved_models,[{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',output_usd_per_million:2.5},{provider:'openrouter',model:'openrouter/free'},{provider:'anthropic',model:'bare'},{provider:'openai',model:'paid-model',input_usd_per_million:1.25,output_usd_per_million:5}]);
 });

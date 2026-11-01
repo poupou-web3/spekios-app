@@ -189,7 +189,9 @@ export function openapi(catalog) {
     responses: { '201': response('New defaults revision saved.'), '200': response('Original save reused.'), ...errors },
   });
   add('/v1/model-providers', 'get', 'getProviders', 'Models', 'Read provider availability without keys');
-  add('/v1/usage', 'get', 'getUsage', 'Models', 'Read nullable provider-reported token/cost totals');
+  add('/v1/usage', 'get', 'getUsage', 'Models', 'Read nullable provider-reported token/cost totals', {
+    description: 'known_input_tokens, known_output_tokens and known_total_tokens count only what providers reported; null means unknown, not zero. by_model has the same counts and reported cost for each provider and model, and by_agent for each agent. Run reports (model_usage) and the run list use the same fields for one run.',
+  });
   add('/v1/model-requests', 'post', 'submitModelRequest', 'Models', 'Admit a bounded nonstreaming model request', {
     requestBody: body(ref('ModelRequest')),
     responses: { '202': response('Request admitted.', ref('ModelAdmission')), '200': response('Original admission reused.', ref('ModelAdmission')), ...errors },
@@ -287,7 +289,9 @@ export function openapi(catalog) {
           reuse_rankings: { type: 'boolean', default: true, description: 'Reuse what the model ranked on a screen in an earlier run when its address pattern, title, text (numbers and times normalized) and control states are unchanged and the model is the same. Needs app memory. Skips the planning request; recorded as a plan decision with status reused. A ranking is reused at most 10 times; rankings that type text and runs with a testing focus are always ranked afresh.' },
           navigation_model: { ...strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 } }, ['provider','model']), type: ['object','null'],
             description: 'A cheaper model that predicts and assesses navigation actions: opening a URL, following a link and scrolling. Any result other than a clean no_issue_observed, or one with browser errors or failed requests, is reassessed by the exploration model. Free-only applies to an OpenRouter navigation model. Omitted or null: one model for everything.' },
-          saved_models: { type: 'array', maxItems: 30, default: [], items: strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 }, label: { type: 'string', maxLength: 60, description: 'Optional display name, trimmed; no control characters.' } }, ['provider','model']),
+          saved_models: { type: 'array', maxItems: 30, default: [], items: strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 }, label: { type: 'string', maxLength: 60, description: 'Optional display name, trimmed; no control characters.' },
+            input_usd_per_million: { type: ['number','null'], minimum: 0, maximum: 10000, description: 'Optional price in US dollars per million input tokens, used to estimate cost. Absent or null keeps the known price, if any.' },
+            output_usd_per_million: { type: ['number','null'], minimum: 0, maximum: 10000, description: 'Optional price in US dollars per million output tokens. Absent or null keeps the known price, if any.' } }, ['provider','model']),
             description: 'The models the settings page offers for exploration and navigation, such as several Meta models. Each provider and trimmed model ID appears once; different providers can share an ID. Only names and IDs are saved, never credentials. Listed models can be paid while free_only is on; only the exploration and navigation models must be free. Jobs do not freeze this list. Omitted: an empty list.' },
         }, ['request_id','expected_revision','provider','model','viewport_profile','free_only','auto_reproduce','max_auto_reproductions','max_auto_replay_actions']),
         ModelRequest: strict({
