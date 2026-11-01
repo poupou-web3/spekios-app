@@ -5,7 +5,7 @@ import { Store, jsonBytes } from './store.js';
 import { CAPTURE_POLICY, capture, installNetworkGate, prepareCaptureContext, type Hooks } from './recorder.js';
 import { MAX_EXPLORATION_ACTIONS, MAX_EXPLORATION_MINUTES, isUuid, type Capture, type ObservedControl } from './contracts.js';
 import { ModelClient, modelSettings } from './model-client.js';
-import { blockedReason, documentFingerprint, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
+import { blockedReason, documentFingerprint, isLayoutOverlap, observeControls, observedCopyIdentity, parseAssessment, parsePlan, parsePrediction, sameObservedState, stateFingerprint, statesMatch, validateTarget } from './exploration-policy.js';
 import { loadReplay, finishReplay, replaySnapshot, type Replay } from './reproduction.js';
 import {loadVerification,bindVerificationCommand,parseFixAssessment,finishVerification} from './fix-verification.js';
 import { FrontierPlanner, PLANNER_VERSION, type BrowserCommand, type ChangeSignal, type RouteStep } from './frontier-planner.js';
@@ -19,7 +19,7 @@ import { accessSignals, AccessStopped, PrivateLoginSurface, AccessContextChanged
 import { AuthVault } from './auth-session.js';
 import { openBrowser } from './browser-sandbox.js';
 import { testFormRules, type TestFormRule } from './form-policy.js';
-import { ActionDiagnostics, settleAction, saveOutcome, outcomeContext, incompleteCompletion, COMPLETION_VERSION, COMPLETION_LIMITS, type Completion } from './action-outcome.js';
+import { ActionDiagnostics, settleAction, saveOutcome, outcomeContext, incompleteCompletion, COMPLETION_VERSION, COMPLETION_LIMITS, LATE_LAYOUT_LIMITS, type Completion } from './action-outcome.js';
 import type { AccessHandoff, AccessResult, AccessReason } from './access-handoff.js';
 import { RunControl, RunCancelled } from './run-control.js';
 import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
@@ -652,17 +652,17 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const outcome=await saveOutcome(store,runId,actionId,completion,diagnostics);
           outcomeSaved=true;
           const completionError=completion.status==='settled'?null:'Action completion was not established within the observation window.';
-          const diff = comparePng(before.bytes, after.bytes, { beforeCaptureId: before.capture.capture_id, afterCaptureId: after.capture.capture_id });
-          const comparison = { ...diff.metadata,
+          let diff = comparePng(before.bytes, after.bytes, { beforeCaptureId: before.capture.capture_id, afterCaptureId: after.capture.capture_id });
+          let comparison = { ...diff.metadata,
             raw_mask_artifact: await store.artifact(runId, 'raw_mask', diff.rawMaskPng, 'png'),
             absolute_delta_artifact: await store.artifact(runId, 'absolute_delta', diff.absoluteDeltaPng, 'png'),
             geometry_mask_artifact: diff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', diff.geometryMaskPng, 'png') : null };
-          const comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
-          const toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
+          let comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
+          let toState = await state(after.capture,fromState,changes(before.capture,after.capture,diff.rawMaskPng),spec.exploration?.purpose==='explore'?spec.exploration.likelihood:1,executed===1);
           idleActions = stateCreated ? 0 : idleActions + 1;
           const reached = { newState: stateCreated, newMapState: mapNovel };
           // What earlier runs observed for this action on an equivalent screen.
-          const fromKey = mapKeys.get(fromState), toKey = mapKeys.get(toState);
+          const fromKey = mapKeys.get(fromState); let toKey = mapKeys.get(toState);
           const earlier = fromKey && toKey ? planner.earlier(fromKey, spec.command) : null;
           const sameDestination = earlier ? earlier.known_to_keys.includes(toKey!) : null;
           // Commit both captures, comparison and graph edge BEFORE asking for a
@@ -683,7 +683,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             ...(fixTarget?{original_failure:{expected_result:replay!.fix_verification!.original.expected_result,observed_result:replay!.fix_verification!.original.observed_result,source_before_context:context(replayStep!.before, scale),source_capture_ids:[replayStep!.before.capture_id,replayStep!.after.capture_id]},
               verification_instruction:'Verify the frozen expected behavior positively. no_issue_observed alone does not establish a fix. Set expectation_met=true only when that exact expected behavior is visible in current evidence. Set preconditions_met=false for unsupported setup. same_failure_observed=true requires the same recorded behavioral failure, not a different error. Use null and inconclusive for uncertainty. Source context is recorded data; only the current before/after pair is attached as images. No desired result is implied by this being a fix verification.'}:{}),
             context_scale: scale,
-            instruction: 'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay.',
+            instruction: 'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay. If text or regions occupy the same space, say that they overlap.',
             response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } })).input;
           const assess = (tier: 'main' | 'navigation') => decide('assessment', actionId, captureIds, assessmentInput,
             value => fixTarget?parseFixAssessment(value,captureIds):parseAssessment(value, captureIds), tier);
@@ -703,16 +703,72 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               check = await assess('main');
             } else check = first!;
           } else check = await assess('main');
-          const assessment = { ...check.result, verdict: checkError || check.result.expectation_uncertain ? 'inconclusive' : check.result.verdict,
+          let assessment: Record<string, any> = { ...check.result, verdict: checkError || check.result.expectation_uncertain ? 'inconclusive' : check.result.verdict,
             check_id: randomUUID(), method: 'model-evidence-v1', expected: spec.prediction.expected_result,
             request_id: check.requestId, decision_id: check.decisionId, tool_error: toolError, confirmed_bug: false, model_tier: check.tier, ...(screening ? { screening } : {}),
-            override_reason: checkError ? 'Tool, observation or completion failure cannot support a product verdict.' : check.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null };
+            override_reason: checkError ? 'Tool, observation or completion failure cannot support a product verdict.' : check.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null, layout_recheck: null };
+          // Overlapping text is often the page still loading. Wait once more and
+          // judge the later screenshots. A collision that remains is kept.
+          let replacedEvidence = false;
+          if (!fixTarget && !checkError && assessment.verdict === 'suspect' && isLayoutOverlap(String(assessment.reason ?? ''), String(assessment.observed_result ?? ''))) {
+            const earlierAfterId = after.capture.capture_id, earlierObserved = assessment.observed_result;
+            try {
+              await control.check();
+              const lateDiagnostics = new ActionDiagnostics(page);
+              let late: Completion;
+              try { late = await settleAction(store, page, runId, actionId, lateDiagnostics, hooks, LATE_LAYOUT_LIMITS, true); }
+              finally { lateDiagnostics.stop(); }
+              const recaptured = await capture(store, page, runId, actionId, 'after', ordinal, null, hooks);
+              const lateDiff = comparePng(before.bytes, recaptured.bytes, { beforeCaptureId: before.capture.capture_id, afterCaptureId: recaptured.capture.capture_id });
+              const lateComparison = { ...lateDiff.metadata,
+                raw_mask_artifact: await store.artifact(runId, 'raw_mask', lateDiff.rawMaskPng, 'png'),
+                absolute_delta_artifact: await store.artifact(runId, 'absolute_delta', lateDiff.absoluteDeltaPng, 'png'),
+                geometry_mask_artifact: lateDiff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', lateDiff.geometryMaskPng, 'png') : null };
+              const lateIds = [before.capture.capture_id, recaptured.capture.capture_id];
+              const lateInput = fitContext(scale => ({ task: 'assessment', action: commandContext(spec.command), prediction: spec.prediction,
+                before: context(before!.capture, scale), after: context(recaptured.capture, scale), pixel_comparison: lateDiff.metadata,
+                tool_error: toolError, action_outcome: outcomeContext(outcome), recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.assessment_history * scale)),
+                layout_recheck: { earlier_observed_result: earlierObserved, wait_status: late.status, wait_elapsed_ms: late.elapsed_ms,
+                  note: 'The first screenshots may have been taken while the page was still loading. Judge only this later pair. Overlap that has separated is loading, not a defect.' },
+                context_scale: scale,
+                instruction: 'Compare both screenshots and observations with the prediction. This is a later observation of the same action after an additional wait. If text or regions occupy the same space, say that they overlap. Overlap that has separated is not a defect. Suspicion requires a supported expectation.',
+                response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: lateIds, expectation_uncertain: 'boolean' } })).input;
+              const second = await decide('assessment', actionId, lateIds, lateInput, value => parseAssessment(value, lateIds), 'main');
+              const secondVerdict = second.result.expectation_uncertain ? 'inconclusive' : second.result.verdict;
+              const still = secondVerdict === 'suspect' && isLayoutOverlap(second.result.reason, second.result.observed_result);
+              if (stateFingerprint(recaptured.capture) !== stateFingerprint(after.capture)) {
+                const wasNew = stateCreated;
+                toState = await state(recaptured.capture, fromState, changes(before.capture, recaptured.capture, lateDiff.rawMaskPng), spec.exploration?.purpose === 'explore' ? spec.exploration.likelihood : 1, executed === 1);
+                toKey = mapKeys.get(toState);
+                if (stateCreated && !wasNew) idleActions = 0;
+              }
+              after = recaptured;
+              diff = lateDiff;
+              comparison = lateComparison;
+              comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(lateComparison), 'json');
+              replacedEvidence = true;
+              assessment = { ...second.result, verdict: secondVerdict, check_id: randomUUID(), method: 'model-evidence-v1', expected: spec.prediction.expected_result,
+                request_id: second.requestId, decision_id: second.decisionId, tool_error: toolError, confirmed_bug: false, model_tier: second.tier, ...(screening ? { screening } : {}),
+                override_reason: second.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null,
+                layout_recheck: { outcome: still ? 'still_present' : secondVerdict === 'no_issue_observed' ? 'cleared' : 'revised',
+                  earlier_verdict: 'suspect', earlier_observed_result: earlierObserved, earlier_after_capture_id: earlierAfterId,
+                  wait_status: late.status, wait_elapsed_ms: late.elapsed_ms, later_verdict: secondVerdict } };
+            } catch (error) {
+              if (error instanceof PrivateLoginSurface || error instanceof RunCancelled || error instanceof AccessContextChanged || error instanceof AccessStopped || (error instanceof Error && error.name === 'AbortError')) throw error;
+              assessment = { ...assessment, layout_recheck: { outcome: 'unavailable', error: message(error) } };
+            }
+          }
           // A different destination, or a verdict that flipped between no issue
           // and suspect, is a change; inconclusive outcomes are too noisy to count.
           const flipped = !!earlier?.last_verdict && earlier.last_verdict !== assessment.verdict
             && [earlier.last_verdict, assessment.verdict].every(v => v === 'no_issue_observed' || v === 'suspect');
           const compared = earlier ? (sameDestination === false || flipped ? 'changed' as const : 'same' as const) : null;
           await store.transaction(async () => {
+            if (replacedEvidence) {
+              await store.query('UPDATE runtime_actions SET after_capture_id=$2,comparison=$3 WHERE action_id=$1', [actionId, after!.capture.capture_id, JSON.stringify({ ...comparison, metadata_artifact: comparisonArtifact })]);
+              await store.query('UPDATE exploration_edges SET to_state_id=$2 WHERE action_id=$1', [actionId, toState]);
+              await store.event(runId, 'action.layout_recheck', { layout_recheck: assessment.layout_recheck, after_capture_id: after!.capture.capture_id, changed_pixels: diff.metadata.counts.changed_pixels }, actionId);
+            }
             await store.query("UPDATE runtime_actions SET state='completed',assessment=$2,finished_at=now() WHERE action_id=$1", [actionId, JSON.stringify(assessment)]);
             await store.event(runId, 'action.assessed', { assessment, before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id }, actionId);
             if (spec.command.type !== 'navigate' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);

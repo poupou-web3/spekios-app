@@ -120,6 +120,28 @@ test('real-browser action completion, diagnostics and safe form journeys',{
       assert.ok(action.outcome.samples<=COMPLETION_LIMITS.max_frames);
       assert.equal(result.report.graph.edges.length,3);
     });
+    await t.test('overlapping content during load is checked again and dropped when it separates',async()=>{
+      const result=await explore(store,fixture.url+'/journeys/overlap',{...options,maxActions:1});
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      const action=result.report.actions[0];
+      assert.equal(action.spec.command.type,'navigate');
+      assert.equal(action.assessment.verdict,'no_issue_observed');
+      assert.equal(action.assessment.layout_recheck.outcome,'cleared');
+      assert.equal(action.assessment.layout_recheck.earlier_verdict,'suspect');
+      assert.ok(action.assessment.layout_recheck.wait_elapsed_ms>=1000);
+      assert.equal(action.outcome.status,'settled');
+      const assessments=result.report.events.filter(e=>e.action_id===action.action_id&&e.event_type==='model.decision_accepted'&&e.payload.kind==='assessment');
+      assert.equal(assessments.length,2);
+      assert.ok(result.report.events.some(e=>e.action_id===action.action_id&&e.event_type==='action.layout_recheck'));
+    });
+    await t.test('overlapping content that remains after a longer wait stays a finding',async()=>{
+      const result=await explore(store,fixture.url+'/journeys/overlap-stuck',{...options,maxActions:1});
+      assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);
+      const action=result.report.actions[0];
+      assert.equal(action.assessment.verdict,'suspect');
+      assert.equal(action.assessment.layout_recheck.outcome,'still_present');
+      assert.equal(action.assessment.layout_recheck.later_verdict,'suspect');
+    });
     await t.test('a CSS animation settles and stays one state while its pixels remain stored',async()=>{
       const result=await explore(store,fixture.url+'/journeys/animation',{...options,maxActions:4});saved.animation=result.run_id;
       assert.equal(result.report.run.lifecycle,'completed',result.report.run.error);

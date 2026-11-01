@@ -755,6 +755,7 @@ pub(crate) fn issue_packet(report: &Value, action: &Value) -> Value {
           "geometry_changed":action["comparison"]["geometry_changed"],"decoded_pixels_identical":action["comparison"]["decoded_pixels_identical"],
           "pixel_change_is_bug_verdict":false},
         "diagnostics":{"completion":fields(&action["outcome"],&["status","reason","elapsed_ms","pending_requests","busy","diagnostics"]),
+          "layout_recheck":assessment["layout_recheck"].clone(),
           "signals":signals,"recorded_events":diagnostics.len(),"signals_truncated":diagnostics.iter().filter(|e|signal(e)).count()>12,
           "stack_traces_collected":false,"causation_established":false},
         "evidence":{"captures":captures,"mask":artifact_ref(report,&action["comparison"]["raw_mask_artifact"]),

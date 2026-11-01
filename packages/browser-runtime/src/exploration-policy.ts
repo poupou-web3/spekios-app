@@ -376,6 +376,13 @@ export function parsePrediction(value: unknown) {
   const o = object(value, ['goal', 'expected_result']);
   return { goal: text(o.goal, 300), expected_result: text(o.expected_result) };
 }
+// A loading page can paint text on top of other text, then separate once fonts
+// and images arrive. The phrase has to describe that collision; a denial does not.
+export function isLayoutOverlap(reason: string, observed: string): boolean {
+  const text = `${reason}\n${observed}`.toLowerCase().replace(/\s+/g, ' ');
+  const cleaned = text.replace(/\b(?:do not|does not|don't|doesn't|did not|no longer|not|without|never|no)\s+(?:overlap\w*|overla(?:id|y|ys)|collid\w*)/g, '');
+  return /\b(?:overlaps?|overlapping|overlaid|overlays?|collides?|colliding)\b|\bon top of\b/.test(cleaned);
+}
 export function parseAssessment(value: unknown, captureIds: string[]) {
   const o = object(value, ['verdict', 'reason', 'observed_result', 'evidence_capture_ids', 'expectation_uncertain']);
   if (!['no_issue_observed', 'suspect', 'inconclusive'].includes(String(o.verdict))) throw new Error('Unsupported assessment verdict.');

@@ -85,6 +85,14 @@ export function explorerReply(input) {
       preconditions_met:true,expectation_met:saved,same_failure_observed:same};
   }
   if (url.includes('/invalid-assessment')) return {verdict:'no_issue_observed',reason:'Invalid evidence reference',observed_result:'Page visible',evidence_capture_ids:['invented','invented'],expectation_uncertain:false};
+  if (url.includes('/journeys/overlap')) {
+    const separated = !url.includes('/overlap-stuck') && input.layout_recheck && String(input.after.text).includes('separated');
+    const suspect = !separated;
+    return {verdict:suspect?'suspect':'no_issue_observed',
+      reason:suspect?'The hero tagline visually overlaps the introductory paragraph.':'The hero and the introduction are separated and the page is readable.',
+      observed_result:suspect?'The hero tagline visually overlaps the introductory paragraph.':input.after.text.slice(0,600),
+      evidence_capture_ids:[input.before.capture_id,input.after.capture_id],expectation_uncertain:false};
+  }
   const click = input.action.type === 'click';
   const broken = input.action.type==='submit' && url.includes('/journeys/broken') && input.after.text.includes('Service unavailable') || click && url.includes('/broken') && (
     input.action.control?.name === 'Save draft' && !input.after.text.includes('Saved') ||

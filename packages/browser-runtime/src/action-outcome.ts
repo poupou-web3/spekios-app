@@ -9,6 +9,9 @@ import { RunCancelled } from './run-control.js';
 
 export const COMPLETION_VERSION = 'action-completion-v1';
 export const COMPLETION_LIMITS = { timeout_ms: 5000, minimum_ms: 1000, quiet_ms: 600, sample_interval_ms: 200, max_frames: 24, long_lived_request_ms: 2000 };
+// One extra wait after a model reports overlapping content. It is not the
+// budget for an ordinary action.
+export const LATE_LAYOUT_LIMITS = { timeout_ms: 8000, minimum_ms: 1200, quiet_ms: 700, sample_interval_ms: 200, max_frames: 24, long_lived_request_ms: 2000 };
 type Artifact = Awaited<ReturnType<Store['artifact']>>;
 type Event = { event_id:string; kind:string; offset_ms:number; [key:string]:unknown };
 export type Completion = { version:string; status:'settled'|'timed_out'|'observation_failed'; elapsed_ms:number;
@@ -114,8 +117,8 @@ function observationBoundary(error:unknown) {
 // text does not keep the page from going quiet. A screenshot uses the time
 // left in the window: a one-second cap turns a slow readback into zero frames.
 // A connection open for long_lived_request_ms is a background channel.
-export async function settleAction(store:Store,page:Page,runId:string,actionId:string,diagnostics:ActionDiagnostics,hooks:Hooks):Promise<Completion> {
-  const started=performance.now(),limits={...COMPLETION_LIMITS};
+export async function settleAction(store:Store,page:Page,runId:string,actionId:string,diagnostics:ActionDiagnostics,hooks:Hooks,requested:typeof COMPLETION_LIMITS=COMPLETION_LIMITS,waitForResources=false):Promise<Completion> {
+  const started=performance.now(),limits={...requested};
   let lastVisual:string|undefined,lastDom:string|undefined,lastUrl:string|undefined,quietSince=started;
   const result:Completion={version:COMPLETION_VERSION,status:'timed_out',elapsed_ms:0,limits,samples:0,observation_failures:0,visual_changes:0,dom_changes:0,url_changes:0,
     pending_requests:0,busy:false,reason:'The page did not reach a quiet observation within the bounded wait.',frames:[]};
@@ -127,10 +130,11 @@ export async function settleAction(store:Store,page:Page,runId:string,actionId:s
     quietSince=performance.now();
   };
   const pause=()=>new Promise(resolve=>setTimeout(resolve,Math.min(limits.sample_interval_ms,Math.max(0,limits.timeout_ms-(performance.now()-started)))));
-  const readDom=()=>boundedRead(page.evaluate(tolerance=>{
+  const readDom=()=>boundedRead(page.evaluate(({tolerance,waitForResources})=>{
     const text=document.body?.innerText??'';
     const scroll={x:Math.round(scrollX/tolerance)*tolerance,y:Math.round(scrollY/tolerance)*tolerance};
-    const busy=document.readyState==='loading'||Array.from(document.querySelectorAll('[aria-busy="true"],[role="progressbar"]')).some(node=>{
+    const resources=!!waitForResources&&(document.fonts?.status==='loading'||Array.from(document.images).some(img=>!img.complete));
+    const busy=document.readyState==='loading'||resources||Array.from(document.querySelectorAll('[aria-busy="true"],[role="progressbar"]')).some(node=>{
       const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
       return !!(rect.width&&rect.height)&&style.visibility==='visible'&&style.display!=='none';
     });
@@ -140,7 +144,7 @@ export async function settleAction(store:Store,page:Page,runId:string,actionId:s
         return [node.tagName,node.textContent?.slice(0,200),field.type==='password'?'[private]':field.value?.slice(0,500),field.checked,field.disabled,node.getAttribute('aria-expanded'),node.getAttribute('aria-invalid')];
       })]);
     return {url:location.href,title:document.title,text:text.slice(0,8000),busy,signature};
-  }, GEOMETRY_TOLERANCE_PX),Math.min(1000,budget()));
+  }, {tolerance:GEOMETRY_TOLERANCE_PX,waitForResources}),Math.min(1000,budget()));
   while(performance.now()-started<limits.timeout_ms&&result.samples<limits.max_frames) {
     try{await hooks.beforeCapture?.(page);}
     catch(error){
