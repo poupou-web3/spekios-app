@@ -40,6 +40,11 @@ read_env() {
   printf '%s' "${line#"${key}"=}"
 }
 
+if [[ -z "$(read_env SCOUT_PROVIDER_VAULT_KEY)" ]]; then
+  umask 077
+  printf '\nSCOUT_PROVIDER_VAULT_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
+fi
+
 export COMPOSE_FILE="compose.yaml:compose.deploy.yaml"
 export SCOUT_PUBLISH="${SCOUT_PUBLISH:-127.0.0.1}"
 

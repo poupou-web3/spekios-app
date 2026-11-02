@@ -562,11 +562,14 @@ pub(crate) async fn start_recheck(state: &AppState, input: RecheckInput) -> Resp
     {
         return error(StatusCode::CONFLICT, "recheck_id_conflict");
     }
-    let providers = state
-        .gateway
-        .as_ref()
-        .map(|g| g.providers())
-        .unwrap_or(json!({}));
+    let providers = if let Some(g) = &state.gateway {
+        match g.providers_for(&state.principal).await {
+            Ok(v) => v,
+            Err(code) => return error(StatusCode::SERVICE_UNAVAILABLE, code),
+        }
+    } else {
+        json!({"providers":[]})
+    };
     let done = saved["done"].as_array().cloned().unwrap_or_default();
     for issue in saved["issues"].as_array().into_iter().flatten() {
         if done.contains(&issue["issue_id"]) {

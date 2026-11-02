@@ -1,12 +1,24 @@
 // Back office entry: delegated DOM events, polling and startup.
 import {toast} from '/assets/ui/components.js';
 import {bindThemeSwitch} from '/assets/ui/theme.js';
-import {get} from './api.js';
+import {api,get} from './api.js';
 import {bootstrapSession,login,refresh,render,route,selectTab,tabHash} from './app.js';
 import {TABS,root,state} from './state.js';
 import {cancelWork} from './views/jobs.js';
 root.addEventListener('submit',async e=>{
   e.preventDefault();
+  if(e.target.id==='demo-settings-form'){
+    if(state.submitting)return;
+    const form=new FormData(e.target),secret=String(form.get('api_key')||'');
+    e.target.querySelector('#demo-api-key').value='';form.delete('api_key');
+    state.demoDraft={enabled:form.has('enabled'),allowance_usd:String(form.get('allowance_usd'))};
+    state.submitting=true;state.demoError='';state.demoMessage='';render();
+    try{
+      await api('/v1/admin/demo',{expected_revision:state.demo.revision,model:'muse-spark-1.3-contributor',enabled:state.demoDraft.enabled,allowance_usd:Number(state.demoDraft.allowance_usd),...(secret?{api_key:secret}:{})});
+      state.demo=await get('/v1/admin/demo');state.demoDraft=null;state.demoMessage='Demo settings saved. Personal models and keys remain available.';
+    }catch(error){state.demoError=error.code==='revision_conflict'?'Another operator changed these settings. Refresh and review the latest revision before saving.':error.message;}
+    finally{state.submitting=false;render();}return;
+  }
   if(e.target.id!=='login-form')return;
   state.token=new FormData(e.target).get('token').trim();state.error='';
   try{await get('/readyz');sessionStorage.setItem('scout.backoffice-token',state.token);state.connected=true;await route();}catch(error){state.error=error.message;login();}
@@ -14,6 +26,11 @@ root.addEventListener('submit',async e=>{
 root.addEventListener('compositionstart',()=>{state.composing=true;});
 root.addEventListener('compositionend',e=>{state.composing=false;captureInput(e.target);setTimeout(render,0);});
 function captureInput(target){
+  if(target.id==='demo-allowance'||target.id==='demo-enabled'){
+    state.demoDraft??={enabled:state.demo?.enabled===true,allowance_usd:state.demo?.allowance_usd??1};
+    state.demoDraft[target.id==='demo-enabled'?'enabled':'allowance_usd']=target.id==='demo-enabled'?target.checked:target.value;
+    return false;
+  }
   const field={'event-search':'eventSearch','job-search':'jobSearch','model-search':'modelSearch'}[target.id];
   if(field)state[field]=target.value;
   return !!field;

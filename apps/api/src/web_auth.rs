@@ -575,13 +575,27 @@ pub(crate) async fn account_email(state: &AppState) -> Result<Option<String>, Re
                 && !email.chars().any(|c| c.is_control() || c.is_whitespace())
         }))
 }
-pub async fn logout_page() -> Response {
+pub async fn logout_page(State(state): State<AppState>) -> Response {
     let mut r = Html("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Sign out · Spekios</title><h1>Sign out of Spekios</h1><form action=\"/logout\" method=\"post\"><button type=\"submit\">Sign out</button></form><p><a href=\"/\">Back to app</a></p></html>").into_response();
+    // A navigation POST under no-referrer serializes Origin as null. Preserve
+    // the origin for this same-origin form without sending referrers off-site;
+    // the POST handler still requires the exact configured application origin.
+    r.headers_mut()
+        .insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
+    // Browsers apply form-action to the POST's redirects too. Allow only the
+    // configured identity provider's logout destination so both sessions end.
+    let form_action = state
+        .web_auth
+        .as_ref()
+        .map(|config| format!("'self' {}/logout", config.auth_origin))
+        .unwrap_or_else(|| "'self'".into());
     r.headers_mut().insert(
         "content-security-policy",
-        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
-            .parse()
-            .unwrap(),
+        format!(
+            "default-src 'none'; form-action {form_action}; frame-ancestors 'none'; base-uri 'none'"
+        )
+        .parse()
+        .unwrap(),
     );
     r
 }
@@ -835,6 +849,68 @@ mod tests {
                 .await
                 .status(),
             503
+        );
+    }
+    #[tokio::test]
+    async fn logout_form_preserves_origin_without_relaxing_csrf() {
+        let app = crate::router(
+            AppState::new(None, TOKEN)
+                .unwrap()
+                .with_web_auth(Some(config()))
+                .unwrap(),
+        );
+        let page = call(&app, "GET", "/logout", None, None).await;
+        assert_eq!(page.status(), 200);
+        assert_eq!(page.headers()[header::REFERRER_POLICY], "same-origin");
+        assert_eq!(page.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(
+            page.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .contains("form-action 'self' https://login.example.test/logout;")
+        );
+        let unconfigured = crate::router(AppState::new(None, TOKEN).unwrap());
+        let unconfigured = call(&unconfigured, "GET", "/logout", None, None).await;
+        assert!(
+            unconfigured.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .contains("form-action 'self';")
+        );
+        for path in ["/login", "/auth/callback", "/"] {
+            let response = call(&app, "GET", path, None, None).await;
+            assert_eq!(response.headers()[header::REFERRER_POLICY], "no-referrer");
+        }
+        for origin in [None, Some("null"), Some("http://evil.test")] {
+            assert_eq!(
+                call(&app, "POST", "/logout", None, origin).await.status(),
+                403
+            );
+        }
+        let null_origin = Request::builder()
+            .method("POST")
+            .uri("/logout")
+            .header("host", "localhost:18080")
+            .header("origin", "null")
+            .header("sec-fetch-site", "same-origin")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(null_origin).await.unwrap().status(),
+            403
+        );
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/logout",
+                None,
+                Some("http://localhost:18080")
+            )
+            .await
+            .status(),
+            503,
+            "valid same-origin form reaches the handler; this test has no database"
         );
     }
     #[tokio::test]

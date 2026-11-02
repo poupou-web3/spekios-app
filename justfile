@@ -223,6 +223,10 @@ model-request request_id:
 model-test:
     bash scripts/test-model-gateway.sh
 
+# Fresh disposable databases and fake credentials; no model-provider calls.
+provider-access-test:
+    bash scripts/test-provider-access.sh
+
 # URL-only entry point; model and trusted-app origins come from local configuration.
 explore url: build-recorder
     docker compose run --rm --no-deps recorder explore "$1"

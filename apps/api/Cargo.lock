@@ -1574,6 +1574,7 @@ dependencies = [
  "dotenvy",
  "object_store",
  "reqwest",
+ "ring",
  "rmcp",
  "rustls",
  "rustls-pemfile",

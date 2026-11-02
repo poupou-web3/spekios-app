@@ -55,7 +55,7 @@ The default revision is zero until the first saved preference. Action limits are
 
 A new save returns 201; an identical retry 200. Revision conflicts return 409. New jobs freeze the effective revision; existing jobs and retries do not adopt later defaults.
 
-The preferences endpoint cannot change provider keys, allowed origins or test-form rules.
+Preferences can select a saved credential with **provider_key_id** (a UUID or `demo`), including in project and navigation model choices. They never contain the credential value. Allowed origins and test-form rules remain operator configuration.
 
 ## App memory
 
@@ -64,3 +64,15 @@ The preferences endpoint cannot change provider keys, allowed origins or test-fo
 **POST /v1/app-memory/{scope_id}/forget** with an empty JSON body deletes that scope's derived pages and controls and returns 200. Runs and evidence are unchanged. An unknown scope returns 404; a scope in use returns 409 **memory_scope_in_use**.
 
 An exploration job (**POST /v1/browser-jobs** with kind **explore**, or the **scout_start_exploration** tool) accepts an optional boolean **app_memory** that overrides the saved default for that run. While the gateway uses simulated models, omitted **app_memory** means off. Reproduction and fix-verification jobs reject it; they never use memory. See [explore deeper across runs](../../guides/app-memory/).
+
+## Named provider keys and demo credits
+
+**GET /v1/model-providers** returns the signed-in manager’s safe key metadata and demo balance alongside scoped provider readiness. Agents receive readiness without private key names or demo balances.
+
+**POST /v1/provider-keys** accepts a fresh **key_id**, **provider**, **name**, **api_key** and optional **make_default**. Multiple keys per provider are supported. Secrets are write-only; responses return the key ID. The same ID and content can be retried without another key record.
+
+**POST /v1/provider-keys/{key_id}/default** and **POST /v1/provider-keys/{key_id}/revoke** accept an empty body and operate only on the caller’s active personal keys. A removed key blocks future dispatch; an in-flight call can still settle.
+
+**GET/POST /v1/admin/demo** requires an operator, not an ordinary workspace manager. Writes accept **expected_revision**, **enabled**, **allowance_usd**, fixed **model** `muse-spark-1.3-contributor`, and an optional replacement **api_key**. Omitting the secret keeps the existing shared key. The default lifetime allowance is $1 per account; the demo starts disabled. Changing the allowance preserves spending and reservations.
+
+Demo input is counted server-side and a maximum charge is reserved atomically before inference. Missing usage keeps the reservation. Demo exhaustion affects only sponsored calls; personal keys, other models and settings remain available. No automatic paid-key fallback occurs.
