@@ -69,9 +69,10 @@ For a public HTTPS name, set `SCOUT_PUBLIC_HOST` to the hostname and `SCOUT_PUBL
 - the DNS records;
 - a Cloudflare Origin certificate;
 - Authenticated Origin Pulls with a private CA;
-- the Access application.
+- the Access application;
+- a Cloudflare Tunnel to sshd, which only the GitHub deploy service token can use, so port 22 stays closed to GitHub.
 
-Ansible hardens the host and refuses kernels without recorded fixes. It then deploys a committed revision with `SCOUT_EDGE_TLS=origin`, which makes `scripts/deploy.sh` add `compose.edge-origin.yaml`. Caddy then serves both hostnames with the Origin certificate and requires Cloudflare's client certificate, instead of requesting certificates from Let's Encrypt. Use `just cloud-plan`, `just cloud-apply` and `just cloud-deploy`.
+Ansible hardens the host and refuses kernels without recorded fixes. It then deploys a committed revision with `SCOUT_EDGE_TLS=origin`, which makes `scripts/deploy.sh` add `compose.edge-origin.yaml`. Caddy then serves both hostnames with the Origin certificate and requires Cloudflare's client certificate, instead of requesting certificates from Let's Encrypt. Use `just cloud-plan`, `just cloud-apply` and `just cloud-deploy`. After `just cloud-ci-setup`, merging `main` into `prod` triggers GitHub Actions to deploy the matching commit from `main`. The playbook and application code always come from `main`; `just release` only fast-forwards an already-merged commit. See [Releasing](../../infra/deploy/README.md#releasing).
 
 ## Why Compose first
 

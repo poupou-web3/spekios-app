@@ -85,6 +85,37 @@ cloud-token:
 cloud-deploy *args:
     cd infra/deploy/ansible && ansible-playbook site.yml "$@"
 
+# Run again after changing ansible/secrets.yml, rotating the service token or
+# moving to a new server.
+# One-time setup so every push to prod deploys through GitHub Actions.
+cloud-ci-setup:
+    bash infra/deploy/ci-setup.sh
+
+# Fast-forwards prod on GitHub, which starts the deploy workflow. Refuses
+# uncommitted changes and anything that would drop commits already on prod.
+# Deploy only a checked-out commit already merged into origin/main.
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "$(git status --porcelain)" ]]; then
+      echo "Commit or stash your changes first: only committed work is deployed." >&2; exit 1
+    fi
+    git fetch --quiet origin main prod
+    if ! git merge-base --is-ancestor HEAD origin/main; then
+      echo "Merge this commit into main first; production only comes from origin/main." >&2; exit 1
+    fi
+    if ! git merge-base --is-ancestor origin/prod HEAD; then
+      echo "prod has commits this one doesn't (git log --oneline HEAD..origin/prod)." >&2
+      echo "Merge main into prod through a pull request; release never drops what is deployed." >&2
+      exit 1
+    fi
+    if [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/prod)" ]]; then
+      echo "prod is already at $(git rev-parse --short HEAD). To redeploy it, run the Deploy workflow by hand." >&2; exit 1
+    fi
+    git push origin HEAD:refs/heads/prod
+    echo "prod is now $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)). GitHub is deploying it:"
+    echo "  https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo '<owner>/<repo>')/actions/workflows/deploy.yml"
+
 # Stop that deployment, including the HTTPS proxy, and keep the database volumes.
 deploy-stop:
     COMPOSE_FILE=compose.yaml:compose.deploy.yaml docker compose --profile edge stop

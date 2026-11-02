@@ -148,6 +148,8 @@ check "SSL and Certificates → Edit (Origin CA)" "$api/certificates?zone_id=$zo
 check "SSL and Certificates → Edit (Authenticated Origin Pulls)" "$api/zones/$zone_id/origin_tls_client_auth/settings"
 check "Config Rules → Edit" "$api/zones/$zone_id/rulesets/phases/http_config_settings/entrypoint"
 check "Account: Access: Apps and Policies → Edit" "$api/accounts/$account_id/access/apps"
+check "Account: Access: Service Tokens → Edit (GitHub deploys)" "$api/accounts/$account_id/access/service_tokens"
+check "Account: Cloudflare Tunnel → Edit (GitHub deploys)" "$api/accounts/$account_id/cfd_tunnel?per_page=1"
 
 status=$(get "$t" "$api/accounts/$account_id/access/organizations")
 if [[ "$status" == 200 ]]; then ok "Zero Trust is set up for the account"; else bad "Zero Trust not set up yet (dashboard → Zero Trust → choose the Free plan) or Access permission missing (HTTP $status)"; fi
