@@ -436,7 +436,8 @@ async fn no_store(request: Request, next: Next) -> Response {
         .insert("x-content-type-options", "nosniff".parse().unwrap());
     response
         .headers_mut()
-        .insert("referrer-policy", "no-referrer".parse().unwrap());
+        .entry("referrer-policy")
+        .or_insert_with(|| "no-referrer".parse().unwrap());
     response
 }
 
