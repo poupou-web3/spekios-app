@@ -11,7 +11,7 @@ backoffice_allowed_emails = ["you@example.com"]
 
 # ssh_public_key_path = "~/.ssh/spekios_hetzner.pub"   # create: ssh-keygen -t ed25519 -f ~/.ssh/spekios_hetzner
 # image               = "debian-13"
-# server_type         = "cx43"   # 8 vCPU / 16 GB; cx53 = 16 vCPU / 32 GB
+# server_type         = "cx43"   # 8 vCPU / 16 GB x86; cax31 = 8 vCPU / 16 GB ARM; `just cloud-check` lists what is in stock
 # location            = "nbg1"   # nbg1, fsn1 or hel1
 # server_backups      = true
 # cloudflare_zone     = "spekios.com"
