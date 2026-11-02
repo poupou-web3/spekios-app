@@ -95,7 +95,7 @@ ssh deploy@<ip>                         # `tofu -chdir=infra/deploy/terraform ou
 cd /opt/scout/current && export COMPOSE_FILE=compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml
 docker compose ps                       # status
 docker compose logs -f api
-grep SCOUT_API_TOKEN /opt/scout/shared/.env   # the operator token for bo.spekios.com
+sed -n 's/^SCOUT_API_TOKEN=//p' /opt/scout/shared/.env   # the operator token for bo.spekios.com (value only, without "SCOUT_API_TOKEN=")
 ```
 
 Each release goes to `/opt/scout/releases/<sha>`, with `/opt/scout/current` pointing at the latest. The three most recent are kept. Data lives in the named Compose volumes of project `scout-qa`, so switching releases never touches it. `/opt/scout/shared/.env` is generated on the server the first time and never replaced. Ansible only updates the keys it manages and the ones in `secrets.yml`.
