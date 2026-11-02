@@ -5,7 +5,7 @@
 # never the local checkout or working tree. Set scout_ref (-e scout_ref=<sha>)
 # only to roll back to an older commit already on that branch.
 scout_remote: origin
-scout_branch: prod
+scout_branch: main
 scout_ref: ""
 
 scout_root: /opt/scout
@@ -15,6 +15,11 @@ scout_cert_dir: /etc/scout/edge
 # Files Terraform writes next to this folder.
 scout_local_secrets_dir: "{{ playbook_dir }}/../.secrets"
 scout_local_build_dir: "{{ playbook_dir }}/../.build"
+
+# Tunnel token Terraform writes, and the public half of the key GitHub Actions
+# deploys with (created by `just cloud-ci-setup`). See tasks/tunnel.yml.
+scout_tunnel_token_file: "{{ scout_local_secrets_dir }}/tunnel-token"
+scout_ci_ssh_public_key_file: "{{ lookup('ansible.builtin.env', 'SCOUT_CI_SSH_KEY', default=lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/spekios_github_deploy') }}.pub"
 
 # Optional private settings (provider keys, SPEKIOS_*, slot count...). See secrets.example.yml.
 scout_secrets_file: "{{ playbook_dir }}/secrets.yml"

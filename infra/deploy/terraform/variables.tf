@@ -82,6 +82,12 @@ variable "backoffice_subdomain" {
   default     = "bo"
 }
 
+variable "ssh_subdomain" {
+  description = "Hostname GitHub Actions uses to reach SSH through the Cloudflare Tunnel."
+  type        = string
+  default     = "ssh"
+}
+
 variable "backoffice_allowed_emails" {
   description = "Who can pass Cloudflare Access to the operator console (one-time PIN sent by email). Empty means any email address; the console still requires the operator token either way."
   type        = list(string)

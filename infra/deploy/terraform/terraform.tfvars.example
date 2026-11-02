@@ -16,4 +16,5 @@ backoffice_allowed_emails = ["you@example.com"]
 # server_backups      = true
 # cloudflare_zone     = "spekios.com"
 # app_subdomain       = "app"
+# ssh_subdomain       = "ssh"     # SSH for GitHub deploys, through a Cloudflare Tunnel
 # manage_ssl_rule     = true      # false if the zone already has a Configuration Rules ruleset

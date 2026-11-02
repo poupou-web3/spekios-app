@@ -7,6 +7,7 @@ provider "cloudflare" {}
 locals {
   fqdn        = "${var.app_subdomain}.${var.cloudflare_zone}"
   bo_fqdn     = "${var.backoffice_subdomain}.${var.cloudflare_zone}"
+  ssh_fqdn    = "${var.ssh_subdomain}.${var.cloudflare_zone}"
   hostnames   = [local.fqdn, local.bo_fqdn]
   secrets_dir = "${path.module}/../.secrets"
   labels      = { app = "scout", managed_by = "terraform" }
@@ -272,6 +273,77 @@ resource "cloudflare_zero_trust_access_application" "backoffice" {
   }]
 }
 
+# ---- SSH for GitHub Actions through a Cloudflare Tunnel.
+# Port 22 stays limited to admin_cidrs. cloudflared on the server dials out to
+# Cloudflare and forwards ssh.<zone> to its own sshd. Only the deploy service
+# token passes Access, and the CI key it carries is accepted only from
+# localhost (tasks/tunnel.yml), so neither secret works without the other.
+
+resource "cloudflare_zero_trust_tunnel_cloudflared" "ssh" {
+  account_id = data.cloudflare_zone.this.account.id
+  name       = "${var.server_name}-ssh"
+  config_src = "cloudflare"
+}
+
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "ssh" {
+  account_id = data.cloudflare_zone.this.account.id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.ssh.id
+
+  config = {
+    ingress = [
+      { hostname = local.ssh_fqdn, service = "ssh://localhost:22" },
+      { service = "http_status:404" },
+    ]
+  }
+}
+
+data "cloudflare_zero_trust_tunnel_cloudflared_token" "ssh" {
+  account_id = data.cloudflare_zone.this.account.id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.ssh.id
+}
+
+resource "cloudflare_dns_record" "ssh" {
+  zone_id = data.cloudflare_zone.this.id
+  name    = local.ssh_fqdn
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.ssh.id}.cfargotunnel.com"
+  proxied = true
+  ttl     = 1
+  comment = "SSH to ${var.server_name} for GitHub deploys (Cloudflare Tunnel + Access)"
+}
+
+# Does not expire: an expiring token would silently stop deploys. Rotate with
+# `tofu apply -replace=cloudflare_zero_trust_access_service_token.deploy`,
+# then `just cloud-ci-setup`.
+resource "cloudflare_zero_trust_access_service_token" "deploy" {
+  account_id = data.cloudflare_zone.this.account.id
+  name       = "${var.server_name} GitHub deploy"
+  duration   = "forever"
+}
+
+resource "cloudflare_zero_trust_access_policy" "deploy_ssh" {
+  account_id = data.cloudflare_zone.this.account.id
+  name       = "Scout GitHub deploy"
+  decision   = "non_identity"
+  include = [{
+    service_token = { token_id = cloudflare_zero_trust_access_service_token.deploy.id }
+  }]
+}
+
+resource "cloudflare_zero_trust_access_application" "deploy_ssh" {
+  account_id           = data.cloudflare_zone.this.account.id
+  name                 = "Scout deploy SSH"
+  type                 = "self_hosted"
+  domain               = local.ssh_fqdn
+  session_duration     = "1h"
+  app_launcher_visible = false
+
+  policies = [{
+    id         = cloudflare_zero_trust_access_policy.deploy_ssh.id
+    precedence = 1
+  }]
+}
+
 # ---- Files Ansible reads. All of them are gitignored.
 
 resource "local_file" "origin_cert" {
@@ -291,6 +363,13 @@ resource "local_sensitive_file" "origin_key" {
 resource "local_file" "aop_ca" {
   filename             = "${local.secrets_dir}/aop-ca.pem"
   content              = tls_self_signed_cert.aop_ca.cert_pem
+  file_permission      = "0600"
+  directory_permission = "0700"
+}
+
+resource "local_sensitive_file" "tunnel_token" {
+  filename             = "${local.secrets_dir}/tunnel-token"
+  content              = data.cloudflare_zero_trust_tunnel_cloudflared_token.ssh.token
   file_permission      = "0600"
   directory_permission = "0700"
 }

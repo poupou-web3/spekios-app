@@ -7,14 +7,18 @@ This folder deploys the single-machine stack from [deployment](../../docs/platfo
 
 Two tools do the work:
 
-- **Terraform** (OpenTofu works the same way) creates the server, its firewall, both DNS records, the Cloudflare Origin certificate, the Full (strict) TLS rule, the Authenticated Origin Pulls client certificate, and the Access application.
-- **Ansible** hardens the host, patches the kernel and checks it, installs Docker, ships a committed revision of the code, and runs `scripts/deploy.sh edge`.
+- **Terraform** (OpenTofu works the same way) creates the server, its firewall, the DNS records, the Cloudflare Origin certificate, the Full (strict) TLS rule, the Authenticated Origin Pulls client certificate, the Access applications, and the Cloudflare Tunnel that GitHub deploys use for SSH.
+- **Ansible** hardens the host, patches the kernel and checks it, installs Docker and cloudflared, ships a committed revision of the code, and runs `scripts/deploy.sh edge`.
+- **GitHub Actions** ([deploy.yml](../../.github/workflows/deploy.yml)) runs that same Ansible release step on every push to `prod`.
 
 ```
 Internet ─▶ Cloudflare ── TLS + our client cert ─▶ Hetzner firewall ─▶ Caddy ─▶ api:8080         (app)
             (Access on bo)                         443/80 from              └──▶ backoffice:8080  (bo)
                                                    Cloudflare only;
                                                    22 from admin_cidrs
+
+GitHub Actions ─▶ Cloudflare Access ─▶ Tunnel ◀── cloudflared (dials out) ─▶ sshd on localhost
+                  (service token)      ssh.spekios.com
 ```
 
 ## Getting started from zero
@@ -31,8 +35,10 @@ You run everything below from this repository on your own machine. The only acco
      - DNS → Edit
      - SSL and Certificates → Edit (Origin certificate, Authenticated Origin Pulls)
      - Config Rules → Edit (Full (strict) for the two hostnames)
-   - Account permission:
+   - Account permissions:
      - Access: Apps and Policies → Edit
+     - Access: Service Tokens → Edit (GitHub deploys)
+     - Cloudflare Tunnel → Edit (GitHub deploys)
 6. **Create a dedicated SSH key** for this server: `ssh-keygen -t ed25519 -f ~/.ssh/spekios_hetzner -C spekios-hetzner`. A passphrase is recommended; macOS can keep it in the Keychain with `ssh-add --apple-use-keychain ~/.ssh/spekios_hetzner`. Terraform installs the public half, and Ansible and the `ssh` output use the private half. To use another key, set `ssh_public_key_path`.
 7. **Fill in your variables:**
    ```sh
@@ -49,9 +55,43 @@ You run everything below from this repository on your own machine. The only acco
    just cloud-plan     # review what will be created
    just cloud-apply    # creates the server, firewall, DNS, certificates and Access app; writes ansible/inventory.yml and .secrets/
    just cloud-deploy   # host setup, kernel check, first deploy (the API compiles on the server: about 15–20 min)
+   just cloud-ci-setup # deploys on push to prod (next section); needs the GitHub CLI: brew install gh cloudflared
    ```
 
-**What gets deployed:** always the tip of the `prod` branch as it is on GitHub. The playbook fetches `origin/prod` and ships that commit with `git archive`, whatever you have checked out locally and whatever is uncommitted. To release, push to `prod`, then run `just cloud-deploy --tags app`. To roll back, run `just cloud-deploy --tags app -e scout_ref=<sha>`; the commit must already be in `prod`'s history, and other branches are refused. The playbook files themselves run from your checkout, so run deploys from an up-to-date `main` or `prod`.
+## Releasing
+
+**Production always comes from `origin/main`.** Merge feature branches into `main` first, then merge `main` into `prod` to release. The [Deploy workflow](../../.github/workflows/deploy.yml) runs on pushes to `prod`, but checks out its playbook from `main` and deploys the matching commit in `main` history. A release whose file tree differs from its latest shared `main` commit is rejected before credentials are prepared. A merge commit on `prod` is a release trigger, not a separate source of application code.
+
+Only one deployment runs at a time: a push during a deploy waits, and if several wait, only the newest runs. `just release` can fast-forward `prod` to your checked-out commit if that commit is already on `origin/main` and includes all `prod` history. Otherwise merge `main` into `prod` through a pull request. Uncommitted changes and feature-only commits cannot be released.
+
+**Roll back or redeploy:** in GitHub, open *Actions → Deploy → Run workflow* on `main` or `prod`. Leave the commit empty to redeploy the tip of `main`, or enter an older commit from `main` history. A later push to `prod` releases the matching `main` commit again.
+
+**From your machine:** use `just cloud-deploy --tags app`, or `just cloud-deploy --tags app -e scout_ref=<sha>` for an older commit in `main` history. Run the playbook from an up-to-date `main`. Overriding `scout_branch` to another branch is refused.
+
+### How GitHub reaches the server
+
+Port 22 stays limited to `admin_cidrs`; GitHub's runners never get through the Hetzner firewall. Instead:
+
+- **cloudflared** (`scout-ssh-tunnel.service`, installed by Ansible) dials out to Cloudflare and forwards `ssh.spekios.com` to the server's own sshd. It runs as an unprivileged throwaway user.
+- **Cloudflare Access** guards `ssh.spekios.com`: only the `scout-prod GitHub deploy` service token passes.
+- **The deploy key** (`~/.ssh/spekios_github_deploy`, made for CI only) is accepted only from `127.0.0.1` and `::1`, that is, through the tunnel. Neither the key nor the service token is enough on its own.
+- **Host keys are pinned:** the workflow refuses a server whose SSH host key isn't the one `just cloud-ci-setup` recorded.
+
+`just cloud-ci-setup` sets all of this up. It creates the deploy key, runs `ansible-playbook site.yml --tags tunnel`, checks a login through the tunnel when cloudflared is installed locally, and stores these in the repository's Actions settings:
+
+| Secret | Holds |
+|---|---|
+| `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` | The deploy key and the server's host keys |
+| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | The Access service token |
+| `ORIGIN_PEM`, `ORIGIN_KEY`, `AOP_CA_PEM` | The files in `.secrets/` that Caddy needs |
+| `ANSIBLE_SECRETS_YML` | `ansible/secrets.yml` (provider keys, `SPEKIOS_*`), if you have one; it must not be vault-encrypted |
+
+Variables: `DEPLOY_SSH_HOST`, `SCOUT_PUBLIC_HOST` and `SCOUT_BACKOFFICE_HOST`.
+
+Run `just cloud-ci-setup` again, then redeploy, whenever you change `secrets.yml`, rotate the service token (`tofu -chdir=infra/deploy/terraform apply -replace=cloudflare_zero_trust_access_service_token.deploy`) or move to a new server. These are repository secrets, readable by workflows on any branch, so only give write access to people who could deploy anyway. On a paid GitHub plan, you can move them into a `production` environment limited to `prod`.
+
+**Adding this to the existing server:** give the Cloudflare token the two new account permissions (step 5), then run `just cloud-check` and `just cloud-apply`. The apply adds the tunnel, the `ssh` DNS record, the Access app and the service token, and doesn't touch the server. Then run `just cloud-ci-setup` and merge the workflow into `main`, then merge `main` into `prod`.
+
 
 ## What is reachable
 
@@ -60,6 +100,7 @@ You run everything below from this repository on your own machine. The only acco
 | 443 | Cloudflare's IP ranges only | Caddy, and only with our client certificate |
 | 80 | Cloudflare's IP ranges only | Caddy redirects to HTTPS |
 | 22 | `admin_cidrs` (may be everyone: `["0.0.0.0/0", "::/0"]`) | SSH as `deploy` with a key only; root login and passwords are off. Debian 13's OpenSSH slows down repeated failed attempts from the same address. Opened to everyone, this is the only port reachable without going through Cloudflare. |
+| none | GitHub Actions, through `ssh.spekios.com` | The Cloudflare Tunnel is an outbound connection from the server, so it opens no port. Access lets only the deploy service token through (see [How GitHub reaches the server](#how-github-reaches-the-server)). |
 | anything else | nobody | Postgres, ClickHouse, the bucket and the internal ports bind to 127.0.0.1 |
 
 The layers, from the outside in:
@@ -95,7 +136,7 @@ ssh deploy@<ip>                         # `tofu -chdir=infra/deploy/terraform ou
 cd /opt/scout/current && export COMPOSE_FILE=compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml
 docker compose ps                       # status
 docker compose logs -f api
-grep SCOUT_API_TOKEN /opt/scout/shared/.env   # the operator token for bo.spekios.com
+sed -n 's/^SCOUT_API_TOKEN=//p' /opt/scout/shared/.env   # the operator token for bo.spekios.com (value only, without "SCOUT_API_TOKEN=")
 ```
 
 Each release goes to `/opt/scout/releases/<sha>`, with `/opt/scout/current` pointing at the latest. The three most recent are kept. Data lives in the named Compose volumes of project `scout-qa`, so switching releases never touches it. `/opt/scout/shared/.env` is generated on the server the first time and never replaced. Ansible only updates the keys it manages and the ones in `secrets.yml`.
@@ -109,19 +150,28 @@ Each release goes to `/opt/scout/releases/<sha>`, with `/opt/scout/current` poin
 
 ## Spekios sign-in on app.spekios.com
 
-The local `spekios-local` client only allows `http://localhost:18080/auth/callback`. For production:
+Production sign-in was activated on 2 November 2026 with the separate
+`spekios-app` client, callback `https://app.spekios.com/auth/callback`, and account
+launch URL `https://app.spekios.com/login`. The app reports auth mode `spekios`.
+The local `spekios-local` client still only allows
+`http://localhost:18080/auth/callback`. For another production installation:
 
 1. Register a second Lovable client whose redirect URI is exactly `https://app.spekios.com/auth/callback`. See [SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md).
 2. Put the five `SPEKIOS_*` values in `secrets.yml`.
 3. Run `just cloud-deploy --tags app`.
 
-Until then, the workspace asks for the API token.
+The five settings are also saved in the original `front-clause` checkout's
+ignored `ansible/secrets.yml`, so future deployments keep sign-in enabled. Keep
+the backend secret paired with its registered Lovable hash; do not generate a
+replacement secret during an ordinary deployment. See
+[SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md) for verification and session behavior.
 
 ## Files that stay private (all gitignored)
 
 - `terraform/terraform.tfstate`: holds the Origin key and the origin-pull keys
 - `terraform/terraform.tfvars`
-- `.secrets/`: Origin certificate and key, origin-pull CA
+- `.secrets/`: Origin certificate and key, origin-pull CA, tunnel token
+- `~/.ssh/spekios_github_deploy`: the GitHub deploy key (outside the repository; GitHub holds a copy as a secret)
 - `ansible/inventory.yml`
 - `ansible/secrets.yml`
 - `.build/`: release archives
@@ -135,4 +185,7 @@ Keep the state file somewhere safe. If more than one person deploys, the next st
 - **Cloudflare returns 526 or 525:** the origin rejected the TLS connection. Check that `.secrets/aop-ca.pem` is on the server in `/etc/scout/edge`, and that *SSL/TLS → Origin Server → Authenticated Origin Pulls* is on for the zone.
 - **`terraform apply` fails on the Access application:** Zero Trust isn't set up for the account yet (step 4), or the token lacks *Access: Apps and Policies → Edit*.
 - **`terraform apply` fails on the ruleset:** the zone already has a Configuration Rules ruleset. Set `manage_ssl_rule = false` and add the rule (hostname in `app.spekios.com`, `bo.spekios.com`; SSL set to Full (strict)) in the dashboard.
-- **SSH host-key warning after recreating the server:** Hetzner reuses IPs. Run `ssh-keygen -R <ip>`.
+- **SSH host-key warning after recreating the server:** Hetzner reuses IPs. Run `ssh-keygen -R <ip>`. Then run `just cloud-ci-setup`, or GitHub deploys will refuse the new host key.
+- **The Deploy workflow says a secret "is not set":** `just cloud-ci-setup` hasn't run for this repository yet.
+- **The Deploy workflow can't connect (`Connection closed`, `websocket: bad handshake`):** check the tunnel on the server with `sudo systemctl status scout-ssh-tunnel` and `sudo journalctl -u scout-ssh-tunnel -n 50`. If the Zero Trust dashboard shows the tunnel as *Healthy*, the service token is probably wrong or rotated, so run `just cloud-ci-setup` again.
+- **The Deploy workflow fails on "Confirm the public URL" but a local deploy works:** Cloudflare is challenging GitHub's runner addresses (Bot Fight Mode or a WAF rule). Skip that check for `/healthz` on `app.spekios.com`.

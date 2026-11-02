@@ -60,11 +60,61 @@ cloud-plan:
 cloud-apply:
     "$(command -v tofu || command -v terraform)" -chdir=infra/deploy/terraform apply
 
-# Configure the host and ship origin/prod as it is on GitHub. Extra args go to
+# Copy the operator token for the back office to the clipboard without showing it.
+cloud-token:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tf=$(command -v tofu || command -v terraform)
+    ip=$("$tf" -chdir=infra/deploy/terraform output -raw server_ipv4 2>/dev/null) || { echo "No server in the Terraform state: run just cloud-apply first." >&2; exit 1; }
+    key=${SCOUT_SSH_KEY:-$HOME/.ssh/spekios_hetzner}
+    if ! token=$(ssh -i "$key" -o ConnectTimeout=15 "deploy@$ip" "sed -n 's/^SCOUT_API_TOKEN=//p' /opt/scout/shared/.env | tail -n 1"); then
+      echo "SSH to deploy@$ip with $key failed (see the error above)." >&2; exit 1
+    fi
+    token=$(printf '%s' "$token" | tr -d '\r\n')
+    if [[ -z "$token" ]]; then
+      echo "No SCOUT_API_TOKEN line in /opt/scout/shared/.env on $ip. Variable names present:" >&2
+      ssh -i "$key" "deploy@$ip" "cut -d= -f1 /opt/scout/shared/.env | grep -v '^#' | tr '\n' ' '" >&2; echo >&2
+      exit 1
+    fi
+    printf '%s' "$token" | pbcopy
+    echo "Copied the operator token (${#token} characters) to the clipboard. Paste it on https://bo.spekios.com."
+
+# Configure the host and ship origin/main as it is on GitHub. Extra args go to
 # ansible-playbook, e.g. `just cloud-deploy --tags app`, or roll back with
-# `just cloud-deploy --tags app -e scout_ref=<older sha on prod>`.
+# `just cloud-deploy --tags app -e scout_ref=<older sha on main>`.
 cloud-deploy *args:
     cd infra/deploy/ansible && ansible-playbook site.yml "$@"
+
+# Run again after changing ansible/secrets.yml, rotating the service token or
+# moving to a new server.
+# One-time setup so every push to prod deploys through GitHub Actions.
+cloud-ci-setup:
+    bash infra/deploy/ci-setup.sh
+
+# Fast-forwards prod on GitHub, which starts the deploy workflow. Refuses
+# uncommitted changes and anything that would drop commits already on prod.
+# Deploy only a checked-out commit already merged into origin/main.
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "$(git status --porcelain)" ]]; then
+      echo "Commit or stash your changes first: only committed work is deployed." >&2; exit 1
+    fi
+    git fetch --quiet origin main prod
+    if ! git merge-base --is-ancestor HEAD origin/main; then
+      echo "Merge this commit into main first; production only comes from origin/main." >&2; exit 1
+    fi
+    if ! git merge-base --is-ancestor origin/prod HEAD; then
+      echo "prod has commits this one doesn't (git log --oneline HEAD..origin/prod)." >&2
+      echo "Merge main into prod through a pull request; release never drops what is deployed." >&2
+      exit 1
+    fi
+    if [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/prod)" ]]; then
+      echo "prod is already at $(git rev-parse --short HEAD). To redeploy it, run the Deploy workflow by hand." >&2; exit 1
+    fi
+    git push origin HEAD:refs/heads/prod
+    echo "prod is now $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)). GitHub is deploying it:"
+    echo "  https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo '<owner>/<repo>')/actions/workflows/deploy.yml"
 
 # Stop that deployment, including the HTTPS proxy, and keep the database volumes.
 deploy-stop:
