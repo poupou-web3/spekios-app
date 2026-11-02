@@ -59,6 +59,7 @@ pub struct Gateway {
     store: Arc<dyn ObjectStore>,
     keys: Vec<(Provider, String)>,
     secrets: Vec<String>,
+    pub(crate) vault: Option<crate::provider_access::Vault>,
     fixture_url: Option<String>,
     clickhouse_url: String,
     clickhouse_password: String,
@@ -114,6 +115,7 @@ impl Gateway {
             "S3_ACCESS_KEY_ID",
             "S3_SECRET_ACCESS_KEY",
             "CLICKHOUSE_PASSWORD",
+            "SCOUT_PROVIDER_VAULT_KEY",
         ] {
             if let Ok(value) = env::var(key)
                 && value.len() >= 8
@@ -155,6 +157,7 @@ impl Gateway {
             store: Arc::new(store),
             keys,
             secrets,
+            vault: crate::provider_access::Vault::from_env()?,
             fixture_url,
             clickhouse_url: env::var("CLICKHOUSE_URL")
                 .unwrap_or_else(|_| "http://clickhouse:8123".into()),
@@ -256,21 +259,71 @@ impl Gateway {
             .collect::<Vec<_>>();
         json!({"providers":providers,"gateway_ready":self.is_ready(),"test_mode":self.fixture_url.is_some()})
     }
+    pub async fn providers_for(&self, principal: &crate::identity::Principal) -> GResult<Value> {
+        let db = self.conn().await?;
+        let keys = crate::provider_access::personal_keys(&**db, principal).await?;
+        let demo = crate::provider_access::demo_status(&**db, principal.user_id).await?;
+        let mut status = self.providers();
+        if let Some(list) = status["providers"].as_array_mut() {
+            for p in list {
+                let personal = keys
+                    .as_array()
+                    .is_some_and(|keys| keys.iter().any(|k| k["provider"] == p["provider"]));
+                let global = if principal.operator {
+                    db.query_one("SELECT EXISTS(SELECT 1 FROM provider_keys WHERE provider=$1 AND revoked_at IS NULL)",&[&p["provider"].as_str().unwrap_or("")]).await.map_err(|_| "database_unavailable")?.get::<_,bool>(0)
+                } else {
+                    false
+                };
+                let demo_ready = p["provider"] == "meta"
+                    && demo["enabled"] == true
+                    && demo["configured"] == true
+                    && demo["remaining_usd"].as_f64().unwrap_or(0.)
+                        >= demo["minimum_call_reserve_usd"]
+                            .as_f64()
+                            .unwrap_or(f64::MAX);
+                p["configured"] = json!(
+                    (principal.operator && p["configured"] == true)
+                        || (self.vault.is_some() && (personal || global || demo_ready))
+                );
+            }
+        }
+        status["keys"] = keys;
+        status["demo"] = demo;
+        status["vault_ready"] = json!(self.vault.is_some());
+        status["operator_access"] = json!(principal.operator);
+        if !principal.is_manager() && !principal.operator {
+            // Provider readiness is an agent capability; private key names and
+            // account balances are not part of that discovery surface.
+            status.as_object_mut().unwrap().remove("keys");
+            status.as_object_mut().unwrap().remove("demo");
+        }
+        Ok(status)
+    }
     fn redact(&self, text: &str) -> String {
         self.secrets.iter().fold(text.to_owned(), |text, secret| {
             text.replace(secret, "[REDACTED_CREDENTIAL]")
         })
     }
-    fn response_bytes(&self, bytes: &[u8]) -> Vec<u8> {
-        fn scrub(g: &Gateway, value: &mut Value) {
+    fn response_bytes(&self, bytes: &[u8], key: &str) -> Vec<u8> {
+        fn scrub(g: &Gateway, value: &mut Value, key: &str) {
             match value {
-                Value::String(text) => *text = g.redact(text).replace('\0', "[NUL]"),
-                Value::Array(values) => values.iter_mut().for_each(|v| scrub(g, v)),
+                Value::String(text) => {
+                    *text = g
+                        .redact(text)
+                        .replace(key, "[REDACTED_CREDENTIAL]")
+                        .replace('\0', "[NUL]")
+                }
+                Value::Array(values) => values.iter_mut().for_each(|v| scrub(g, v, key)),
                 Value::Object(map) => {
                     let old = std::mem::take(map);
-                    for (key, mut value) in old {
-                        scrub(g, &mut value);
-                        map.insert(g.redact(&key).replace('\0', "[NUL]"), value);
+                    for (field, mut value) in old {
+                        scrub(g, &mut value, key);
+                        map.insert(
+                            g.redact(&field)
+                                .replace(key, "[REDACTED_CREDENTIAL]")
+                                .replace('\0', "[NUL]"),
+                            value,
+                        );
                     }
                 }
                 _ => {}
@@ -278,12 +331,14 @@ impl Gateway {
         }
         if let Ok(original) = serde_json::from_slice::<Value>(bytes) {
             let mut cleaned = original.clone();
-            scrub(self, &mut cleaned);
+            scrub(self, &mut cleaned, key);
             if cleaned != original {
                 return serde_json::to_vec(&cleaned).expect("JSON value");
             }
         }
-        self.redact(&String::from_utf8_lossy(bytes)).into_bytes()
+        self.redact(&String::from_utf8_lossy(bytes))
+            .replace(key, "[REDACTED_CREDENTIAL]")
+            .into_bytes()
     }
 
     pub fn start(self: &Arc<Self>) {
@@ -465,18 +520,20 @@ impl Gateway {
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
         // Only the trusted operator/worker may submit raw model requests. Derive
         // ownership from its admitted run, never a client-supplied workspace ID.
-        let (workspace_id, user_id, agent_id) = if let Some(id) = spec.run_id {
-            let row=tx.query_opt("SELECT r.workspace_id,r.user_id,(SELECT agent_id FROM browser_jobs j WHERE j.run_id=r.run_id AND j.workspace_id=r.workspace_id AND j.user_id=r.user_id ORDER BY j.created_at,j.job_id LIMIT 1) FROM runtime_runs r WHERE r.run_id=$1",&[&id]).await.map_err(|_|"database_unavailable")?.ok_or("run_not_found")?;
+        let (workspace_id, user_id, agent_id, run_config) = if let Some(id) = spec.run_id {
+            let row=tx.query_opt("SELECT r.workspace_id,r.user_id,(SELECT agent_id FROM browser_jobs j WHERE j.run_id=r.run_id AND j.workspace_id=r.workspace_id AND j.user_id=r.user_id ORDER BY j.created_at,j.job_id LIMIT 1),r.config FROM runtime_runs r WHERE r.run_id=$1",&[&id]).await.map_err(|_|"database_unavailable")?.ok_or("run_not_found")?;
             (
                 row.get::<_, Uuid>(0),
                 row.get::<_, Uuid>(1),
                 row.get::<_, Option<Uuid>>(2),
+                Some(row.get::<_, Value>(3)),
             )
         } else {
             (
                 principal.workspace_id,
                 principal.user_id,
                 principal.agent_id,
+                None,
             )
         };
         if let Some(row) = tx
@@ -496,7 +553,68 @@ impl Gateway {
             }
             return Ok(false);
         }
-        if !self.keys.iter().any(|(p, _)| *p == spec.provider) {
+        let owner = crate::identity::Principal {
+            workspace_id,
+            user_id,
+            operator: principal.operator
+                && workspace_id == crate::WORKSPACE_ID
+                && user_id == USER_ID,
+            ..principal.clone()
+        };
+        let reference = if let Some(config) = &run_config {
+            let choices = [
+                &config["model_connection"],
+                &config["model_tiers"]["navigation"],
+            ];
+            let choice = choices.into_iter().find(|c| {
+                c["provider"] == json!(spec.provider)
+                    && c["model"] == spec.model
+                    && spec
+                        .provider_key_id
+                        .as_ref()
+                        .is_none_or(|id| c["providerKeyId"] == *id)
+            });
+            if let Some(choice) = choice {
+                choice["providerKeyId"]
+                    .as_str()
+                    .or(spec.provider_key_id.as_deref())
+            } else if owner.operator && spec.provider_key_id.is_none() {
+                None
+            } else {
+                return Err("model_connection_mismatch");
+            }
+        } else {
+            spec.provider_key_id.as_deref()
+        };
+        let funding = if self.fixture_url.is_some() {
+            crate::provider_access::Funding {
+                source: "operator",
+                key_id: None,
+            }
+        } else {
+            crate::provider_access::resolve(
+                &*tx,
+                &owner,
+                spec.provider,
+                &spec.model,
+                reference,
+                true,
+            )
+            .await?
+        };
+        if funding.key_id.is_some() && self.vault.is_none() {
+            return Err("provider_vault_not_configured");
+        }
+        if let Some(id) = funding.key_id {
+            let key =
+                crate::provider_access::key_secret(&*tx, self.vault.as_ref(), id, spec.provider)
+                    .await?;
+            if spec.prompt.contains(&key) || spec.system.contains(&key) || spec.model.contains(&key)
+            {
+                return Err("credential_in_prompt");
+            }
+        }
+        if funding.source == "operator" && !self.keys.iter().any(|(p, _)| *p == spec.provider) {
             return Err("provider_not_configured");
         }
         if !self.is_ready() {
@@ -528,7 +646,7 @@ impl Gateway {
         for id in &spec.capture_ids {
             if tx.query_opt("SELECT 1 FROM runtime_captures WHERE capture_id=$1 AND run_id=$2 AND status='available' AND byte_length <= $3",&[id,&spec.run_id,&(MAX_IMAGE as i64)]).await.map_err(|_| "database_unavailable")?.is_none() { return Err("capture_unavailable_or_too_large"); }
         }
-        tx.execute("INSERT INTO model_requests(request_id,workspace_id,user_id,run_id,action_id,provider,model,spec,spec_sha256,state,execution_mode,agent_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11)",&[&spec.request_id,&workspace_id,&user_id,&spec.run_id,&spec.action_id,&spec.provider.name(),&spec.model,&value,&sha,&self.execution_mode(),&agent_id]).await.map_err(|_| "database_unavailable")?;
+        tx.execute("INSERT INTO model_requests(request_id,workspace_id,user_id,run_id,action_id,provider,model,spec,spec_sha256,state,execution_mode,agent_id,funding_source,provider_key_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11,$12,$13)",&[&spec.request_id,&workspace_id,&user_id,&spec.run_id,&spec.action_id,&spec.provider.name(),&spec.model,&value,&sha,&self.execution_mode(),&agent_id,&funding.source,&funding.key_id]).await.map_err(|_| "database_unavailable")?;
         event(&tx,spec.request_id,None,"request_accepted",&json!({"spec":value,"training_status":if self.fixture_url.is_some(){"excluded_fixture"}else{"pending_review"}})).await?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
         self.notify.notify_one();
@@ -536,15 +654,35 @@ impl Gateway {
     }
 
     async fn process_next(&self) -> GResult<bool> {
-        let row = self.conn().await?.query_opt("UPDATE model_requests SET state='preparing' WHERE request_id=(SELECT request_id FROM model_requests WHERE execution_mode=$1 AND state='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1) RETURNING spec",&[&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
+        let row = self.conn().await?.query_opt("UPDATE model_requests SET state='preparing' WHERE request_id=(SELECT request_id FROM model_requests WHERE execution_mode=$1 AND state='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 1) RETURNING spec,funding_source,provider_key_id,user_id",&[&self.execution_mode()]).await.map_err(|_| "database_unavailable")?;
         let Some(row) = row else { return Ok(false) };
         let spec: ModelRequest =
             serde_json::from_value(row.get(0)).map_err(|_| "stored_request_invalid")?;
-        let Some((_, key)) = self.keys.iter().find(|(p, _)| *p == spec.provider) else {
-            self.fail_before_dispatch(spec.request_id, "provider_not_configured")
+        let source: String = row.get(1);
+        let key_id: Option<Uuid> = row.get(2);
+        let user: Uuid = row.get(3);
+        let selected = if let Some(id) = key_id {
+            let db = self.conn().await?;
+            crate::provider_access::key_secret(&**db, self.vault.as_ref(), id, spec.provider).await
+        } else {
+            self.keys
+                .iter()
+                .find(|(p, _)| *p == spec.provider)
+                .map(|(_, k)| k.clone())
+                .ok_or("provider_not_configured")
+        };
+        let key = match selected {
+            Ok(key) => key,
+            Err(code) => {
+                self.fail_before_dispatch(spec.request_id, code).await?;
+                return Ok(true);
+            }
+        };
+        if spec.prompt.contains(&key) || spec.system.contains(&key) || spec.model.contains(&key) {
+            self.fail_before_dispatch(spec.request_id, "credential_in_prompt")
                 .await?;
             return Ok(true);
-        };
+        }
         let mut images = Vec::new();
         for id in &spec.capture_ids {
             match self.image(*id, spec.run_id).await {
@@ -557,6 +695,25 @@ impl Gateway {
         }
         let bytes =
             serde_json::to_vec(&wire_request(&spec, &images)).map_err(|_| "invalid_request")?;
+        let demo_input = if source == "demo" {
+            if let Some(run) = spec.run_id {
+                let cancelled:bool=self.conn().await?.query_one("SELECT cancel_id IS NOT NULL OR lifecycle='cancelled' FROM runtime_runs WHERE run_id=$1",&[&run]).await.map_err(|_| "database_unavailable")?.get(0);
+                if cancelled {
+                    self.fail_before_dispatch(spec.request_id, "run_cancelled_before_dispatch")
+                        .await?;
+                    return Ok(true);
+                }
+            }
+            match self.count_demo_input(&key, &bytes).await {
+                Ok(tokens) => tokens,
+                Err(code) => {
+                    self.fail_before_dispatch(spec.request_id, code).await?;
+                    return Ok(true);
+                }
+            }
+        } else {
+            0
+        };
         let call_id = Uuid::new_v4();
         {
             let mut db = self.conn().await?;
@@ -587,11 +744,30 @@ impl Gateway {
             }
             let attempt: i32 = tx.query_one("UPDATE model_requests SET state='dispatched',attempt_count=attempt_count+1 WHERE request_id=$1 AND state='preparing' RETURNING attempt_count",&[&spec.request_id]).await.map_err(|_| "database_unavailable")?.get(0);
             tx.execute("INSERT INTO model_calls(call_id,request_id,attempt,state) VALUES($1,$2,$3,'dispatched')",&[&call_id,&spec.request_id,&attempt]).await.map_err(|_| "database_unavailable")?;
+            if source == "demo"
+                && let Err(code) = crate::provider_access::reserve(
+                    &tx,
+                    user,
+                    call_id,
+                    demo_input,
+                    spec.max_output_tokens,
+                    &spec.model,
+                )
+                .await
+            {
+                tx.rollback().await.map_err(|_| "database_unavailable")?;
+                self.fail_before_dispatch(spec.request_id, code).await?;
+                return Ok(true);
+            }
+            if let Some(id) = key_id && tx.query_opt("SELECT 1 FROM provider_keys WHERE key_id=$1 AND revoked_at IS NULL FOR SHARE",&[&id]).await.map_err(|_| "database_unavailable")?.is_none() {
+                    tx.rollback().await.map_err(|_| "database_unavailable")?;
+                    self.fail_before_dispatch(spec.request_id,"provider_key_unavailable").await?;return Ok(true);
+            }
             let reference = payload(&tx, call_id, "request", &bytes).await?;
             event(&tx,spec.request_id,Some(call_id),"call_dispatched",&json!({"attempt":attempt,"request":reference,"prompt":spec.prompt,"system":spec.system,"capture_ids":spec.capture_ids})).await?;
             tx.commit().await.map_err(|_| "database_unavailable")?;
         }
-        let result = self.invoke(&spec, call_id, key, bytes).await;
+        let result = self.invoke(&spec, call_id, &key, bytes).await;
         // A sync'd response journal survives a crash or database outage before
         // settlement. Database idempotency makes replay safe and non-billable.
         if let Err(code) = self.write_journal(&result).await {
@@ -630,12 +806,16 @@ impl Gateway {
     async fn fail_before_dispatch(&self, id: Uuid, code: &str) -> GResult<()> {
         let mut db = self.conn().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
-        tx.execute("UPDATE model_requests SET state='failed',finished_at=now(),error=$2 WHERE request_id=$1",&[&id,&code]).await.map_err(|_| "database_unavailable")?;
+        tx.execute("UPDATE model_requests SET state=CASE WHEN $2='run_cancelled_before_dispatch' THEN 'cancelled' ELSE 'failed' END,finished_at=now(),error=$2 WHERE request_id=$1",&[&id,&code]).await.map_err(|_| "database_unavailable")?;
         event(
             &tx,
             id,
             None,
-            "request_failed",
+            if code == "run_cancelled_before_dispatch" {
+                "request_cancelled"
+            } else {
+                "request_failed"
+            },
             &json!({"error":code,"provider_dispatched":false}),
         )
         .await?;
@@ -688,7 +868,13 @@ impl Gateway {
                     .get("x-request-id")
                     .or_else(|| response.headers().get("request-id"))
                     .and_then(|h| h.to_str().ok())
-                    .map(|s| self.redact(s).chars().take(256).collect());
+                    .map(|s| {
+                        self.redact(s)
+                            .replace(key, "[REDACTED_CREDENTIAL]")
+                            .chars()
+                            .take(256)
+                            .collect()
+                    });
                 let retry = response
                     .headers()
                     .get("retry-after")
@@ -715,7 +901,7 @@ impl Gateway {
                         }
                     }
                 }
-                let cleaned = self.response_bytes(&bytes);
+                let cleaned = self.response_bytes(&bytes, key);
                 result.response_base64 = STANDARD.encode(&cleaned);
                 if result.response_complete {
                     interpret(spec.provider, &cleaned, &mut result);
@@ -736,6 +922,41 @@ impl Gateway {
         result
     }
 
+    async fn count_demo_input(&self, key: &str, body: &[u8]) -> GResult<i64> {
+        // Meta's non-generating count endpoint accepts the same Responses body,
+        // including media, instructions, reasoning and server prompt scaffolding.
+        let mut response = self
+            .http
+            .post("https://api.meta.ai/v1/responses/input_tokens")
+            .bearer_auth(key)
+            .header("content-type", "application/json")
+            .body(body.to_vec())
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|_| "demo_token_count_unavailable")?;
+        if !response.status().is_success() {
+            return Err("demo_token_count_unavailable");
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "demo_token_count_unavailable")?
+        {
+            if bytes.len() + chunk.len() > 16_384 {
+                return Err("demo_token_count_unavailable");
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let value: Value =
+            serde_json::from_slice(&bytes).map_err(|_| "demo_token_count_unavailable")?;
+        value["input_tokens"]
+            .as_i64()
+            .filter(|n| (0..=1_048_576).contains(n))
+            .ok_or("demo_token_count_unavailable")
+    }
+
     async fn settle(&self, result: &CallResult) -> GResult<()> {
         let mut db = self.conn().await?;
         let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
@@ -748,6 +969,7 @@ impl Gateway {
         let spec: ModelRequest =
             serde_json::from_value(row.get(3)).map_err(|_| "stored_request_invalid")?;
         let u = &result.usage;
+        crate::provider_access::settle(&tx, result).await?;
         tx.execute("UPDATE model_calls SET state=$2,finished_at=now(),elapsed_ms=$3,http_status=$4,provider_request_id=$5,returned_model=$6,routed_provider=$7,output_text=$8,finish_reason=$9,error=$10,input_tokens=$11,output_tokens=$12,cached_input_tokens=$13,cache_write_tokens=$14,reasoning_tokens=$15,cost_usd=$16::text::numeric,usage_status=$17,usage_reason=$18,usage_raw=$19,response_complete=$20 WHERE call_id=$1",
             &[&result.call_id,&result.state,&result.elapsed_ms,&result.http_status,&result.provider_request_id,&result.returned_model,&result.routed_provider,&result.output_text,&result.finish_reason,&result.error,&u.input_tokens,&u.output_tokens,&u.cached_input_tokens,&u.cache_write_tokens,&u.reasoning_tokens,&u.cost_usd,&u.usage_status,&u.usage_reason,&u.usage_raw,&result.response_complete]).await.map_err(|_| "database_settlement_failed")?;
         let response = STANDARD
@@ -955,14 +1177,16 @@ async fn payload(tx: &Transaction<'_>, call_id: Uuid, kind: &str, bytes: &[u8]) 
     Ok(json!({"payload_id":id,"object_key":key,"sha256":sha,"byte_length":bytes.len()}))
 }
 
-pub async fn providers(ScopedState(state): ScopedState) -> Json<Value> {
-    Json(
-        state
-            .gateway
-            .as_ref()
-            .map(|g| g.providers())
-            .unwrap_or_else(|| json!({"gateway_ready":false,"providers":[]})),
-    )
+pub async fn providers(ScopedState(state): ScopedState) -> Response {
+    if let Some(g) = &state.gateway {
+        match g.providers_for(&state.principal).await {
+            Ok(v) => Json(v).into_response(),
+            Err(code) => error(StatusCode::SERVICE_UNAVAILABLE, code),
+        }
+    } else {
+        Json(json!({"gateway_ready":false,"providers":[],"keys":[],"vault_ready":false}))
+            .into_response()
+    }
 }
 pub async fn submit(
     ScopedState(state): ScopedState,
@@ -980,6 +1204,7 @@ pub async fn submit(
         Err(code) => error(match code {
             "idempotency_conflict"|"run_cancelled"=>StatusCode::CONFLICT,
             "queue_full"=>StatusCode::TOO_MANY_REQUESTS,
+            "demo_credits_insufficient"=>StatusCode::PAYMENT_REQUIRED,
             "run_not_found"|"action_not_found"=>StatusCode::NOT_FOUND,
             "gateway_not_ready"|"database_unavailable"|"provider_not_configured"=>StatusCode::SERVICE_UNAVAILABLE,
             _=>StatusCode::BAD_REQUEST

@@ -7,6 +7,7 @@ import {freeModel} from './settings.js';
 import {estimateCost,tokenSplit,tokenSum,usd} from '/assets/ui/usage.js';
 import {selectedWebsite,websiteRuns} from '../website-state.js';
 import {browserTargetUrl,dockerAddress,normalizeTargetUrl,websiteHref,websiteLabel,websitePath} from '../websites.js';
+import {connectionReady,keyOptions,launchConnection} from '../provider-keys.js';
 // A run's tokens with their input/output split and estimated cost, for the runs table.
 export function runUsage(usage){
   if(!usage)return '<span class="small muted">—</span>';
@@ -30,12 +31,14 @@ const choiceOf=m=>`${m.provider}|${m.model}`;
 // The model the next test will use: chosen for this test, else its project's, else the default.
 export function launchModel(){
   const chosen=launchModels().find(m=>choiceOf(m)===state.launchModel);
-  if(chosen)return {provider:chosen.provider,model:chosen.model,label:chosen.label||chosen.model,source:'run'};
   const project=launchProjects().find(p=>p.projectId===state.launchProject);
-  if(project?.provider&&project?.model)return {provider:project.provider,model:project.model,label:project.model,source:'project'};
-  return {provider:state.settings.provider,model:state.settings.model,label:state.settings.model,source:'default'};
+  const base=project?.provider&&project?.model?{provider:project.provider,model:project.model,label:project.model,source:'project',key:project.providerKeyId||(project.provider===state.settings.provider?state.settings.providerKeyId:'')||''}
+    :{provider:state.settings.provider,model:state.settings.model,label:state.settings.model,source:'default',key:state.settings.providerKeyId||''};
+  if(base.key==='demo'&&(base.provider!=='meta'||base.model!==state.providers.demo?.model))base.key='';
+  if(chosen){const key=state.launchKey||(chosen.provider===base.provider&&!(base.key==='demo'&&chosen.model!==state.providers.demo?.model)?base.key:'');return {provider:chosen.provider,model:chosen.model,label:chosen.label||chosen.model,source:'run',...(key?{key}:{})};}
+  const key=state.launchKey||base.key;delete base.key;return {...base,...(key?{key}:{})};
 }
-export function canStart(){const model=launchModel();return state.providers.gateway_ready===true&&state.workers.some(w=>w.available)&&state.providers.providers.some(p=>p.provider===model.provider&&p.configured)&&!!model.model;}
+export function canStart(){const model=launchModel();return state.providers.gateway_ready===true&&state.workers.some(w=>w.available)&&connectionReady(model.provider,model.model,model.key)&&!!model.model;}
 const VIEWPORTS=[['desktop','Desktop'],['tablet','Tablet'],['mobile','Mobile']];
 const SIGN_IN=[['auto','Ask when sign-in is detected','Sign in when asked'],['sign_in','Sign in before testing','Sign in first'],['public','Public pages only','Public pages only']];
 export function launchStatus(){
@@ -45,7 +48,7 @@ export function launchStatus(){
   const model=launchModel(),provider=state.providers.providers.find(p=>p.provider===model.provider),settings='<a href="#/settings/models">Settings</a>',actions=Number(state.settings.maxActions);
   const [tone,text]=!state.lastUpdatedAt?['',state.error?'Workspace status unavailable.':'Checking your workspace…']
     :!model.provider||!model.model?['amber',`Choose a model in ${settings} to start testing.`]
-    :!provider?.configured?['amber',`${esc(providerName(model.provider))} is not configured on this server. Choose another model ${model.source==='run'?'under the options below':`in ${settings}`}.`]
+    :!connectionReady(model.provider,model.model,model.key)?['amber',model.key==='demo'?`The demo connection is unavailable or has insufficient credit for another call. Add your own API key and choose a model in ${settings}.`:`Add or choose a personal ${esc(providerName(model.provider))} API key in ${settings}.`]
     :!state.workers.some(w=>w.available)?['amber','Waiting for the browser worker. Your recorded tests are still available.']
     :state.providers.gateway_ready!==true?['amber','Waiting for the model gateway.']
     :['green',['Ready',esc(providerName(model.provider)),esc(model.model)+(model.source==='project'?' (project model)':model.source==='run'?' (this test)':''),(actions>0?`up to ${number(actions)} actions`:'no action limit'),...(state.providers.test_mode?['simulated model']:[])].join(' · ')];
@@ -55,16 +58,18 @@ export function hero(){
   const viewport=state.viewportProfile||state.settings.viewportProfile||'desktop';
   const project=launchProjects().find(p=>p.projectId===state.launchProject),model=launchModel();
   const summary=[VIEWPORTS.find(([value])=>value===viewport)?.[1]||'Desktop',SIGN_IN.find(([value])=>value===state.authMode)?.[2]||SIGN_IN[0][2],...(project?[project.label||'Project '+short(project.projectId)]:[]),...(model.source==='run'?[model.label]:[]),...(automaticEnabled()?['Rechecks on']:[])].join(' · ');
-  return `<section class="landing" aria-labelledby="landing-title"><p class="eyebrow"><span class="signal-dot" aria-hidden="true"></span>${state.websiteOrigin?'Website overview':'A fresh pair of eyes'}</p><h1 id="landing-title">${state.websiteOrigin?`A fresh look at<br><span>${esc(websiteLabel(state.websiteOrigin))}.</span>`:'What should we explore?'}</h1><p class="landing-lead">${state.websiteOrigin?'Explore a new journey, or return to a previous test.':'Let Spekios try your website and find what needs attention.'}</p><form id="run-form" class="landing-form" novalidate><label class="landing-field">${icon('globe')}<span class="sr-only">Application URL</span><input id="target-url" name="url" type="text" inputmode="url" required maxlength="2048" placeholder="your-app.example" autocomplete="url" autocapitalize="off" spellcheck="false" aria-describedby="launch-status"${state.launchError?' aria-invalid="true"':''} value="${esc(state.url)}"></label><button type="submit" class="button primary landing-start" ${!canStart()||state.submitting?'disabled':''}>${state.submitting?'Starting…':`Start testing${icon('arrow')}`}</button></form>${launchStatus()}<details class="landing-options" data-disclosure="launch-options"><summary>${icon('settings')}<span class="landing-options-summary">${esc(summary)}</span><span class="landing-options-change">Change</span></summary><div class="landing-options-body"><div class="landing-options-grid"><label>Screen size<select id="viewport-profile" name="viewport_profile" form="run-form">${VIEWPORTS.map(([value,label])=>`<option value="${value}" ${viewport===value?'selected':''}>${label}</option>`).join('')}</select></label>${authOptions()}${launchChoices()}</div>${automaticOptions()}<p class="small muted landing-options-note">You can sign in yourself when Spekios asks. Private login activity is excluded from screenshots, model inputs and training evidence. Google and other external identity providers are not supported in this local handoff yet.</p></div></details></section>`;
+  return `<section class="landing" aria-labelledby="landing-title"><p class="eyebrow"><span class="signal-dot" aria-hidden="true"></span>${state.websiteOrigin?'Website overview':'A fresh pair of eyes'}</p><h1 id="landing-title">${state.websiteOrigin?`A fresh look at<br><span>${esc(websiteLabel(state.websiteOrigin))}.</span>`:'What should we explore?'}</h1><p class="landing-lead">${state.websiteOrigin?'Explore a new journey, or return to a previous test.':'Let Spekios try your website and find what needs attention.'}</p>${launchConnection(model)}<form id="run-form" class="landing-form" novalidate><label class="landing-field">${icon('globe')}<span class="sr-only">Application URL</span><input id="target-url" name="url" type="text" inputmode="url" required maxlength="2048" placeholder="your-app.example" autocomplete="url" autocapitalize="off" spellcheck="false" aria-describedby="launch-status"${state.launchError?' aria-invalid="true"':''} value="${esc(state.url)}"></label><button type="submit" class="button primary landing-start" ${!canStart()||state.submitting?'disabled':''}>${state.submitting?'Starting…':`Start testing${icon('arrow')}`}</button></form>${launchStatus()}<details class="landing-options" data-disclosure="launch-options"><summary>${icon('settings')}<span class="landing-options-summary">${esc(summary)}</span><span class="landing-options-change">Change</span></summary><div class="landing-options-body"><div class="landing-options-grid"><label>Screen size<select id="viewport-profile" name="viewport_profile" form="run-form">${VIEWPORTS.map(([value,label])=>`<option value="${value}" ${viewport===value?'selected':''}>${label}</option>`).join('')}</select></label>${authOptions()}${launchChoices()}</div>${automaticOptions()}<p class="small muted landing-options-note">You can sign in yourself when Spekios asks. Private login activity is excluded from screenshots, model inputs and training evidence. Google and other external identity providers are not supported in this local handoff yet.</p></div></details></section>`;
 }
 // Project and model for this test. Hidden until settings name a project or list a model.
 export function launchChoices(){
   const projects=launchProjects(),models=launchModels();
-  if(!projects.length&&!models.length)return '';
+  if(!projects.length&&!models.length&&!Array.isArray(state.providers.keys))return '';
   const project=projects.find(p=>p.projectId===state.launchProject),inherited=project?.model?`${project.model} (project)`:`${state.settings.model||'not chosen'} (default)`;
   const projectSelect=projects.length?`<label>Project<select id="launch-project" name="project_id" form="run-form"><option value="">No project</option>${projects.map(p=>`<option value="${esc(p.projectId)}" ${p.projectId===state.launchProject?'selected':''}>${esc(p.label||short(p.projectId))}${p.model?` · ${esc(p.model)}`:''}</option>`).join('')}</select></label>`:'';
   const modelSelect=models.length?`<label>Model<select id="launch-model" name="model" form="run-form"><option value="">${esc(inherited)}</option>${models.map(m=>`<option value="${esc(choiceOf(m))}" ${choiceOf(m)===state.launchModel?'selected':''}>${esc(m.label?`${m.label} (${m.model})`:m.model)} · ${esc(providerName(m.provider))}</option>`).join('')}</select></label>`:'';
-  return projectSelect+modelSelect;
+  const current=launchModel();
+  const keySelect=Array.isArray(state.providers.keys)?`<label>API key for this test<select id="launch-key" form="run-form">${keyOptions(current.provider,current.model,state.launchKey||'','Use the project or account key')}</select></label>`:'';
+  return projectSelect+modelSelect+keySelect;
 }
 export function automaticEnabled(){return state.autoReproduce ?? state.settings.autoReproduce===true;}
 export function automaticOptions(){
@@ -75,7 +80,7 @@ export function explorationRequest(form){
   state.url=browserTargetUrl(form.get('url'));const session=form.get('session_id');
   const model=launchModel(),project=launchProjects().some(p=>p.projectId===state.launchProject)?state.launchProject:'';
   // Free-only stays on unless this test deliberately picks a paid OpenRouter model.
-  const choice=model.source==='run'?{model:{provider:model.provider,model:model.model,free_only:!(model.provider==='openrouter'&&!freeModel(model.model))}}:{};
+  const choice=model.source==='run'||state.launchKey?{model:{provider:model.provider,model:model.model,free_only:!(model.provider==='openrouter'&&!freeModel(model.model)),...(model.key?{provider_key_id:model.key}:{})}}:{};
   return {kind:'explore',target_url:state.url,viewport_profile:form.get('viewport_profile'),auth_mode:form.get('auth_mode')||'auto',auto_reproduce:automaticEnabled(),...(session?{session_id:session}:{}),...(project?{project_id:project}:{}),...choice};
 }
 function targetOrigin(){try{return new URL(normalizeTargetUrl(state.url)).origin;}catch{return '';}}

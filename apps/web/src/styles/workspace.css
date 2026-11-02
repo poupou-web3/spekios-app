@@ -452,3 +452,28 @@ a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-sof
   .landing h1 { font-size: 36px; }
   .topbar { right: 16px; }
 }
+
+/* Provider connections: credentials stay in a native modal outside refreshes. */
+.provider-key-dialog { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; padding: 28px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
+.provider-key-dialog::backdrop { background: #0007; }
+.provider-key-dialog form { display: grid; gap: 18px; }
+.provider-key-dialog label { display: grid; gap: 7px; font-size: 13px; }
+.provider-key-dialog label.row { display: flex; }
+.provider-key-dialog input:not([type="checkbox"]),.provider-key-dialog select { width: 100%; min-height: 44px; }
+.provider-key-dialog h2 { margin: 0; flex: 1; font-size: 24px; }
+.personal-key-list { list-style: none; margin: 0; padding: 0; }
+.personal-key-list li { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.personal-key-list li:last-child { border-bottom: 0; }
+.personal-key-list strong,.personal-key-list small { display: block; overflow-wrap: anywhere; }
+.personal-key-list small { margin-top: 4px; color: var(--muted); }
+.model-key-field { display: flex; gap: 12px; align-items: end; margin: 16px 0; }
+.model-key-field label { flex: 1; min-width: 0; display: grid; gap: 7px; font-size: 13px; }
+.model-key-field select { width: 100%; min-height: 42px; }
+.demo-credits { padding: 22px; }
+.demo-credits p { margin: 12px 0; }
+.demo-credits progress { width: 100%; height: 8px; accent-color: var(--brand-strong); }
+.demo-launch-note { margin: 18px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); text-align: left; font-size: 13px; }
+.demo-launch-note p { margin: 6px 0; color: var(--muted); }
+.demo-launch-note a,.launch-key-note a { text-decoration: underline; text-underline-offset: 3px; }
+.demo-data-note { border-top: 1px solid var(--border); padding-top: 12px; }
+@media (max-width: 600px) { .personal-key-list li { align-items: start; flex-direction: column; } .provider-key-dialog { padding: 20px; } .model-key-field { flex-wrap: wrap; } }

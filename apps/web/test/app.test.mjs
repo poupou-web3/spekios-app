@@ -450,7 +450,7 @@ test('a test can run under a project and on its own model; readiness follows the
   request=ui.explorationRequest(fields);assert.equal(request.project_id,project);assert.equal(request.model,undefined,'The server resolves the project model.');
   ui.state.launchModel='openai|gpt-6.1-sol';
   assert.equal(ui.canStart(),false,'An unconfigured provider for this test blocks the start.');
-  assert.match(ui.launchStatus(),/OpenAI is not configured[\s\S]*under the options below/);
+  assert.match(ui.launchStatus(),/Add or choose a personal OpenAI API key[\s\S]*Settings/);
   ui.state.launchModel='anthropic|claude-sonnet-5-5';assert.equal(ui.canStart(),true);
   request=ui.explorationRequest(fields);
   assert.deepEqual({...request.model},{provider:'anthropic',model:'claude-sonnet-5-5',free_only:true});
