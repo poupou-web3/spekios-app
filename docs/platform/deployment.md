@@ -60,6 +60,19 @@ Open the workspace at `http://127.0.0.1:18080` and the operator console at `http
 
 For a public HTTPS name, set `SCOUT_PUBLIC_HOST` to the hostname and `SCOUT_PUBLIC_ORIGIN` to the `https://` origin, point DNS at this machine, and run `just deploy edge`. Caddy listens on ports 80 and 443 and proxies to the API. The workspace port and the operator console stay on loopback; deploy refuses the edge while `SCOUT_DEV_AUTH_BYPASS=true`. A public origin disables the development auth bypass. Bundled Postgres still uses `PGSSLMODE=disable` on the Compose network, and the API logs a warning; use `verify-full` when Postgres is a managed server on a network you do not trust. Bundled ClickHouse is one server. This command does not apply the schema to an external database.
 
+### Hetzner and Cloudflare
+
+[infra/deploy](../../infra/deploy/README.md) runs this same command on a Hetzner CX43 (Debian 13) behind a proxied Cloudflare zone. The customer workspace is at `app.spekios.com`, and the operator console is at `bo.spekios.com` behind Cloudflare Access. Terraform creates:
+
+- the server;
+- a cloud firewall (443 and 80 from Cloudflare only, 22 from admin addresses);
+- the DNS records;
+- a Cloudflare Origin certificate;
+- Authenticated Origin Pulls with a private CA;
+- the Access application.
+
+Ansible hardens the host and refuses kernels without recorded fixes. It then deploys a committed revision with `SCOUT_EDGE_TLS=origin`, which makes `scripts/deploy.sh` add `compose.edge-origin.yaml`. Caddy then serves both hostnames with the Origin certificate and requires Cloudflare's client certificate, instead of requesting certificates from Let's Encrypt. Use `just cloud-plan`, `just cloud-apply` and `just cloud-deploy`.
+
 ## Why Compose first
 
 For this one-machine phase, Compose describes the processes, health checks, resource caps, network and volumes without an additional cluster. `just` makes the common workflow one command while preserving the underlying scripts. This is a development choice. The browser sandbox is container isolation on one shared host kernel, not a virtual-machine or multi-tenant boundary.

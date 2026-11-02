@@ -314,7 +314,13 @@ services:
       - /tmp:size=512m,mode=1777
     shm_size: 256m
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    # Docker's default seccomp profile (moby v27.4.0) plus one rule allowing clone,
+    # unshare, setns and chroot, so Chromium can build its own namespace sandbox
+    # without any capability. Linux hosts apply the default profile, which blocks
+    # that; Docker Desktop runs unconfined, which hid it.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./infra/recorder/seccomp-chromium.json
     mem_limit: 1g
     cpus: 2
     restart: unless-stopped

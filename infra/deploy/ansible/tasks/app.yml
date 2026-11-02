@@ -1,0 +1,262 @@
+# Ship a committed revision to /opt/scout/releases/<sha> and run scripts/deploy.sh edge.
+# Data lives in the named Compose volumes of project "scout-qa", so releases
+# can be swapped and pruned freely. /opt/scout/shared/.env is never replaced.
+
+- name: Resolve the revision to deploy
+  delegate_to: localhost
+  become: false
+  run_once: true
+  block:
+    # git archive only includes the current subdirectory, so work from the top.
+    - name: Find the repository root
+      ansible.builtin.command:
+        cmd: git rev-parse --show-toplevel
+        chdir: "{{ playbook_dir }}"
+      register: scout_repo
+      changed_when: false
+
+    # Production runs only what is on the deploy branch on GitHub, whatever is
+    # checked out locally, so a laptop and CI ship exactly the same commit.
+    - name: Fetch {{ scout_remote }}/{{ scout_branch }}
+      ansible.builtin.command:
+        cmd: git fetch --quiet "{{ scout_remote }}" "+refs/heads/{{ scout_branch }}:refs/remotes/{{ scout_remote }}/{{ scout_branch }}"
+        chdir: "{{ scout_repo.stdout }}"
+      changed_when: false
+
+    - name: Resolve the commit to deploy
+      ansible.builtin.command:
+        cmd: git rev-parse --verify "{{ scout_ref | default('', true) or (scout_remote ~ '/' ~ scout_branch) }}^{commit}"
+        chdir: "{{ scout_repo.stdout }}"
+      register: scout_rev
+      changed_when: false
+
+    # An explicit scout_ref is for rollbacks: it must already be part of the
+    # deploy branch's history. Other branches are never deployed.
+    - name: Refuse commits that are not on {{ scout_remote }}/{{ scout_branch }}
+      ansible.builtin.command:
+        cmd: git merge-base --is-ancestor "{{ scout_rev.stdout }}" "{{ scout_remote }}/{{ scout_branch }}"
+        chdir: "{{ scout_repo.stdout }}"
+      register: scout_on_branch
+      changed_when: false
+      failed_when: scout_on_branch.rc != 0
+
+    - name: Show what is deployed
+      ansible.builtin.debug:
+        msg: Deploying {{ scout_rev.stdout[:12] }} from {{ scout_remote }}/{{ scout_branch }}
+
+    - name: Create the local build folder
+      ansible.builtin.file:
+        path: "{{ scout_local_build_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Archive the revision
+      ansible.builtin.command:
+        cmd: >-
+          git archive --format=tar.gz
+          -o "{{ scout_local_build_dir }}/scout-{{ scout_rev.stdout }}.tar.gz"
+          {{ scout_rev.stdout }}
+        chdir: "{{ scout_repo.stdout }}"
+      changed_when: false
+
+    - name: Check for the Origin certificate and origin pull CA from Terraform
+      ansible.builtin.stat:
+        path: "{{ scout_local_secrets_dir }}/{{ item }}"
+      loop: [origin.pem, origin.key, aop-ca.pem]
+      register: scout_cert_files
+      failed_when: not scout_cert_files.stat.exists
+
+    - name: Check for optional secrets
+      ansible.builtin.stat:
+        path: "{{ scout_secrets_file }}"
+      register: scout_secrets_stat
+
+- name: Load optional secrets
+  ansible.builtin.include_vars:
+    file: "{{ scout_secrets_file }}"
+  when: scout_secrets_stat.stat.exists
+  no_log: true
+
+- name: Set release paths
+  ansible.builtin.set_fact:
+    scout_release: "{{ scout_root }}/releases/{{ scout_rev.stdout }}"
+    scout_env_file: "{{ scout_root }}/shared/.env"
+    scout_compose_files: compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml
+
+- name: Create the release folders
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0750"
+  loop:
+    - "{{ scout_root }}"
+    - "{{ scout_root }}/releases"
+    - "{{ scout_root }}/shared"
+    - "{{ scout_release }}"
+
+- name: Unpack the release
+  ansible.builtin.unarchive:
+    src: "{{ scout_local_build_dir }}/scout-{{ scout_rev.stdout }}.tar.gz"
+    dest: "{{ scout_release }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    creates: "{{ scout_release }}/compose.yaml"
+
+# ---- .env: generated once on the server, then only managed keys are updated.
+
+- name: Generate credentials on first deploy
+  become_user: "{{ ansible_user }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      umask 077
+      t() { openssl rand -hex 32; }
+      {
+        echo "# Created by infra/deploy on first deploy. Keep private; never replace on a server with data."
+        echo "POSTGRES_PASSWORD=$(t)"
+        echo "S3_ACCESS_KEY_ID=$(t)"
+        echo "S3_SECRET_ACCESS_KEY=$(t)"
+        echo "CLICKHOUSE_PASSWORD=$(t)"
+        echo "SCOUT_API_TOKEN=$(t)"
+      } > "{{ scout_env_file }}"
+    creates: "{{ scout_env_file }}"
+
+- name: Set deployment settings in .env
+  ansible.builtin.lineinfile:
+    path: "{{ scout_env_file }}"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    mode: "0600"
+    owner: "{{ ansible_user }}"
+  loop: "{{ scout_managed_env | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Set private settings in .env
+  ansible.builtin.lineinfile:
+    path: "{{ scout_env_file }}"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    mode: "0600"
+    owner: "{{ ansible_user }}"
+  loop: "{{ (scout_env | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
+- name: Link .env into the release
+  ansible.builtin.file:
+    src: "{{ scout_env_file }}"
+    dest: "{{ scout_release }}/.env"
+    state: link
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+# ---- Cloudflare Origin certificate for Caddy.
+
+- name: Create the certificate folder
+  ansible.builtin.file:
+    path: "{{ scout_cert_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+
+- name: Install the Origin certificate, key and origin pull CA
+  ansible.builtin.copy:
+    src: "{{ scout_local_secrets_dir }}/{{ item }}"
+    dest: "{{ scout_cert_dir }}/{{ item }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  loop: [origin.pem, origin.key, aop-ca.pem]
+  notify: Restart edge
+
+# ---- Deploy.
+
+- name: Point current at the release
+  ansible.builtin.file:
+    src: "{{ scout_release }}"
+    dest: "{{ scout_root }}/current"
+    state: link
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+# Run from the real release path (not the symlink) so Compose bind mounts point
+# at this release and an edited Caddyfile recreates the edge container.
+- name: Build and start Scout (the first build compiles the API; allow ~20 minutes)
+  become_user: "{{ ansible_user }}"
+  ansible.builtin.command:
+    cmd: bash scripts/deploy.sh edge
+    chdir: "{{ scout_release }}"
+  async: 3600
+  poll: 20
+  changed_when: true
+
+- name: Apply a changed certificate
+  ansible.builtin.meta: flush_handlers
+
+# ---- Verify.
+
+- name: Confirm the browser sandbox cannot reach the metadata service
+  become_user: "{{ ansible_user }}"
+  ansible.builtin.command:
+    cmd: >-
+      docker compose exec -T browser-sandbox node -e
+      "fetch('http://169.254.169.254/hetzner/v1/metadata',{signal:AbortSignal.timeout(4000)})
+      .then(()=>process.exit(1),()=>process.exit(0))"
+    chdir: "{{ scout_release }}"
+  environment:
+    COMPOSE_FILE: "{{ scout_compose_files }}"
+  changed_when: false
+  register: scout_metadata_probe
+  failed_when: scout_metadata_probe.rc != 0
+
+- name: Confirm the public URL answers through Cloudflare
+  delegate_to: localhost
+  become: false
+  ansible.builtin.uri:
+    url: "https://{{ scout_public_host }}/healthz"
+    return_content: true
+  register: scout_public_health
+  until: scout_public_health.status == 200
+  retries: 12
+  delay: 10
+
+# An anonymous request must be sent to the Cloudflare Access login, never served.
+- name: Confirm Cloudflare Access guards the operator console
+  delegate_to: localhost
+  become: false
+  ansible.builtin.uri:
+    url: "https://{{ scout_backoffice_host }}/"
+    follow_redirects: none
+    status_code: [302]
+  register: scout_bo_anonymous
+  failed_when: >-
+    scout_bo_anonymous.status != 302
+    or 'cloudflareaccess.com' not in (scout_bo_anonymous.location | default(''))
+
+# ---- Prune old releases (never the one just deployed).
+
+- name: List releases
+  ansible.builtin.find:
+    paths: "{{ scout_root }}/releases"
+    file_type: directory
+  register: scout_releases
+
+- name: Remove releases beyond the newest {{ scout_releases_kept }}
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ (scout_releases.files | sort(attribute='mtime', reverse=true))[scout_releases_kept:] }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: item.path != scout_release
+
+- name: Done
+  ansible.builtin.debug:
+    msg:
+      - "Deployed {{ scout_rev.stdout[:12] }} to https://{{ scout_public_host }}"
+      - "Operator console: https://{{ scout_backoffice_host }} (Cloudflare Access, then the operator token)"

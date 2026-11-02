@@ -1,0 +1,20 @@
+# Reboot when a newer kernel is installed than the one running. On first boot,
+# cloud-init may already be rebooting for the same reason; the reboot module
+# waits for the new boot either way. Uses uname rather than facts so it can
+# run before facts are gathered.
+
+- name: Compare the newest installed kernel with the running one
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      newest=$(ls -1 /boot/vmlinuz-* | sed 's|^/boot/vmlinuz-||' | sort -V | tail -n 1)
+      echo "$newest $(uname -r)"
+    executable: /bin/bash
+  register: scout_kernels
+  changed_when: false
+
+- name: Reboot into the newest kernel
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+    msg: Rebooting into kernel {{ scout_kernels.stdout.split()[0] }}
+  when: scout_kernels.stdout.split()[0] != scout_kernels.stdout.split()[1]

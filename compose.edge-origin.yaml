@@ -1,0 +1,18 @@
+# Edge TLS from a Cloudflare Origin certificate (proxied DNS) instead of ACME.
+# scripts/deploy.sh adds this file when .env sets SCOUT_EDGE_TLS=origin.
+# SCOUT_EDGE_CERT_DIR must contain origin.pem, origin.key and aop-ca.pem (the
+# Authenticated Origin Pulls CA). SCOUT_BACKOFFICE_HOST publishes the operator
+# console; it must sit behind Cloudflare Access (see infra/deploy).
+
+services:
+  edge:
+    environment:
+      SCOUT_BACKOFFICE_HOST: ${SCOUT_BACKOFFICE_HOST:?Set SCOUT_BACKOFFICE_HOST to the operator console hostname}
+    volumes:
+      - ./infra/edge/Caddyfile.origin:/etc/caddy/Caddyfile:ro
+      - ${SCOUT_EDGE_CERT_DIR:?Set SCOUT_EDGE_CERT_DIR to the folder holding origin.pem, origin.key and aop-ca.pem}:/certs:ro
+    # Compose merges this with compose.deploy.yaml's api dependency; both are
+    # listed so the file reads correctly on its own.
+    depends_on:
+      api: { condition: service_healthy }
+      backoffice: { condition: service_healthy }

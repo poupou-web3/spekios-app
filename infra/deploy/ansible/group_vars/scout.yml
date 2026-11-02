@@ -1,0 +1,55 @@
+# Defaults for the Scout host. Per-host values (address, user, public host)
+# come from inventory.yml, which Terraform writes.
+
+# Production deploys the tip of this branch as it is on GitHub (fetched first),
+# never the local checkout or working tree. Set scout_ref (-e scout_ref=<sha>)
+# only to roll back to an older commit already on that branch.
+scout_remote: origin
+scout_branch: prod
+scout_ref: ""
+
+scout_root: /opt/scout
+scout_releases_kept: 3
+scout_cert_dir: /etc/scout/edge
+
+# Files Terraform writes next to this folder.
+scout_local_secrets_dir: "{{ playbook_dir }}/../.secrets"
+scout_local_build_dir: "{{ playbook_dir }}/../.build"
+
+# Optional private settings (provider keys, SPEKIOS_*, slot count...). See secrets.example.yml.
+scout_secrets_file: "{{ playbook_dir }}/secrets.yml"
+
+# Settings this playbook owns in the server's .env. Everything else in that file,
+# including the generated database and storage credentials, is left alone.
+scout_managed_env:
+  SCOUT_PUBLIC_HOST: "{{ scout_public_host }}"
+  SCOUT_PUBLIC_ORIGIN: "https://{{ scout_public_host }}"
+  SCOUT_BACKOFFICE_HOST: "{{ scout_backoffice_host }}"
+  SCOUT_DEV_AUTH_BYPASS: "false"
+  SCOUT_EDGE_TLS: origin
+  SCOUT_EDGE_CERT_DIR: "{{ scout_cert_dir }}"
+
+# Patch, reboot and refuse unfixed kernels (tasks/kernel.yml). Only for test
+# hosts that do not own their kernel, such as containers.
+scout_manage_kernel: true
+
+# First package version of the running kernel image with every required fix.
+# Sources checked on 2 November 2026:
+#   CVE-2026-98432 (IPv4 TCP use-after-free, remote, CVSS 9.8)
+#   Debian: https://security-tracker.debian.org/tracker/CVE-2026-98432
+#     trixie 6.12.113-1 (DSA-6568-1)
+#   Ubuntu: https://ubuntu.com/security/CVE-2026-98432 — 24.04 still vulnerable,
+#     so no entry: deploys to Ubuntu are refused until a fixed version is recorded.
+# Debian 12 is left out on purpose: its linux and linux-6.12 kernels need
+# different minimums that one version comparison cannot tell apart.
+scout_kernel_minimum:
+  Debian-13: 6.12.113-1
+scout_kernel_minimum_reason: CVE-2026-98432
+
+# Unattended security upgrades reboot at this time when a new kernel needs it.
+scout_auto_reboot_time: "04:30"
+
+# Link-local range, including the Hetzner metadata service (169.254.169.254).
+# Containers, and so the browsers opening untrusted pages, must not reach it.
+scout_blocked_container_destinations:
+  - 169.254.0.0/16

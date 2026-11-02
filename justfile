@@ -48,6 +48,24 @@ dev: up
 deploy mode="":
     bash scripts/deploy.sh {{mode}}
 
+# Hetzner + Cloudflare production host (infra/deploy/README.md).
+# Needs HCLOUD_TOKEN and CLOUDFLARE_API_TOKEN in the environment.
+# Read-only: confirms both tokens have every permission cloud-apply needs.
+cloud-check:
+    bash infra/deploy/check-access.sh
+
+cloud-plan:
+    "$(command -v tofu || command -v terraform)" -chdir=infra/deploy/terraform plan
+
+cloud-apply:
+    "$(command -v tofu || command -v terraform)" -chdir=infra/deploy/terraform apply
+
+# Configure the host and ship origin/prod as it is on GitHub. Extra args go to
+# ansible-playbook, e.g. `just cloud-deploy --tags app`, or roll back with
+# `just cloud-deploy --tags app -e scout_ref=<older sha on prod>`.
+cloud-deploy *args:
+    cd infra/deploy/ansible && ansible-playbook site.yml "$@"
+
 # Stop that deployment, including the HTTPS proxy, and keep the database volumes.
 deploy-stop:
     COMPOSE_FILE=compose.yaml:compose.deploy.yaml docker compose --profile edge stop

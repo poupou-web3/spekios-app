@@ -1,0 +1,56 @@
+# Run on a kernel with known fixes, and prove it before deploying.
+# scout_kernel_minimum maps "<Distribution>-<major version>" to the first
+# package version of the running kernel's image that carries every fix we
+# require. A distribution without an entry is refused: add one only after
+# checking the vendor's tracker.
+#
+# This runs before any other host change. cloud-init upgraded and rebooted on
+# first boot (Terraform user_data), and site.yml already booted any newer
+# kernel; this installs whatever has been published since, then checks.
+
+- name: Install pending updates, including new kernel packages
+  ansible.builtin.apt:
+    upgrade: safe
+    update_cache: true
+    cache_valid_time: 600
+
+- name: Boot the kernel just installed
+  ansible.builtin.import_tasks: reboot-into-newest-kernel.yml
+
+- name: Refresh kernel facts
+  ansible.builtin.setup:
+    filter: [ansible_kernel, ansible_distribution*]
+
+- name: Read the running kernel's package version
+  ansible.builtin.command:
+    cmd: dpkg-query -W -f=${Version} linux-image-{{ ansible_facts['kernel'] }}
+  register: scout_kernel_package
+  changed_when: false
+
+- name: Refuse a kernel without the required fixes
+  vars:
+    release_key: "{{ ansible_facts['distribution'] }}-{{ ansible_facts['distribution_major_version'] }}"
+    minimum: "{{ scout_kernel_minimum[release_key] | default('') }}"
+  block:
+    - name: Require a verified minimum for this distribution
+      ansible.builtin.assert:
+        that: minimum | length > 0
+        fail_msg: >-
+          No verified fixed kernel is recorded for {{ release_key }} in scout_kernel_minimum
+          ({{ scout_kernel_minimum_reason }}). Check the vendor tracker and add an entry.
+        quiet: true
+
+    - name: Compare the running kernel package with the recorded minimum
+      ansible.builtin.command:
+        cmd: dpkg --compare-versions "{{ scout_kernel_package.stdout }}" ge "{{ minimum }}"
+      register: scout_kernel_ok
+      changed_when: false
+      failed_when: false
+
+    - name: Require the fixed kernel
+      ansible.builtin.assert:
+        that: scout_kernel_ok.rc == 0
+        fail_msg: >-
+          Running kernel {{ ansible_facts['kernel'] }} (package {{ scout_kernel_package.stdout }})
+          is older than {{ minimum }} for {{ release_key }} ({{ scout_kernel_minimum_reason }}).
+        success_msg: Kernel {{ scout_kernel_package.stdout }} >= {{ minimum }}

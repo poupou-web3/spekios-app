@@ -27,7 +27,7 @@ The same loop is available from the [workspace](../platform/workspace.md) at **h
 | `SCOUT_EXPLORER_APP_MEMORY` | `true` | Default for remembering explored pages and controls across runs; see [memory across runs](./planner.md#memory-across-runs) |
 | `SCOUT_EXPLORER_VIEWPORT` | `desktop` | `desktop` (1920×1080), `tablet` (768×1024), or `mobile` (390×844) |
 | `SCOUT_ALLOWED_ORIGINS` | `http://exploration-fixture:8082,http://larchwood:8084,http://larchwood:8085` | Extra origins for private, HTTP and internal apps. Public https sites do not need an entry |
-| `SCOUT_CHROMIUM_SANDBOX` | `true` | Chromium's own sandbox inside the browser sandbox container. Set `false` only on hosts where Chromium cannot start it |
+| `SCOUT_CHROMIUM_SANDBOX` | `true` | Chromium's own sandbox inside the browser sandbox container. The container uses [seccomp-chromium.json](../../infra/recorder/seccomp-chromium.json), which is Docker's default profile plus clone/unshare/setns/chroot, so the sandbox starts on Linux hosts without extra capabilities. On Ubuntu 24.04 the host also needs `kernel.apparmor_restrict_unprivileged_userns=0`; [infra/deploy](../../infra/deploy/README.md) sets it. Set `false` only on hosts where Chromium still cannot start it |
 
 ```sh
 .tools/bin/just dev
