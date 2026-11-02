@@ -575,18 +575,27 @@ pub(crate) async fn account_email(state: &AppState) -> Result<Option<String>, Re
                 && !email.chars().any(|c| c.is_control() || c.is_whitespace())
         }))
 }
-pub async fn logout_page() -> Response {
+pub async fn logout_page(State(state): State<AppState>) -> Response {
     let mut r = Html("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Sign out · Spekios</title><h1>Sign out of Spekios</h1><form action=\"/logout\" method=\"post\"><button type=\"submit\">Sign out</button></form><p><a href=\"/\">Back to app</a></p></html>").into_response();
     // A navigation POST under no-referrer serializes Origin as null. Preserve
     // the origin for this same-origin form without sending referrers off-site;
     // the POST handler still requires the exact configured application origin.
     r.headers_mut()
         .insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
+    // Browsers apply form-action to the POST's redirects too. Allow only the
+    // configured identity provider's logout destination so both sessions end.
+    let form_action = state
+        .web_auth
+        .as_ref()
+        .map(|config| format!("'self' {}/logout", config.auth_origin))
+        .unwrap_or_else(|| "'self'".into());
     r.headers_mut().insert(
         "content-security-policy",
-        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
-            .parse()
-            .unwrap(),
+        format!(
+            "default-src 'none'; form-action {form_action}; frame-ancestors 'none'; base-uri 'none'"
+        )
+        .parse()
+        .unwrap(),
     );
     r
 }
@@ -858,7 +867,15 @@ mod tests {
             page.headers()[header::CONTENT_SECURITY_POLICY]
                 .to_str()
                 .unwrap()
-                .contains("form-action 'self'")
+                .contains("form-action 'self' https://login.example.test/logout;")
+        );
+        let unconfigured = crate::router(AppState::new(None, TOKEN).unwrap());
+        let unconfigured = call(&unconfigured, "GET", "/logout", None, None).await;
+        assert!(
+            unconfigured.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .contains("form-action 'self';")
         );
         for path in ["/login", "/auth/callback", "/"] {
             let response = call(&app, "GET", path, None, None).await;
