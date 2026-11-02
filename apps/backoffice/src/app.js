@@ -37,12 +37,14 @@ export function render(){
   }
 }
 export async function refresh(){
+  if(document.activeElement?.closest?.('#demo-settings-form')||document.getElementById?.('demo-api-key')?.value)return;
   if(refreshing||(!state.token&&!state.developmentAccess))return;refreshing=true;
   const token=state.token,developmentAccess=state.developmentAccess;
   try{
     const [runs,jobs,providers,operations,usage]=await Promise.all(['/v1/runs','/v1/browser-jobs','/v1/model-providers','/v1/operations','/v1/usage'].map(get));
     if(token!==state.token||developmentAccess!==state.developmentAccess)return;
     state.runs=runs.runs;state.jobs=jobs.jobs;state.workers=jobs.workers;state.settings=jobs.settings||{};state.providers=providers;state.operations=operations;state.usage=usage;
+    if(state.opsTab==='credits')state.demo=await get('/v1/admin/demo');
     if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if(token!==state.token||developmentAccess!==state.developmentAccess)return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}state.report=report;}}
     state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();render();
   }catch(error){if(token===state.token&&developmentAccess===state.developmentAccess){state.error=error.message;render();}}finally{refreshing=false;}

@@ -4,7 +4,7 @@ import { PROMPT_LIMIT_BYTES } from './model-context.js';
 // Reasoning models spend part of this budget before any visible JSON. 4096 is
 // the gateway maximum, so a light reasoning pass can still finish a plan.
 export const MAX_OUTPUT_TOKENS = 4096;
-export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean };
+export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean; providerKeyId?:string|null };
 export function modelSettings(): ModelSettings {
   const provider = process.env.SCOUT_EXPLORER_PROVIDER ?? 'openrouter';
   if (!['openai', 'anthropic', 'openrouter', 'meta'].includes(provider)) throw new Error('Unsupported explorer provider.');
@@ -23,7 +23,12 @@ export class ModelClient {
     const response = await fetch(this.endpoint + path, { method: body ? 'POST' : 'GET',
       headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined, redirect: 'error', signal: signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000) });
-    if (!response.ok) throw new Error(`Model gateway returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      const code=await response.json().then(body=>body?.error).catch(()=>null);
+      if(code==='demo_credits_insufficient')throw new Error('Not enough demo credit for this call. Add a personal API key and choose it in Settings.');
+      if(code==='provider_key_required'||code==='provider_key_unavailable')throw new Error('Choose an available personal API key in Settings.');
+      throw new Error(`Model gateway returned HTTP ${response.status}.`);
+    }
     return response.json();
   }
   async ready() {
@@ -39,6 +44,7 @@ export class ModelClient {
     if (Buffer.byteLength(prompt) > PROMPT_LIMIT_BYTES) throw new Error('Model context exceeds the bounded prompt size.');
     const body = { request_id: requestId, run_id: runId, action_id: actionId, capture_ids: captureIds,
       provider: this.settings.provider, model: this.settings.model, free_only: this.settings.freeOnly,
+      ...(this.settings.providerKeyId?{provider_key_id:this.settings.providerKeyId}:{}),
       prompt, system, max_output_tokens: MAX_OUTPUT_TOKENS, max_attempts: 1 };
     // Re-submit only the identical logical request. A lost HTTP acknowledgement
     // cannot turn into a second charge or a second model-generated action.

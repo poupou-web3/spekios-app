@@ -7,6 +7,11 @@
   become: false
   run_once: true
   block:
+    - name: Require main as the production source
+      ansible.builtin.assert:
+        that: scout_branch == "main"
+        fail_msg: Production must come from main. Merge changes into main before deploying.
+
     # git archive only includes the current subdirectory, so work from the top.
     - name: Find the repository root
       ansible.builtin.command:

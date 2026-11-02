@@ -5,7 +5,7 @@
 # never the local checkout or working tree. Set scout_ref (-e scout_ref=<sha>)
 # only to roll back to an older commit already on that branch.
 scout_remote: origin
-scout_branch: prod
+scout_branch: main
 scout_ref: ""
 
 scout_root: /opt/scout

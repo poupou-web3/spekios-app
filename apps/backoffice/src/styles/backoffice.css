@@ -1,4 +1,10 @@
 /* Operator back office. A separate deployment that shares tokens and components with the workspace. */
+.demo-admin { max-width: 800px; padding: 24px; }
+.demo-admin form { display: grid; gap: 20px; margin-top: 20px; }
+.demo-admin label { display: grid; gap: 8px; font-size: 13px; }
+.demo-admin label.row { display: flex; align-items: center; }
+.demo-admin input:not([type="checkbox"]) { width: 100%; min-height: 44px; }
+.demo-admin small { color: var(--muted); line-height: 1.6; }
 .ops-app { min-height: 100dvh; }
 .ops-header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 32px; border-bottom: 1px solid var(--border); background: var(--bg); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: saturate(1.4) blur(10px); }
 .ops-header .brand { padding: 0; font-size: 19px; }

@@ -2,42 +2,33 @@
 {
   "title": "Connect a model provider",
   "description": "Configure OpenAI, Anthropic, OpenRouter or Meta AI API access, understand free-only routing, saved defaults and nullable token/cost accounting.",
-  "reviewed": "2026-11-01",
+  "reviewed": "2026-11-02",
   "sidebar": {
     "order": 3
   }
 }
 ---
-Scout’s model gateway supports OpenAI, Anthropic, OpenRouter and Meta AI using provider API keys. The key stays in the private service configuration; it is not entered in these docs or embedded in a client bundle.
+Spekios supports OpenAI, Anthropic, OpenRouter and Meta AI. Use the sponsored demo connection or add your own named API keys in **Settings → Models**.
 
-## Configure provider access
+## Demo credits
 
-Add the relevant key to your checkout’s private **.env**:
+The **Spekios demo key** runs only **Muse Spark 1.3 Contributor**. Each account has a lifetime allowance set by the operator (default $1), with spent, reserved and remaining credit shown separately. Demo calls stop when there is not enough credit for the next call. You can add personal models and keys before or after that point; personal-key calls do not use demo credit.
 
-~~~dotenv
-# Set only the providers you intend to use.
-OPENAI_API_KEY=your-private-key
-ANTHROPIC_API_KEY=your-private-key
-OPENROUTER_API_KEY=your-private-key
-META_API_KEY=your-private-key
-~~~
+Meta Contributor mode permits Meta to use submitted prompts and screenshots for training. The launch page and demo card disclose this. See [Meta’s Contributor documentation](https://dev.meta.ai/docs/pricing-rate-limits).
 
-These are placeholders. Do not commit real values. Restart the stack after adding or changing keys.
+## Add a personal API key
 
-Set the initial explorer provider and a current model ID available to that account:
+1. Open **Settings → Models → Your API keys** and select **Add API key**.
+2. Choose its provider, give it a name and enter the key. You can save several keys for the same provider.
+3. Select the key for your account defaults, project or individual test. The first key becomes that provider’s default; you can choose another default later.
 
-~~~dotenv
-SCOUT_EXPLORER_PROVIDER=openrouter
-SCOUT_EXPLORER_MODEL=openrouter/free
-SCOUT_EXPLORER_FREE_ONLY=true
-SCOUT_EXPLORER_MAX_ACTIONS=6
-~~~
+You may add a model first: if it needs a key, the named-key form opens automatically. Cancelling that form keeps the model in your draft. Keys are saved securely and never shown again, included in prompts or placed in browser storage. Removing a key stops future calls through it; it never silently switches to another paid connection.
 
-Provider model availability, rate limits and pricing can change. Scout checks free-only eligibility, but it cannot guarantee a provider’s free capacity or quota.
+Self-hosted operators can still configure environment keys for local/operator work. Those credentials are not a fallback for hosted users. The separate provider-vault encryption key is generated once during setup/deployment and must be preserved across releases.
 
 ## Save nonsecret defaults
 
-In the workspace, open **Settings → Models**. Under **Your models**, pick a listed model or type another model ID. Listed models already have a name and a standard price: Meta AI (including Muse Spark), Claude and ChatGPT on their own providers, and those same models plus DeepSeek, Mistral and GLM on OpenRouter. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Models whose provider has no key on this server are marked **Not configured**. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
+In the workspace, open **Settings → Models**. Under **Your models**, pick a listed model or type another model ID. Listed models already have a name and a standard price: Meta AI (including Muse Spark), Claude and ChatGPT on their own providers, and those same models plus DeepSeek, Mistral and GLM on OpenRouter. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Choose an **API key** independently of each model. A missing or removed key prevents new tests until you select a usable connection. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
 
 Defaults are append-only revisions. A newly admitted job freezes its effective settings; retries preserve the original admission. Your model list is saved with the defaults, but jobs do not freeze it.
 
@@ -46,14 +37,14 @@ Defaults are append-only revisions. A newly admitted job freezes its effective s
 A run uses, in order of precedence:
 
 1. **The model chosen for that run.** In the workspace, open the options under the URL field and pick a **Model**. Agents and the API send `model` with the job: `{"provider": "anthropic", "model": "claude-sonnet-5-5"}`, optionally with `free_only` and `navigation_model`. Run again and Continue keep a run's own choice.
-2. **Its project's model.** Under **Settings → Models → Project models**, give a project ID (the UUID agents send as `project_id`) a name, an exploration model and a navigation model from your list. A test started in the workspace can pick that project under its options.
+2. **Its project's model.** Under **Settings → Models → Project models**, create a named project and choose its model and API key. Its ID is generated automatically and is available under **Agent project ID** when connecting an agent. A test started in the workspace can pick that project under its options.
 3. **The exploration model** in **Models in use**.
 
 The job records where its model came from in `settings.modelSource` (`run`, `project` or `default`), and the run page says so next to the model. Limit overrides for a model match the model the run ends up using. **GET /v1/projects**, **scout_list_projects** and **scout_get_project** show the model and limits a new run in each project would use, so agents can look up project IDs before starting work.
 
 Free-only stays on for a project or run choice unless it picks a paid OpenRouter model, and when **Restrict OpenRouter to free model IDs** is on the workspace only offers free OpenRouter models there. A free-only choice never inherits a paid OpenRouter navigation model; the run uses one model instead.
 
-Provider keys and allowed origins remain environment-level configuration. Saving a GUI preference does not alter either.
+Preferences select saved keys by opaque reference. Key values are managed separately; allowed origins remain operator configuration.
 
 ## OpenRouter free-only mode
 

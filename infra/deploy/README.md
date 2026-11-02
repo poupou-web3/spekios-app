@@ -51,7 +51,7 @@ You run everything below from this repository on your own machine. The only acco
    just cloud-deploy   # host setup, kernel check, first deploy (the API compiles on the server: about 15–20 min)
    ```
 
-**What gets deployed:** always the tip of the `prod` branch as it is on GitHub. The playbook fetches `origin/prod` and ships that commit with `git archive`, whatever you have checked out locally and whatever is uncommitted. To release, push to `prod`, then run `just cloud-deploy --tags app`. To roll back, run `just cloud-deploy --tags app -e scout_ref=<sha>`; the commit must already be in `prod`'s history, and other branches are refused. The playbook files themselves run from your checkout, so run deploys from an up-to-date `main` or `prod`.
+**What gets deployed:** always the tip of the `main` branch as it is on GitHub. The playbook fetches `origin/main` and ships that commit with `git archive`, whatever you have checked out locally and whatever is uncommitted. To release, merge the changes into `main`, then run `just cloud-deploy --tags app`. To roll back, run `just cloud-deploy --tags app -e scout_ref=<sha>`; the commit must already be in `main`'s history, and other branches are refused. The playbook files themselves run from your checkout, so run deploys from an up-to-date `main`. Overriding `scout_branch` to another branch is refused.
 
 ## What is reachable
 
@@ -109,13 +109,21 @@ Each release goes to `/opt/scout/releases/<sha>`, with `/opt/scout/current` poin
 
 ## Spekios sign-in on app.spekios.com
 
-The local `spekios-local` client only allows `http://localhost:18080/auth/callback`. For production:
+Production sign-in was activated on 2 November 2026 with the separate
+`spekios-app` client, callback `https://app.spekios.com/auth/callback`, and account
+launch URL `https://app.spekios.com/login`. The app reports auth mode `spekios`.
+The local `spekios-local` client still only allows
+`http://localhost:18080/auth/callback`. For another production installation:
 
 1. Register a second Lovable client whose redirect URI is exactly `https://app.spekios.com/auth/callback`. See [SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md).
 2. Put the five `SPEKIOS_*` values in `secrets.yml`.
 3. Run `just cloud-deploy --tags app`.
 
-Until then, the workspace asks for the API token.
+The five settings are also saved in the original `front-clause` checkout's
+ignored `ansible/secrets.yml`, so future deployments keep sign-in enabled. Keep
+the backend secret paired with its registered Lovable hash; do not generate a
+replacement secret during an ordinary deployment. See
+[SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md) for verification and session behavior.
 
 ## Files that stay private (all gitignored)
 
