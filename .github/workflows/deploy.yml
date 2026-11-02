@@ -1,0 +1,85 @@
+name: Deploy
+
+# Every push to prod ships that commit to production, with the same playbook
+# as `just cloud-deploy --tags app`. One-time setup: `just cloud-ci-setup`
+# (infra/deploy/README.md). SSH goes through a Cloudflare Tunnel, so port 22
+# stays closed to GitHub.
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit already on prod to deploy (rollback). Leave empty to redeploy the tip of prod.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# One deploy at a time. A push during a deploy waits for it; if several wait,
+# only the newest runs.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # The playbook that runs, not only the code it ships, comes from prod.
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-24.04
+    # The first build on a new server compiles the API (about 20 minutes).
+    timeout-minutes: 75
+    env:
+      ANSIBLE_CORE_VERSION: 2.21.5
+      CLOUDFLARED_VERSION: 2026.10.7
+      CLOUDFLARED_SHA256: 70b1a1e0f46033ffc8d90b406e554044ba6cbf2e4360295ef1163aed31e09393
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The playbook checks that the commit is in prod's history.
+          fetch-depth: 0
+
+      - name: Install Ansible and cloudflared
+        run: |
+          pipx install "ansible-core==$ANSIBLE_CORE_VERSION"
+          ansible-galaxy collection install community.general:==13.5.0 ansible.posix:==2.2.2
+          curl -fsSLo "$RUNNER_TEMP/cloudflared.deb" \
+            "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64.deb"
+          echo "$CLOUDFLARED_SHA256  $RUNNER_TEMP/cloudflared.deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/cloudflared.deb"
+
+      - name: Write the deploy key, inventory and certificates
+        env:
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          SCOUT_PUBLIC_HOST: ${{ vars.SCOUT_PUBLIC_HOST }}
+          SCOUT_BACKOFFICE_HOST: ${{ vars.SCOUT_BACKOFFICE_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          ORIGIN_PEM: ${{ secrets.ORIGIN_PEM }}
+          ORIGIN_KEY: ${{ secrets.ORIGIN_KEY }}
+          AOP_CA_PEM: ${{ secrets.AOP_CA_PEM }}
+          ANSIBLE_SECRETS_YML: ${{ secrets.ANSIBLE_SECRETS_YML }}
+        run: bash infra/deploy/ci-prepare.sh
+
+      - name: Deploy
+        working-directory: infra/deploy/ansible
+        env:
+          # Read by cloudflared in the SSH ProxyCommand.
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          # Host keys are pinned: refuse unknown ones instead of trusting them.
+          ANSIBLE_SSH_ARGS: -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=yes
+          ANSIBLE_FORCE_COLOR: "1"
+          SCOUT_PUBLIC_HOST: ${{ vars.SCOUT_PUBLIC_HOST }}
+          # A push deploys exactly the pushed commit, even if prod has moved on.
+          REF: ${{ github.event_name == 'push' && github.sha || inputs.ref }}
+        run: |
+          args=(--tags app)
+          if [[ -n "$REF" ]]; then
+            [[ "$REF" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::ref must be a commit SHA, got: $REF"; exit 1; }
+            args+=(-e "scout_ref=$REF")
+          fi
+          ansible-playbook site.yml "${args[@]}"
+          sha=$(git rev-parse "${REF:-origin/prod}^{commit}")
+          echo "Deployed \`${sha:0:12}\` to https://$SCOUT_PUBLIC_HOST" >>"$GITHUB_STEP_SUMMARY"
