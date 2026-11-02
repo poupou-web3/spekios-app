@@ -1,8 +1,12 @@
 # Defaults for the Scout host. Per-host values (address, user, public host)
 # come from inventory.yml, which Terraform writes.
 
-# Git ref to deploy. Only committed code is shipped (git archive), never the working tree.
-scout_ref: HEAD
+# Production deploys the tip of this branch as it is on GitHub (fetched first),
+# never the local checkout or working tree. Set scout_ref (-e scout_ref=<sha>)
+# only to roll back to an older commit already on that branch.
+scout_remote: origin
+scout_branch: prod
+scout_ref: ""
 
 scout_root: /opt/scout
 scout_releases_kept: 3

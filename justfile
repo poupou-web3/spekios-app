@@ -60,8 +60,9 @@ cloud-plan:
 cloud-apply:
     "$(command -v tofu || command -v terraform)" -chdir=infra/deploy/terraform apply
 
-# Configure the host and ship the committed HEAD. Extra args go to ansible-playbook,
-# e.g. `just cloud-deploy --tags app` or `just cloud-deploy -e scout_ref=v1.2`.
+# Configure the host and ship origin/prod as it is on GitHub. Extra args go to
+# ansible-playbook, e.g. `just cloud-deploy --tags app`, or roll back with
+# `just cloud-deploy --tags app -e scout_ref=<older sha on prod>`.
 cloud-deploy *args:
     cd infra/deploy/ansible && ansible-playbook site.yml "$@"
 

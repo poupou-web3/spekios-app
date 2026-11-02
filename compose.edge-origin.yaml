@@ -11,5 +11,8 @@ services:
     volumes:
       - ./infra/edge/Caddyfile.origin:/etc/caddy/Caddyfile:ro
       - ${SCOUT_EDGE_CERT_DIR:?Set SCOUT_EDGE_CERT_DIR to the folder holding origin.pem, origin.key and aop-ca.pem}:/certs:ro
+    # Compose merges this with compose.deploy.yaml's api dependency; both are
+    # listed so the file reads correctly on its own.
     depends_on:
+      api: { condition: service_healthy }
       backoffice: { condition: service_healthy }

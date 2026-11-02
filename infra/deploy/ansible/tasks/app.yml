@@ -15,24 +15,34 @@
       register: scout_repo
       changed_when: false
 
-    - name: Resolve {{ scout_ref }}
+    # Production runs only what is on the deploy branch on GitHub, whatever is
+    # checked out locally, so a laptop and CI ship exactly the same commit.
+    - name: Fetch {{ scout_remote }}/{{ scout_branch }}
       ansible.builtin.command:
-        cmd: git rev-parse --verify "{{ scout_ref }}^{commit}"
+        cmd: git fetch --quiet "{{ scout_remote }}" "+refs/heads/{{ scout_branch }}:refs/remotes/{{ scout_remote }}/{{ scout_branch }}"
+        chdir: "{{ scout_repo.stdout }}"
+      changed_when: false
+
+    - name: Resolve the commit to deploy
+      ansible.builtin.command:
+        cmd: git rev-parse --verify "{{ scout_ref | default('', true) or (scout_remote ~ '/' ~ scout_branch) }}^{commit}"
         chdir: "{{ scout_repo.stdout }}"
       register: scout_rev
       changed_when: false
 
-    - name: Look for uncommitted changes
+    # An explicit scout_ref is for rollbacks: it must already be part of the
+    # deploy branch's history. Other branches are never deployed.
+    - name: Refuse commits that are not on {{ scout_remote }}/{{ scout_branch }}
       ansible.builtin.command:
-        cmd: git status --porcelain --untracked-files=no
+        cmd: git merge-base --is-ancestor "{{ scout_rev.stdout }}" "{{ scout_remote }}/{{ scout_branch }}"
         chdir: "{{ scout_repo.stdout }}"
-      register: scout_dirty
+      register: scout_on_branch
       changed_when: false
+      failed_when: scout_on_branch.rc != 0
 
-    - name: Warn that uncommitted changes are not deployed
+    - name: Show what is deployed
       ansible.builtin.debug:
-        msg: Uncommitted changes exist locally. Only commit {{ scout_rev.stdout[:12] }} is deployed.
-      when: scout_dirty.stdout | length > 0
+        msg: Deploying {{ scout_rev.stdout[:12] }} from {{ scout_remote }}/{{ scout_branch }}
 
     - name: Create the local build folder
       ansible.builtin.file:
