@@ -62,6 +62,28 @@ if [[ "$edge" == 1 ]]; then
   export SCOUT_PUBLIC_HOST="$host"
   export SCOUT_PUBLIC_ORIGIN="$origin"
   export SCOUT_EDGE_PUBLISH="${SCOUT_EDGE_PUBLISH:-0.0.0.0}"
+  edge_tls=$(read_env SCOUT_EDGE_TLS)
+  case "${edge_tls:-acme}" in
+    acme) ;;
+    origin)
+      cert_dir=$(read_env SCOUT_EDGE_CERT_DIR)
+      if [[ -z "$cert_dir" || ! -f "$cert_dir/origin.pem" || ! -f "$cert_dir/origin.key" || ! -f "$cert_dir/aop-ca.pem" ]]; then
+        echo "SCOUT_EDGE_TLS=origin needs SCOUT_EDGE_CERT_DIR with origin.pem, origin.key and aop-ca.pem." >&2
+        exit 1
+      fi
+      backoffice_host=$(read_env SCOUT_BACKOFFICE_HOST)
+      if [[ ! "$backoffice_host" =~ ^[A-Za-z0-9.-]+$ || "$backoffice_host" == "$host" ]]; then
+        echo "SCOUT_EDGE_TLS=origin needs SCOUT_BACKOFFICE_HOST: a bare hostname, different from SCOUT_PUBLIC_HOST, behind Cloudflare Access." >&2
+        exit 1
+      fi
+      export SCOUT_BACKOFFICE_HOST="$backoffice_host"
+      COMPOSE_FILE="$COMPOSE_FILE:compose.edge-origin.yaml"
+      ;;
+    *)
+      echo "SCOUT_EDGE_TLS must be acme or origin." >&2
+      exit 1
+      ;;
+  esac
 fi
 if [[ "$bypass" == "true" && "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
   echo "Refusing to publish the workspace while SCOUT_DEV_AUTH_BYPASS=true." >&2

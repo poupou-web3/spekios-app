@@ -1,0 +1,74 @@
+# Configure the host and deploy Scout.
+#   ansible-playbook site.yml                 # everything
+#   ansible-playbook site.yml --tags app      # ship a new release only
+#   ansible-playbook site.yml -e scout_ref=v1 # deploy another commit, tag or branch
+- name: Scout host
+  hosts: scout
+  become: true
+  gather_facts: false
+
+  handlers:
+    - name: Restart ssh
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+
+    - name: Restart docker
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+
+    - name: Reload IP options filter
+      ansible.builtin.systemd_service:
+        name: scout-ip-options
+        state: reloaded
+        daemon_reload: true
+
+    - name: Restart edge
+      become_user: "{{ ansible_user }}"
+      ansible.builtin.command:
+        cmd: docker compose --profile edge restart edge
+        chdir: "{{ scout_root }}/current"
+      environment:
+        COMPOSE_FILE: compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml
+      changed_when: true
+
+  tasks:
+    - name: Wait for the first boot to finish
+      tags: [always]
+      block:
+        - name: Wait for SSH
+          ansible.builtin.wait_for_connection:
+            timeout: 300
+
+        - name: Wait for cloud-init
+          ansible.builtin.command: cloud-init status --wait
+          changed_when: false
+          failed_when: false
+
+        # cloud-init reboots into the patched kernel at the end of first boot;
+        # wait for that (or do it) before touching anything else.
+        - name: Boot the newest installed kernel
+          ansible.builtin.import_tasks: tasks/reboot-into-newest-kernel.yml
+          when: scout_manage_kernel | bool
+
+        - name: Gather facts
+          ansible.builtin.setup:
+
+    # First: nothing else is configured or deployed on an unverified kernel.
+    - name: Kernel
+      ansible.builtin.import_tasks: tasks/kernel.yml
+      tags: [host, kernel]
+      when: scout_manage_kernel | bool
+
+    - name: Host
+      ansible.builtin.import_tasks: tasks/host.yml
+      tags: [host]
+
+    - name: Docker
+      ansible.builtin.import_tasks: tasks/docker.yml
+      tags: [host, docker]
+
+    - name: App
+      ansible.builtin.import_tasks: tasks/app.yml
+      tags: [app]

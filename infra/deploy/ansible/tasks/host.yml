@@ -1,0 +1,149 @@
+# Base packages, SSH hardening, kernel exposure reduction and a host firewall.
+# The Hetzner cloud firewall (Terraform) is the real gate. ufw is a second layer
+# for host services such as sshd: Docker-published ports bypass ufw, which is
+# why every Compose port except the edge binds to 127.0.0.1.
+
+- name: Install base packages
+  ansible.builtin.apt:
+    # python3-debian is required by deb822_repository (Docker's apt source).
+    name: [ca-certificates, curl, openssl, ufw, unattended-upgrades, iptables, nftables, python3-debian]
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Keep security updates automatic
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# A kernel fix only applies after a reboot. Containers come back on their own
+# (restart: unless-stopped), so the site is down for about a minute.
+- name: Reboot automatically when a security update needs it
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52scout-reboot
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "{{ scout_auto_reboot_time }}";
+
+# Ubuntu 24.04 socket-activates ssh, so this may not exist yet; sshd -t needs it.
+- name: Ensure the sshd privilege separation directory exists
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    mode: "0755"
+
+- name: Harden sshd (keys only, no root, deploy user only)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-scout.conf
+    mode: "0644"
+    # Sorted before cloud-init's 50-*.conf, and sshd keeps the first value it reads.
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      AllowUsers {{ ansible_user }}
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh
+
+- name: Allow SSH, HTTP and HTTPS through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["22", "80", "443"]
+
+- name: Enable ufw, denying other inbound traffic
+  community.general.ufw:
+    state: enabled
+    direction: incoming
+    policy: deny
+
+# ---- Kernel settings. Each is applied only where the kernel exposes it.
+
+- name: Check which kernel settings exist
+  ansible.builtin.stat:
+    path: "/proc/sys/{{ item.key | replace('.', '/') }}"
+  loop: "{{ scout_sysctls | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: scout_sysctl_paths
+  vars:
+    scout_sysctls:
+      # Nothing here uses multipath TCP. Go programs such as Caddy open MPTCP
+      # listeners by default, and the public CVE-2026-98432 exploit path goes
+      # through one; switching it off removes that path even before patching.
+      net.mptcp.enabled: "0"
+      # Chromium's sandbox in browser-sandbox needs unprivileged user
+      # namespaces. Ubuntu 24.04 blocks them through AppArmor (1); Debian
+      # allows them (0, and unprivileged_userns_clone=1). This keeps both
+      # working; containers stay limited by their seccomp profile, dropped
+      # capabilities and the docker-default AppArmor profile.
+      kernel.apparmor_restrict_unprivileged_userns: "0"
+      kernel.unprivileged_userns_clone: "1"
+
+- name: Apply kernel settings
+  ansible.posix.sysctl:
+    name: "{{ item.item.key }}"
+    value: "{{ item.item.value }}"
+    sysctl_file: /etc/sysctl.d/60-scout.conf
+    reload: true
+  loop: "{{ scout_sysctl_paths.results }}"
+  loop_control:
+    label: "{{ item.item.key }}={{ item.item.value }}"
+  when: item.stat.exists
+
+# ---- Drop inbound IPv4 TCP packets that carry IP options.
+# Interim CVE-2026-98432 mitigation from Red Hat and AlmaLinux: the bug is
+# reached through IPv4 options (Record Route, Timestamp) in a SYN. Ordinary
+# traffic never uses them. It stays in place after patching as cheap hardening.
+# A separate table, loaded by its own unit: nftables.service would flush
+# Docker's rules, so it is not used.
+- name: Write the IP options filter
+  ansible.builtin.copy:
+    dest: /etc/scout-ip-options.nft
+    mode: "0644"
+    content: |
+      # Managed by Ansible (infra/deploy). Recreated atomically on each load.
+      table ip scout_ip_options
+      delete table ip scout_ip_options
+      table ip scout_ip_options {
+        chain prerouting {
+          type filter hook prerouting priority raw; policy accept;
+          meta l4proto tcp ip hdrlength > 5 counter drop
+        }
+      }
+  notify: Reload IP options filter
+
+- name: Install the IP options filter unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/scout-ip-options.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Drop IPv4 TCP packets with IP options (CVE-2026-98432 hardening)
+      After=network-pre.target
+      Before=network.target docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/nft -f /etc/scout-ip-options.nft
+      ExecReload=/usr/sbin/nft -f /etc/scout-ip-options.nft
+      ExecStop=/usr/sbin/nft delete table ip scout_ip_options
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload IP options filter
+
+- name: Enable the IP options filter
+  ansible.builtin.systemd_service:
+    name: scout-ip-options
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply the sshd change before continuing
+  ansible.builtin.meta: flush_handlers

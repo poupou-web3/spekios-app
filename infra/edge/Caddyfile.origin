@@ -1,0 +1,35 @@
+# Public entry behind the Cloudflare proxy (SCOUT_EDGE_TLS=origin; see
+# compose.edge-origin.yaml). TLS uses a Cloudflare Origin certificate instead
+# of ACME, and every connection must present the Authenticated Origin Pull
+# client certificate signed by our own CA, which only Cloudflare holds for
+# this zone. Anything else, including direct hits on the IP, fails the handshake.
+{
+	servers {
+		# The Host header must match the TLS server name, so a request cannot
+		# arrive for one hostname and be routed to the other.
+		strict_sni_host on
+	}
+}
+
+(cloudflare_origin) {
+	tls /certs/origin.pem /certs/origin.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /certs/aop-ca.pem
+		}
+	}
+	encode gzip
+}
+
+# Customer workspace and API.
+{$SCOUT_PUBLIC_HOST} {
+	import cloudflare_origin
+	reverse_proxy api:8080
+}
+
+# Operator console. Cloudflare Access admits only the configured operators, and
+# the console still requires the operator token.
+{$SCOUT_BACKOFFICE_HOST} {
+	import cloudflare_origin
+	reverse_proxy backoffice:8080
+}

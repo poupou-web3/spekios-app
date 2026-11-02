@@ -1,0 +1,80 @@
+# Docker Engine and Compose from Docker's apt repository.
+
+- name: Add Docker's apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}
+    suites: ["{{ ansible_facts['distribution_release'] }}"]
+    components: [stable]
+    architectures: ["{{ 'arm64' if ansible_facts['architecture'] == 'aarch64' else 'amd64' }}"]
+    signed_by: https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg
+
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+    update_cache: true
+
+- name: Rotate container logs
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: "{{ {'log-driver': 'local', 'log-opts': {'max-size': '20m', 'max-file': '5'}} | to_nice_json }}\n"
+  notify: Restart docker
+
+- name: Let the deploy user run Docker
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: [docker]
+    append: true
+  register: docker_group
+
+- name: Reconnect so the docker group applies
+  ansible.builtin.meta: reset_connection
+  when: docker_group is changed
+
+# Docker inserts its own FORWARD rules, so container egress filtering belongs in
+# the DOCKER-USER chain. This unit re-applies the rules whenever Docker starts.
+- name: Install the container egress block script
+  ansible.builtin.copy:
+    dest: /usr/local/sbin/scout-docker-user-rules
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # Managed by Ansible: drop container traffic to these destinations.
+      set -eu
+      iptables -N DOCKER-USER 2>/dev/null || true
+      {% for cidr in scout_blocked_container_destinations %}
+      iptables -C DOCKER-USER -d {{ cidr }} -j DROP 2>/dev/null || iptables -I DOCKER-USER -d {{ cidr }} -j DROP
+      {% endfor %}
+  notify: Restart docker
+
+- name: Install the container egress block unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/scout-docker-user-rules.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Scout container egress rules (DOCKER-USER)
+      After=docker.service
+      PartOf=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/scout-docker-user-rules
+
+      [Install]
+      WantedBy=docker.service
+  notify: Restart docker
+
+- name: Enable Docker and the egress rules
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: [docker, scout-docker-user-rules]
+
+- name: Apply Docker changes before deploying
+  ansible.builtin.meta: flush_handlers
