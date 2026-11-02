@@ -79,9 +79,9 @@ cloud-token:
     printf '%s' "$token" | pbcopy
     echo "Copied the operator token (${#token} characters) to the clipboard. Paste it on https://bo.spekios.com."
 
-# Configure the host and ship origin/prod as it is on GitHub. Extra args go to
+# Configure the host and ship origin/main as it is on GitHub. Extra args go to
 # ansible-playbook, e.g. `just cloud-deploy --tags app`, or roll back with
-# `just cloud-deploy --tags app -e scout_ref=<older sha on prod>`.
+# `just cloud-deploy --tags app -e scout_ref=<older sha on main>`.
 cloud-deploy *args:
     cd infra/deploy/ansible && ansible-playbook site.yml "$@"
 

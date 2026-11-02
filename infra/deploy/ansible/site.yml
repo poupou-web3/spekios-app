@@ -1,7 +1,7 @@
 # Configure the host and deploy Scout.
 #   ansible-playbook site.yml                 # everything
 #   ansible-playbook site.yml --tags app      # ship a new release only
-#   ansible-playbook site.yml -e scout_ref=<sha>  # roll back to an older commit on origin/prod
+#   ansible-playbook site.yml -e scout_ref=<sha>  # roll back to an older commit on origin/main
 - name: Scout host
   hosts: scout
   become: true

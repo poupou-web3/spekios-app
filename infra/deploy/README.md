@@ -51,7 +51,7 @@ You run everything below from this repository on your own machine. The only acco
    just cloud-deploy   # host setup, kernel check, first deploy (the API compiles on the server: about 15–20 min)
    ```
 
-**What gets deployed:** always the tip of the `prod` branch as it is on GitHub. The playbook fetches `origin/prod` and ships that commit with `git archive`, whatever you have checked out locally and whatever is uncommitted. To release, push to `prod`, then run `just cloud-deploy --tags app`. To roll back, run `just cloud-deploy --tags app -e scout_ref=<sha>`; the commit must already be in `prod`'s history, and other branches are refused. The playbook files themselves run from your checkout, so run deploys from an up-to-date `main` or `prod`.
+**What gets deployed:** always the tip of the `main` branch as it is on GitHub. The playbook fetches `origin/main` and ships that commit with `git archive`, whatever you have checked out locally and whatever is uncommitted. To release, merge the changes into `main`, then run `just cloud-deploy --tags app`. To roll back, run `just cloud-deploy --tags app -e scout_ref=<sha>`; the commit must already be in `main`'s history, and other branches are refused. The playbook files themselves run from your checkout, so run deploys from an up-to-date `main`. Overriding `scout_branch` to another branch is refused.
 
 ## What is reachable
 

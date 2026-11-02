@@ -12,6 +12,13 @@ Most of the time, start that branch from an up-to-date `main`:
 
 Use a short, descriptive branch name for the change. Keep unrelated work on its own branch.
 
+## Production deployments
+
+Production must always come from `origin/main`. Merge changes into `main` before
+deploying them; never deploy directly from a feature branch or a separate `prod`
+branch. Fetch the latest `main` before deploying. Rollbacks must use a commit
+already in `origin/main` history.
+
 ## Commits
 
 Do not add `Co-authored-by` trailers, or any other co-author attribution, to commit messages.
