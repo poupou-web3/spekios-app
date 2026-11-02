@@ -1,0 +1,117 @@
+# cloudflared, so GitHub Actions can reach sshd without opening port 22.
+# The tunnel only dials out. Terraform routes ssh.<zone> through it to
+# localhost:22, behind a Cloudflare Access app that only the deploy service
+# token passes. The CI key below is accepted only from localhost, that is,
+# through the tunnel, so a leaked key alone opens nothing.
+
+- name: Check for the tunnel token from Terraform
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ scout_tunnel_token_file }}"
+  register: scout_tunnel_token_stat
+  failed_when: not scout_tunnel_token_stat.stat.exists
+
+- name: Add Cloudflare's apt repository
+  ansible.builtin.deb822_repository:
+    name: cloudflared
+    types: [deb]
+    uris: https://pkg.cloudflare.com/cloudflared
+    suites: [any]
+    components: [main]
+    signed_by: https://pkg.cloudflare.com/cloudflare-main.gpg
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    name: cloudflared
+    update_cache: true
+
+# The repository's Release file says "Origin: cloudflared". Lists in apt.conf.d
+# add up, so this extends Debian's security origins instead of replacing them.
+- name: Keep cloudflared updated with the security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/53scout-cloudflared
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Origins-Pattern { "origin=cloudflared"; };
+
+- name: Create the tunnel settings folder
+  ansible.builtin.file:
+    path: /etc/scout/tunnel
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the tunnel token
+  ansible.builtin.copy:
+    dest: /etc/scout/tunnel/env
+    content: "TUNNEL_TOKEN={{ lookup('ansible.builtin.file', scout_tunnel_token_file) }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart SSH tunnel
+
+# systemd reads the token as root, then runs cloudflared as an unprivileged
+# throwaway user that cannot write to the system.
+- name: Install the tunnel unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/scout-ssh-tunnel.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Cloudflare Tunnel to sshd for GitHub deploys
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      EnvironmentFile=/etc/scout/tunnel/env
+      ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+      Restart=always
+      RestartSec=5
+      DynamicUser=yes
+      NoNewPrivileges=yes
+      ProtectSystem=strict
+      ProtectHome=yes
+      PrivateTmp=yes
+      PrivateDevices=yes
+      CapabilityBoundingSet=
+      RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart SSH tunnel
+
+- name: Enable the tunnel
+  ansible.builtin.systemd_service:
+    name: scout-ssh-tunnel
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Check for the GitHub deploy key on this machine
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ scout_ci_ssh_public_key_file }}"
+  register: scout_ci_key_stat
+
+# from= limits the key to connections arriving through the tunnel.
+- name: Authorize the GitHub deploy key, through the tunnel only
+  ansible.posix.authorized_key:
+    user: "{{ ansible_user }}"
+    key: "{{ lookup('ansible.builtin.file', scout_ci_ssh_public_key_file) }}"
+    key_options: 'from="127.0.0.1,::1"'
+    state: present
+  when: scout_ci_key_stat.stat.exists
+
+- name: Note that GitHub deploys are not set up yet
+  ansible.builtin.debug:
+    msg: No {{ scout_ci_ssh_public_key_file }} here. Run `just cloud-ci-setup` to set up deploys on push to prod.
+  when: not scout_ci_key_stat.stat.exists
+
+- name: Start the tunnel before continuing
+  ansible.builtin.meta: flush_handlers
