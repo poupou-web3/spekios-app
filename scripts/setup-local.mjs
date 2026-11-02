@@ -17,12 +17,17 @@ try {
     throw new Error('SCOUT_API_TOKEN is invalid. Existing credentials were not changed.');
   }
   console.log('Existing .env preserved; permissions set to 0600.');
+  if (!/^SCOUT_PROVIDER_VAULT_KEY=.+/m.test(existing)) {
+    await appendFile(path, `\nSCOUT_PROVIDER_VAULT_KEY=${randomBytes(32).toString('hex')}\n`, {mode:0o600});
+  } else if (!/^SCOUT_PROVIDER_VAULT_KEY=[A-Fa-f0-9]{64}$/m.test(existing)) {
+    throw new Error('SCOUT_PROVIDER_VAULT_KEY is invalid. Existing credentials were not changed.');
+  }
 } catch (error) {
   if (error.code !== 'ENOENT') throw error;
   const token = () => randomBytes(32).toString('hex');
   const value = ['# Local development credentials. Keep private.',
     `POSTGRES_PASSWORD=${token()}`, `S3_ACCESS_KEY_ID=${token()}`,
-    `S3_SECRET_ACCESS_KEY=${token()}`, `CLICKHOUSE_PASSWORD=${token()}`, `SCOUT_API_TOKEN=${token()}`, ''].join('\n');
+    `S3_SECRET_ACCESS_KEY=${token()}`, `CLICKHOUSE_PASSWORD=${token()}`, `SCOUT_API_TOKEN=${token()}`, `SCOUT_PROVIDER_VAULT_KEY=${token()}`, ''].join('\n');
   await writeFile(path, value, { mode: 0o600, flag: 'wx' });
   console.log('Created .env with independent random credentials and permissions 0600.');
 }

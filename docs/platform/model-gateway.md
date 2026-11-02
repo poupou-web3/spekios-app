@@ -4,7 +4,15 @@ Implemented on 22 October 2026: asynchronous OpenAI, Claude and OpenRouter calls
 
 ## Connect and use a provider
 
-Add `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `META_API_KEY` to the private, ignored `.env`, then run `just dev` and `just models`. Meta’s docs call that bearer token `MODEL_API_KEY`; if `META_API_KEY` is empty, the gateway uses `MODEL_API_KEY`. Keys are passed only to the Rust API. This increment supports API-key authentication; ChatGPT subscription token sharing and native Claude Code authentication remain future adapters. Capabilities explicitly report `subscription_auth: false`. See [authentication boundaries](./models.md).
+Hosted users add named personal keys in **Settings → Models**, independently of
+the sponsored Meta demo connection. Multiple keys per provider, account/project/run
+selection, encrypted storage and demo credit enforcement are described in
+[provider access](./provider-access.md).
+
+For operator/local-development calls, add `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENROUTER_API_KEY`, or `META_API_KEY` to the private `.env`. Meta's `MODEL_API_KEY`
+alias remains supported. These environment credentials are not a fallback for
+hosted user accounts. Subscription authentication remains unsupported.
 
 Create `artifacts/request.json` with a new UUID:
 
@@ -30,15 +38,17 @@ Resubmitting the same UUID and normalized input returns the existing request wit
 
 | Route | Behavior |
 | --- | --- |
-| `GET /v1/model-providers` | Configured providers, authentication, gateway readiness, fixture/live mode; no keys |
+| `GET /v1/model-providers` | Configured providers, authentication, gateway readiness, fixture/live mode, safe owned-key metadata and demo balance; no secrets |
 | `POST /v1/model-requests` | HTTP 202 after committing admission; 200 for an identical existing request |
 | `GET /v1/model-requests/{request_id}` | Request, attempts, output/usage, payload references and export state |
 | `GET /v1/usage` | Authoritative per-user usage for the current execution mode |
 | `GET /v1/runs/{run_id}` | Includes model usage linked to the run |
 
-All data routes require the local `SCOUT_API_TOKEN`. This represents one local developer workspace/user, not multi-user authentication.
+Hosted humans use their account-bound app session; agents use scoped bearer
+credentials. Raw inference submission remains operator/worker-only and derives
+the account and key from the admitted run. See [authentication boundaries](./models.md).
 
-Provider mappings use [OpenAI Responses](https://developers.openai.com/api/docs/guides/text), [Meta Model API Responses](https://dev.meta.ai/docs/protocols/responses), [Claude Messages](https://platform.claude.com/docs/en/api/messages/create), and [OpenRouter Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion). Calls are non-streaming text-plus-image requests. OpenAI and Meta use `store: false` so prompts and screenshots are not retained by the provider; Claude pins API version `2023-06-01`. Meta posts to `https://api.meta.ai/v1/responses` with bearer authentication and `reasoning.effort` set to `low`, because Muse Wonder's reasoning tokens share `max_output_tokens` with the visible answer. The usual model ID is `muse-wonder-1.0`. Meta usage follows the Responses token fields, and a missing price stays null. The gateway does not execute model-generated tools. Provider output is a proposal, not evidence that a browser action succeeded.
+Provider mappings use [OpenAI Responses](https://developers.openai.com/api/docs/guides/text), [Meta Model API Responses](https://dev.meta.ai/docs/protocols/responses), [Claude Messages](https://platform.claude.com/docs/en/api/messages/create), and [OpenRouter Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion). Calls are non-streaming text-plus-image requests. OpenAI and Meta use `store: false` to disable server-managed response state; Meta Contributor training/data use is a separate model-tier policy; Claude pins API version `2023-06-01`. Meta posts to `https://api.meta.ai/v1/responses` with bearer authentication and `reasoning.effort` set to `low`, because Muse Wonder's reasoning tokens share `max_output_tokens` with the visible answer. The usual model ID is `muse-wonder-1.0`. Meta usage follows the Responses token fields, and a missing price stays null. The gateway does not execute model-generated tools. Provider output is a proposal, not evidence that a browser action succeeded.
 
 OpenRouter defaults to free-only: model `openrouter/free` or an explicit `:free` model, with zero price ceilings for prompt, completion, request and image. No fallback model list or paid plugins are accepted. Routing requires parameter support and denies data-collecting providers. These filters can result in no available endpoint; they do not guarantee vision support. `free_only: false` explicitly permits the selected paid route. Requested/returned model, routed provider and response/generation ID are recorded. [Routing controls](https://openrouter.ai/docs/guides/routing/provider-selection)
 

@@ -14,10 +14,11 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {addCatalogModel,addSavedModel,editOverrides,editProjectModels,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel} from './views/settings.js';
+import {addCatalogModel,addSavedModel,editOverrides,editProjectModels,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel,useDemoModel} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 import {rememberWorkspacePage} from './website-state.js';
 import {bindWebsiteFavicons,clearWebsiteNavigation,launchUrlError,updateWebsiteLaunchHint,websiteHref} from './websites.js';
+import {changeProviderKey,openProviderKeyDialog} from './provider-keys.js';
 bindWebsiteFavicons(root);
 root.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -50,8 +51,9 @@ function captureInput(target){
   return !!field;
 }
 root.addEventListener('input',e=>{if(captureInput(e.target))render();});
-root.addEventListener('change',e=>{if(e.target.id==='auto-reproduce'){state.autoReproduce=e.target.checked;sessionStorage.setItem('scout.auto-reproduce',String(state.autoReproduce));render();}if(e.target.dataset.reviewField){updateReviewDraft(e.target.dataset.reviewAction,e.target.dataset.reviewField,e.target.value);if(e.target.dataset.reviewField==='disposition')render();}if(e.target.id==='auth-mode'){state.authMode=e.target.value;if(state.authMode==='public')state.sessionId='';render();}if(e.target.id==='app-session')state.sessionId=e.target.value;if(e.target.id==='viewport-profile'){state.viewportProfile=e.target.value;render();}if(e.target.id==='launch-project'){state.launchProject=e.target.value;render();}if(e.target.id==='launch-model'){state.launchModel=e.target.value;render();}});
+root.addEventListener('change',e=>{if(e.target.id==='auto-reproduce'){state.autoReproduce=e.target.checked;sessionStorage.setItem('scout.auto-reproduce',String(state.autoReproduce));render();}if(e.target.dataset.reviewField){updateReviewDraft(e.target.dataset.reviewAction,e.target.dataset.reviewField,e.target.value);if(e.target.dataset.reviewField==='disposition')render();}if(e.target.id==='auth-mode'){state.authMode=e.target.value;if(state.authMode==='public')state.sessionId='';render();}if(e.target.id==='app-session')state.sessionId=e.target.value;if(e.target.id==='viewport-profile'){state.viewportProfile=e.target.value;render();}if(e.target.id==='launch-project'){state.launchProject=e.target.value;state.launchKey='';render();}if(e.target.id==='launch-model'){state.launchModel=e.target.value;state.launchKey='';render();}});
 root.addEventListener('change',e=>{
+  if(e.target.id==='launch-key'){state.launchKey=e.target.value;render();return;}
   if(e.target.dataset.configurationField||e.target.dataset.newModelField){if(captureInput(e.target))render();return;}
   const field={'run-mode':'runMode'}[e.target.id];
   if(field){state[field]=e.target.value;render();}
@@ -60,6 +62,9 @@ root.addEventListener('click',async e=>{
   if(e.target.closest('a[href^="#/"]')&&state.trackedJobId)clearTrackedJob();
   const el=e.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action;
+  if(action==='use-demo-model'){useDemoModel();render();return;}
+  if(action==='add-provider-key'){openProviderKeyDialog(el.dataset.provider);return;}
+  if(action==='default-provider-key'||action==='revoke-provider-key'){await changeProviderKey(el.dataset.id,action==='default-provider-key'?'default':'revoke');return;}
   if(action==='close-drawer'&&e.target.closest('.drawer')&&!e.target.closest('button[data-action="close-drawer"]'))return;
   if(el.tagName==='A')e.preventDefault();
   if(action==='focus-launch'){state.focusLaunch=true;if(state.view==='workspace'&&!state.runId&&state.websitePage==='overview'){state.focusLaunch=false;document.getElementById('target-url')?.focus();}else location.hash=websiteHref(state.websiteOrigin);}

@@ -37,7 +37,7 @@ async function mode() {
 function navigationClient(settings: Record<string, any>, gateway: GatewayStatus) {
   const nav = settings.navigationModel;
   if (!nav || !gateway.configuredProviders.includes(nav.provider)) return null;
-  return new ModelClient({ provider: nav.provider, model: nav.model, freeOnly: settings.freeOnly === true && nav.provider === 'openrouter' });
+  return new ModelClient({ provider: nav.provider, model: nav.model, freeOnly: settings.freeOnly === true && nav.provider === 'openrouter', providerKeyId:nav.providerKeyId??(nav.provider===settings.provider?settings.providerKeyId:null) });
 }
 
 async function run(session: Store, job: Record<string, any>, gateway: GatewayStatus) {

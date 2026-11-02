@@ -385,6 +385,9 @@ pub fn permitted(p: &Principal, method: &str, path: &str) -> bool {
     if p.operator {
         return true;
     }
+    if path.starts_with("/v1/admin/") {
+        return false;
+    }
     if path == "/v1/workspaces" || (path == "/v1/model-requests" && method == "POST") {
         return false;
     }

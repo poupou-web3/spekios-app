@@ -69,6 +69,8 @@ impl Strategy {
 struct NavigationModel {
     provider: String,
     model: String,
+    #[serde(default)]
+    provider_key_id: Option<String>,
 }
 fn valid_model(model: &str) -> bool {
     !model.is_empty()
@@ -146,7 +148,14 @@ impl NavigationModel {
         {
             return Err("free_only_requires_free_model");
         }
-        Ok(json!({"provider":self.provider,"model":model}))
+        let mut value = json!({"provider":self.provider,"model":model});
+        if let Some(id) = &self.provider_key_id {
+            if !crate::provider_access::valid_reference(id) {
+                return Err("invalid_provider_key_reference");
+            }
+            value["providerKeyId"] = json!(id);
+        }
+        Ok(value)
     }
 }
 fn free_model(model: &str) -> bool {
@@ -187,6 +196,8 @@ pub struct ModelChoice {
     provider: String,
     model: String,
     #[serde(default)]
+    provider_key_id: Option<String>,
+    #[serde(default)]
     free_only: Option<bool>,
     #[serde(default, deserialize_with = "present")]
     navigation_model: Option<Option<NavigationModel>>,
@@ -194,13 +205,20 @@ pub struct ModelChoice {
 impl ModelChoice {
     /// The request form, kept in the job request so a retry must match it.
     fn normalize(&self) -> Result<Value, &'static str> {
-        model_choice(
+        let mut value = model_choice(
             &self.provider,
             &self.model,
             self.free_only,
             &self.navigation_model,
             "invalid_model_choice",
-        )
+        )?;
+        if let Some(id) = &self.provider_key_id {
+            if !crate::provider_access::valid_reference(id) {
+                return Err("invalid_provider_key_reference");
+            }
+            value["provider_key_id"] = json!(id);
+        }
+        Ok(value)
     }
 }
 
@@ -215,6 +233,8 @@ struct ProjectModel {
     label: Option<String>,
     provider: String,
     model: String,
+    #[serde(default)]
+    provider_key_id: Option<String>,
     #[serde(default)]
     free_only: Option<bool>,
     #[serde(default, deserialize_with = "present")]
@@ -239,6 +259,12 @@ impl ProjectModel {
             invalid,
         )?;
         let mut value = json!({"projectId":self.project_id,"provider":choice["provider"],"model":choice["model"],"freeOnly":choice["free_only"]});
+        if let Some(id) = &self.provider_key_id {
+            if !crate::provider_access::valid_reference(id) {
+                return Err("invalid_provider_key_reference");
+            }
+            value["providerKeyId"] = json!(id);
+        }
         if let Some(navigation) = choice.get("navigation_model") {
             value["navigationModel"] = navigation.clone();
         }
@@ -254,6 +280,13 @@ impl ProjectModel {
 fn apply_model(settings: &mut Value, choice: &Value) {
     let field = |snake: &str, camel: &str| choice.get(snake).or_else(|| choice.get(camel));
     let provider = choice["provider"].clone();
+    if let Some(key) = field("provider_key_id", "providerKeyId") {
+        settings["providerKeyId"] = key.clone();
+    } else if provider != settings["provider"]
+        || (settings["providerKeyId"] == "demo" && choice["model"] != settings["model"])
+    {
+        settings["providerKeyId"] = Value::Null;
+    }
     settings["freeOnly"] =
         json!(provider == "openrouter" && field("free_only", "freeOnly") == Some(&json!(true)));
     settings["provider"] = provider;
@@ -317,6 +350,7 @@ fn project_settings(defaults: &Value, project_id: Uuid) -> Value {
         "project_id":project_id,"label":label,
         "model":{"provider":settings["provider"],"model":settings["model"],"free_only":settings["freeOnly"],
             "navigation_model":settings["navigationModel"],"source":settings["modelSource"]},
+        "provider_key_id":settings["providerKeyId"],
         "limits":limits,"limit_overrides_applied":settings["limitOverridesApplied"]
     })
 }
@@ -494,6 +528,8 @@ pub struct SettingsSubmission {
     expected_revision: i64,
     provider: String,
     model: String,
+    #[serde(default)]
+    provider_key_id: Option<String>,
     /// Absent or null: no limit. The idle stop defaults when absent.
     #[serde(default, deserialize_with = "present")]
     max_actions: Option<Option<u32>>,
@@ -540,6 +576,13 @@ struct NormalizedSettings {
 
 impl SettingsSubmission {
     fn normalize(self) -> Result<NormalizedSettings, &'static str> {
+        if self
+            .provider_key_id
+            .as_deref()
+            .is_some_and(|v| !crate::provider_access::valid_reference(v))
+        {
+            return Err("invalid_provider_key_reference");
+        }
         if self.request_id.is_nil()
             || self.expected_revision < 0
             || self.expected_revision == i64::MAX
@@ -646,6 +689,9 @@ impl SettingsSubmission {
                     "navigationModel":navigation_model,"savedModels":saved_models,
                     "projectModels":project_models
                 });
+                if let Some(key) = self.provider_key_id {
+                    settings["providerKeyId"] = json!(key);
+                }
                 settings.as_object_mut().unwrap().extend(limits);
                 settings
             },
@@ -660,6 +706,7 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
         for key in [
             "provider",
             "model",
+            "providerKeyId",
             "maxActions",
             "maxMinutes",
             "maxTokens",
@@ -1049,9 +1096,11 @@ impl Queue {
         let (revision, settings) = saved
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
-        Ok(
-            json!({"revision":revision,"settings":settings_view(&self.settings,settings.as_ref(),revision)}),
-        )
+        let mut base = self.settings.clone();
+        if settings.is_none() {
+            crate::provider_access::account_defaults(&**db, &self.principal, &mut base).await?;
+        }
+        Ok(json!({"revision":revision,"settings":settings_view(&base,settings.as_ref(),revision)}))
     }
 
     /// Every project this user has started jobs in or configured, most
@@ -1063,7 +1112,11 @@ impl Queue {
         let (revision, saved) = saved
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
-        let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
+        let mut base = self.settings.clone();
+        if saved.is_none() {
+            crate::provider_access::account_defaults(&**db, &self.principal, &mut base).await?;
+        }
+        let defaults = settings_snapshot(&base, saved.as_ref(), revision);
         let used: Value = db.query_one("SELECT COALESCE(jsonb_agg(jsonb_build_object('project_id',project_id,'jobs',jobs,'runs',runs,'last_job_at',last_job_at) ORDER BY last_job_at DESC,project_id),'[]'::jsonb) FROM (SELECT project_id,count(*) AS jobs,count(DISTINCT run_id) AS runs,max(created_at) AS last_job_at FROM browser_jobs WHERE workspace_id=$1 AND user_id=$2 AND project_id IS NOT NULL AND ($3::uuid IS NULL OR project_id=$3) GROUP BY project_id ORDER BY max(created_at) DESC LIMIT 200) p",&[&self.principal.workspace_id,&self.principal.user_id,&only]).await.map_err(|_|"database_unavailable")?.get(0);
         let mut ids: Vec<Uuid> = used
             .as_array()
@@ -1374,7 +1427,11 @@ impl Queue {
         let (revision, saved) = latest
             .map(|row| (row.get::<_, i64>(0), Some(row.get::<_, Value>(1))))
             .unwrap_or((0, None));
-        let defaults = settings_snapshot(&self.settings, saved.as_ref(), revision);
+        let mut base = self.settings.clone();
+        if saved.is_none() {
+            crate::provider_access::account_defaults(&*tx, &self.principal, &mut base).await?;
+        }
+        let defaults = settings_snapshot(&base, saved.as_ref(), revision);
         let (request, mut settings) = prepare_submission(&input, &defaults)?;
         // The job keeps the model and limits resolved now; later setting
         // changes never alter it. Limits match the model resolved above.
@@ -1421,6 +1478,9 @@ impl Queue {
                 list.iter()
                     .any(|p| p["provider"] == settings["provider"] && p["configured"] == true)
             });
+        if providers["test_mode"] != true {
+            crate::provider_access::bind_settings(&tx, &self.principal, &mut settings).await?;
+        }
         if !connected || settings["model"].as_str().is_none_or(str::is_empty) {
             return Err("provider_not_configured");
         }
@@ -1502,11 +1562,14 @@ pub async fn submit(
     let Ok(Json(input)) = input else {
         return error(StatusCode::BAD_REQUEST, "invalid_job_request");
     };
-    let providers = state
-        .gateway
-        .as_ref()
-        .map(|g| g.providers())
-        .unwrap_or(json!({}));
+    let providers = if let Some(g) = &state.gateway {
+        match g.providers_for(&state.principal).await {
+            Ok(v) => v,
+            Err(code) => return error(StatusCode::SERVICE_UNAVAILABLE, code),
+        }
+    } else {
+        json!({})
+    };
     match queue.admit(input, providers).await {
         Ok(value) => (
             if value["reused"] == true {
@@ -1520,6 +1583,7 @@ pub async fn submit(
         Err(code) => error(
             match code {
                 "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+                "demo_credits_insufficient" => StatusCode::PAYMENT_REQUIRED,
                 "issue_not_found" | "continuation_run_not_found" => StatusCode::NOT_FOUND,
                 "job_id_conflict" | "provider_not_configured" | "browser_queue_full" => {
                     StatusCode::CONFLICT
@@ -2495,8 +2559,14 @@ mod tests {
                 "http://host.docker.internal:18083/",
                 "http://host.docker.internal:18083/",
             ),
-            ("http://127.0.0.1:18083/", "http://host.docker.internal:18083/"),
-            ("http://127.0.0.1:18085/shop", "http://host.docker.internal:18085/shop"),
+            (
+                "http://127.0.0.1:18083/",
+                "http://host.docker.internal:18083/",
+            ),
+            (
+                "http://127.0.0.1:18085/shop",
+                "http://host.docker.internal:18085/shop",
+            ),
             ("https://127.0.0.1/", "https://host.docker.internal/"),
             ("https://10.0.0.8/admin", "https://10.0.0.8/admin"),
             ("https://app.internal/", "https://app.internal/"),

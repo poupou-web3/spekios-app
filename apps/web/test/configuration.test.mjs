@@ -8,10 +8,34 @@ const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
   const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
-  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,addCatalogModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel,editProjectModels};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,addCatalogModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel,editProjectModels,connectionReady,keyOptions,demoPanel,keysPanel,needsPersonalKey,useDemoModel};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
+test('demo exhaustion leaves personal models and named key choices available',()=>{
+  const ui=workspace(),one='11111111-1111-4111-8111-111111111111',two='22222222-2222-4222-8222-222222222222';
+  ui.state.providers={gateway_ready:true,vault_ready:true,keys:[{key_id:one,provider:'openai',name:'Production <key>',is_default:true},{key_id:two,provider:'openai',name:'Personal',is_default:false}],providers:[{provider:'openai',configured:true},{provider:'meta',configured:false}],demo:{enabled:true,configured:true,model:'muse-spark-1.3-contributor',allowance_usd:1,spent_usd:1,remaining_usd:0,reserved_usd:0,minimum_call_reserve_usd:0.00082}};
+  assert.equal(ui.connectionReady('meta','muse-spark-1.3-contributor','demo'),false);
+  assert.equal(ui.connectionReady('openai','gpt-6.1-sol',two),true);
+  assert.equal(ui.connectionReady('openai','gpt-6.1-sol','33333333-3333-4333-8333-333333333333'),false);
+  const options=ui.keyOptions('openai','gpt-6.1-sol',two);
+  assert.match(options,/Production &lt;key&gt;/);assert.match(options,new RegExp(`value="${two}" selected`));
+  assert.doesNotMatch(options,/value="demo"/,'Only the supported Meta demo model can select the shared key.');
+  const d=ui.configurationDraft();Object.assign(d.adding,{provider:'openai',model:'gpt-6.1-sol',label:'My model'});
+  assert.equal(ui.addSavedModel(),true,'Credits never gate creation of a personal model.');
+  const html=ui.settingsView();assert.match(html,/Your API keys/);assert.match(html,/Add API key/);assert.match(html,/Demo balance too low/);assert.match(html,/My model/);
+  assert.equal(ui.needsPersonalKey('anthropic','claude-sonnet-5-5'),true);
+  assert.equal(ui.needsPersonalKey('openai','gpt-6.1-sol'),false);
+});
+test('account and project key references save independently without any provider secret',async()=>{
+  let sent;const ui=workspace(async(path,options)=>{if(options?.method==='POST'){sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}});}return response({revision:4,settings:{...defaults}});});
+  const one='11111111-1111-4111-8111-111111111111',two='22222222-2222-4222-8222-222222222222';
+  const d=ui.configurationDraft();d.values.provider_key_id=one;d.values.project_models=[{project_id:'33333333-3333-4333-8333-333333333333',label:'Shop',choice:'openrouter|openrouter/free',navigation:'none',provider_key_id:two}];d.dirty=true;
+  assert.equal(ui.configurationError(d.values),'');await ui.saveConfiguration();
+  assert.equal(sent.provider_key_id,one);assert.equal(sent.project_models[0].provider_key_id,two);
+  assert.equal(sent.api_key,undefined);assert.equal(sent.project_models[0].api_key,undefined);
+  assert.match(ui.configurationError({...d.values,provider_key_id:'sk-plaintext-is-not-a-reference'}),/Add API key form/);
+});
 test('defaults validate the same supported models, limits and free-only restriction as the API',()=>{
   const ui=workspace(),values=ui.configurationValues();assert.equal(ui.configurationError(values),'');
   for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:10001},{max_minutes:0},{max_minutes:10081},{max_tokens:999},{max_cost_usd:0},{stop_after_idle_actions:4},{max_auto_reproductions:4},{max_auto_replay_actions:101},{viewport_profile:'watch'},{provider:'other'},{model:'paid/model'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
@@ -124,7 +148,7 @@ test('an old acknowledgement cannot discard a new draft after reconnecting with 
 });
 test('configuration text is escaped, exposes no secret input and clearly separates immutable environment policy',()=>{
   const ui=workspace();ui.updateConfiguration('model','<script>bad()</script>');const html=ui.configurationView();assert.doesNotMatch(html,/<script>|type="password"/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Queued and running jobs keep their original settings/);assert.match(html,/Saving does not call a model/);
-  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','navigation_model','reuse_rankings','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','project_models','provider','saved_models','stop_after_idle_actions','viewport_profile'].sort());
+  assert.deepEqual(Object.keys(plain(ui.configurationValues())).sort(),['app_memory','auto_reproduce','exploration_strategy','free_only','limit_overrides','navigation_model','reuse_rankings','max_actions','max_auto_replay_actions','max_auto_reproductions','max_cost_usd','max_minutes','max_tokens','model','project_models','provider','provider_key_id','saved_models','stop_after_idle_actions','viewport_profile'].sort());
 });
 test('previous and next follow the visible list, preserve comparison, and reject stale targets',()=>{
   const ui=workspace();ui.state.report={run:{},actions:[{action_id:'one'},{action_id:'two'},{action_id:'three'}],events:[]};ui.state.actionId='one';ui.state.image='compare';ui.state.frameId='old';
@@ -265,7 +289,10 @@ test('each project can have its own model, picked from the saved list and sent w
   const sonnet=d.values.saved_models.findIndex(m=>m.model==='claude-sonnet-5-5');
   assert.equal(ui.removeSavedModel(sonnet),false,'A project model stays listed.');
   ui.editProjectModels(true);
-  assert.deepEqual(plain(d.values.project_models[1]),{project_id:'',label:'',choice:'openrouter|openrouter/free',navigation:'inherit'},'A new row starts on the default model.');
+  assert.match(d.values.project_models[1].project_id,/^[0-9a-f-]{36}$/,'A new project gets its ID automatically.');
+  assert.equal(d.values.project_models[1].choice,'openrouter|openrouter/free');
+  assert.equal(d.values.project_models[1].label,'Project 2');
+  d.values.project_models[1].project_id='';
   assert.equal(ui.updateConfiguration('project.1.choice',''),false,'A project always picks a listed model.');
   d.values.project_models[1].choice='';
   assert.match(ui.configurationError(d.values),/Project model 2: the project ID must be a UUID/);

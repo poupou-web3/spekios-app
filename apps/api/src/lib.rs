@@ -23,6 +23,7 @@ pub mod memory;
 use identity::{Principal, ScopedState};
 pub mod models;
 pub mod oauth;
+pub mod provider_access;
 pub mod reviews;
 mod runs;
 pub mod steering;
@@ -235,6 +236,22 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/model-providers", get(gateway::providers))
+        .route(
+            "/v1/provider-keys",
+            axum::routing::post(provider_access::create_key),
+        )
+        .route(
+            "/v1/provider-keys/{id}/revoke",
+            axum::routing::post(provider_access::revoke_key),
+        )
+        .route(
+            "/v1/provider-keys/{id}/default",
+            axum::routing::post(provider_access::default_key),
+        )
+        .route(
+            "/v1/admin/demo",
+            get(provider_access::admin_get).post(provider_access::admin_update),
+        )
         .route(
             "/v1/model-requests",
             axum::routing::post(gateway::submit).layer(axum::extract::DefaultBodyLimit::max(
@@ -700,11 +717,14 @@ async fn capabilities(ScopedState(state): ScopedState) -> Response {
             json!({"maxAutoReproductions":2,"maxAutoReplayActions":12,"appMemory":false,"settingsRevision":0})
         }
     };
-    let providers = state
-        .gateway
-        .as_ref()
-        .map(|g| g.providers())
-        .unwrap_or_else(|| json!({"providers":[]}));
+    let providers = if let Some(g) = &state.gateway {
+        match g.providers_for(&state.principal).await {
+            Ok(v) => v,
+            Err(code) => return error(StatusCode::SERVICE_UNAVAILABLE, code),
+        }
+    } else {
+        json!({"providers":[]})
+    };
     let configured = providers["providers"]
         .as_array()
         .is_some_and(|p| p.iter().any(|p| p["configured"] == true));

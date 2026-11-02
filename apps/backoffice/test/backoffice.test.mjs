@@ -9,7 +9,7 @@ function view(){
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
     sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,picker,operations,opsOverview,jobsView,modelsView,eventsView,connections};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,picker,operations,opsOverview,jobsView,modelsView,eventsView,connections,demoCredits};',sandbox);
   return sandbox.testing;
 }
 function configured(ui){
@@ -19,6 +19,16 @@ function configured(ui){
   ui.state.operations={database:'reachable',active_runs:0,pending_captures:0,pending_artifacts:0,pending_model_payloads:0,pending_runtime_events:0,pending_model_events:0,failed_captures:0};
 }
 const body=html=>html.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1]||'';
+test('demo controls configure the lifetime allowance and accept a write-only shared key',()=>{
+  const ui=view();ui.state.demo={enabled:false,configured:true,allowance_usd:1,vault_ready:true,revision:2,api_key:'never-render-this-secret'};
+  ui.state.opsTab='credits';ui.state.demoError='<script>bad()</script>';
+  const html=ui.operations();
+  assert.match(html,/Demo credits/);assert.match(html,/muse-spark-1.3-contributor/);
+  assert.match(html,/Allowance per account \(USD\)/);assert.match(html,/value="1"/);
+  assert.match(html,/type="password"/);assert.match(html,/Leave empty to keep the saved key/);
+  assert.match(html,/Personal models and keys stay available/);
+  assert.doesNotMatch(html,/never-render-this-secret|<script>/);assert.match(html,/&lt;script&gt;/);
+});
 const job=(id,status='queued',mode='live',extra={})=>({job_id:id,status,execution_mode:mode,request:{kind:'explore',target_url:`https://app.test/${id}`},created_at:'2026-10-28T12:00:00Z',...extra});
 function report(){
   return {run:{run_id:'run-one',target_url:'https://app.test/checkout',config:{execution_mode:'live'},lifecycle:'completed'},

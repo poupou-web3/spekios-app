@@ -57,6 +57,9 @@ pub struct ModelRequest {
     pub request_id: Uuid,
     pub provider: Provider,
     pub model: String,
+    /// Opaque saved credential reference, never a provider credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_key_id: Option<String>,
     pub prompt: String,
     #[serde(default)]
     pub system: String,
@@ -76,6 +79,13 @@ pub struct ModelRequest {
 }
 impl ModelRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self
+            .provider_key_id
+            .as_deref()
+            .is_some_and(|v| !crate::provider_access::valid_reference(v))
+        {
+            return Err("invalid_provider_key_reference");
+        }
         if self.request_id.is_nil()
             || self.model.is_empty()
             || self.model.len() > 200
@@ -121,8 +131,8 @@ impl ModelRequest {
 /// never accepted. The order of images follows capture_ids in the audit spec.
 pub fn wire_request(spec: &ModelRequest, images: &[Vec<u8>]) -> Value {
     match spec.provider {
-        // Meta's Responses API accepts this same input shape. store:false keeps
-        // the turn off Meta's server so prompts and screenshots are not retained.
+        // store:false disables server-managed response state. Meta Contributor
+        // training/data use is governed separately by that model tier.
         Provider::Openai | Provider::Meta => {
             let mut content = vec![json!({"type":"input_text","text":spec.prompt})];
             content.extend(images.iter().map(|b| json!({"type":"input_image","image_url":format!("data:image/png;base64,{}",STANDARD.encode(b)),"detail":"high"})));
@@ -354,6 +364,7 @@ mod tests {
             request_id: Uuid::new_v4(),
             provider,
             model: "test/free:free".into(),
+            provider_key_id: None,
             prompt: "inspect".into(),
             system: String::new(),
             run_id: None,
@@ -408,7 +419,11 @@ mod tests {
         assert_eq!(wire["store"], false);
         assert_eq!(wire["reasoning"]["effort"], "low");
         assert!(wire.get("provider").is_none());
-        assert!(wire_request(&spec(Provider::Openai), &[]).get("reasoning").is_none());
+        assert!(
+            wire_request(&spec(Provider::Openai), &[])
+                .get("reasoning")
+                .is_none()
+        );
         assert_eq!(wire["input"][0]["role"], "user");
         assert_eq!(wire["input"][0]["content"][0]["type"], "input_text");
         assert_eq!(wire["input"][0]["content"][1]["type"], "input_image");
