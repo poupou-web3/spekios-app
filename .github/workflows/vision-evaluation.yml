@@ -1,0 +1,29 @@
+name: Vision evaluation contracts
+on:
+  pull_request:
+    paths:
+      - packages/browser-runtime/**
+      - packages/image-diff/**
+      - apps/bug-lab/**
+      - .github/workflows/vision-evaluation.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - run: npm ci --prefix packages/image-diff --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix packages/browser-runtime --ignore-scripts --no-audit --no-fund
+      - run: npm run check --prefix packages/browser-runtime
+      - run: npm test --prefix packages/image-diff
+      - name: Test evaluation, blinding, image selection and gateway transport
+        working-directory: packages/browser-runtime
+        run: ./node_modules/.bin/tsx --test test/vision-evaluation.test.ts test/vision-preview.test.ts test/assessment-vision.test.ts test/model-client.test.ts

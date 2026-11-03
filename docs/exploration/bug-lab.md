@@ -105,3 +105,9 @@ just bug-lab-test
 ```
 
 This runs the HTTP and scoring tests (`node --test apps/bug-lab/test/*.test.mjs`) and the Chromium test in the recorder image. The HTTP tests also check that the fixed build has no dead links, that the buggy build's only dead link is the planted one, and that no page, URL or header contains a giveaway word or a bug ID. The Chromium test proves every bug and correct case in a real browser, and runs Scout's own control observer on the shop to check that every trigger is a usable, unambiguous control.
+
+## Compare full screenshots with crop-focused assessments
+
+The [recorded-example evaluation pipeline](../../packages/browser-runtime/evaluation/README.md) freezes public Larchwood captures and compares both visual policies with a real model. It scores detection of the same planted failure without requiring equal wording, includes known correct cases, keeps first-crop and fallback results separate, and records provider usage plus grading overhead. Original findings and reviews are preserved.
+
+Use `just larchwood-eval --help` for the snapshot, offline preview, bounded live evaluation and report commands. The PR workflow checks pipeline contracts without inference. A scripted fixture pass does not establish model quality; the live report explicitly distinguishes retained detections, misses, false alarms and insufficient evidence.
