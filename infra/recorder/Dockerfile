@@ -4,7 +4,7 @@ COPY packages/image-diff/package*.json packages/image-diff/
 RUN npm ci --prefix packages/image-diff --ignore-scripts --no-audit --no-fund
 COPY packages/browser-runtime/package*.json packages/browser-runtime/
 RUN npm ci --prefix packages/browser-runtime --ignore-scripts --no-audit --no-fund
-COPY packages/image-diff/index.mjs packages/image-diff/index.mjs
+COPY packages/image-diff/index.mjs packages/image-diff/attention.mjs packages/image-diff/
 # The Larchwood shop with known bugs: the larchwood service and its browser test.
 COPY apps/bug-lab/ apps/bug-lab/
 COPY packages/browser-runtime/ packages/browser-runtime/

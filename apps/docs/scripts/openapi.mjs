@@ -329,6 +329,7 @@ export function openapi(catalog) {
           prompt: { type: 'string', minLength: 1, maxLength: 65536, description: 'Nonblank, no NUL, at most 65536 UTF-8 bytes. This route accepts request bodies up to 192 KiB.' },
           system: { type: 'string', maxLength: 16384, default: '', description: 'No NUL; at most 16384 UTF-8 bytes.' },
           run_id: uuid, action_id: uuid, capture_ids: { type: 'array', maxItems: 2, uniqueItems: true, items: uuid, default: [] },
+          assessment_image_ids: { type: 'array', maxItems: 2, items: uuid, description: 'Optional recorded before/after overview-and-crop artifacts linked to this action and original capture pair. Originals remain authoritative. Omit for full screenshots.' },
           max_output_tokens: bounded(1,4096,1024), max_attempts: bounded(1,3,2), free_only: { type: 'boolean', default: true },
           computer_use:{type:'boolean',default:false,description:'Trusted worker/operator native Meta computer request. Requires an enabled run and exactly one linked screenshot, or computer_use_probe.'},
           computer_use_probe:{type:'boolean',default:false,description:'Non-executing Meta compatibility probe. Requires computer_use; cannot attach a run or screenshots. Prefer the manager check endpoint.'},

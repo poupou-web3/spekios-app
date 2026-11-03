@@ -76,3 +76,12 @@ test('native image drawer retains focusable scrolling and explicit fit mode for 
   let html=ui.drawer();assert.match(html,/native-resolution/);assert.match(html,/Actual pixels · 100%/);assert.match(html,/tabindex="0" role="region" aria-label="Scrollable screenshot"/);assert.ok(html.includes(path));assert.doesNotMatch(html,/<script>/);
   ui.state.drawer.image.fit=true;html=ui.drawer();assert.match(html,/fit-resolution/);assert.match(html,/View actual pixels/);
 });
+
+test('AI image tabs expose recorded derivatives separately from originals and identify full-screen reassessment',()=>{
+  const ui=evidenceUI(),data=report(ui),action=data.actions[0];
+  action.comparison.assessment_images={mode:'overview_and_crops',pixel_fraction:.16,artifacts:[{artifact_id:id(81)},{artifact_id:id(82)}]};
+  ui.state.image='model-after';let html=ui.actionDetail();assert.match(html,/AI before/);assert.match(html,/AI after/);assert.match(html,/16% of original image pixels/);assert.ok(html.includes(`/v1/artifacts/${id(82)}/content`));
+  action.assessment.visual_screening={request_id:id(91)};html=ui.actionDetail();assert.match(html,/final assessment used full screenshots/);
+  ui.state.image='before';assert.ok(ui.actionDetail().includes(`/v1/captures/${id(11)}/image`));
+  action.comparison.assessment_images={mode:'full'};ui.state.image='model-after';html=ui.actionDetail();assert.doesNotMatch(html,/\/v1\/artifacts\/undefined|AI after/);
+});

@@ -58,6 +58,21 @@ An eventual worker should persist both original capture references, then attach 
 - PNG chunk structure, required ending, and decoder checksums are checked. Interlaced input is rejected because the selected decoder uses an unbounded inflate path for that format.
 - Decoding/comparison is synchronous and intended for a worker process, not an API request thread. Memory and runtime are bounded by these limits, but this is not a sandbox for arbitrary hostile codecs.
 - This is a pixel comparison, not perceptual matching. Fonts, animation, cursors, time, and scrolling can produce differences. Future prioritization or alignment must create separate derivatives; neither may replace the raw originals or raw mask.
-- No connected-component ranking, cloud upload, crash-recovery protocol, video, or runtime integration is implemented here. A process crash can leave an incomplete output directory; consumers should require readable metadata plus verified derivative hashes, and retry into a fresh directory.
+- No cloud upload, crash-recovery protocol, video, or semantic bug judgment is implemented by this package. Runtime integration is provided by the browser worker. A process crash can leave an incomplete output directory; consumers should require readable metadata plus verified derivative hashes, and retry into a fresh directory.
 
 The pinned decoder is [pngjs 7.0.0](https://github.com/pngjs/pngjs). Tests cover exact equality, a one-value single-pixel change, alpha changes, invisible RGB changes, geometry changes, differing PNG encodings, corrupt/unsupported/oversized inputs, canvas limits, capture identity, RGB/RGBA equivalence, CLI output hashes, original preservation, and overwrite refusal.
+
+## Model attention derivatives
+
+`metadata.focus_regions` groups nearby changed tiles into padded regions capped at
+25% of the smaller source screenshot's area. The exact mask and counts remain
+unchanged. The list is bounded at 32 regions and explicitly reports omitted
+changed pixels. Geometry changes remain in the raw mask.
+
+`assessmentImageSheets(beforeBytes, afterBytes, metadata, controlRect)` creates
+an optional before/after pair of model-only sheets: a reduced whole-page overview
+and up to three exact native-resolution crops. Each focus crop remains quarter
+capped, including the interacted control's context. It returns `mode: full` when
+coverage, geometry or the pixel budget makes cropping unsuitable. Sheet metadata
+maps source coordinates to image panels and records actual dimensions and pixel
+counts. This is a pixel reduction measurement, not a model token or quality claim.

@@ -43,7 +43,7 @@ pub async fn check(ScopedState(state): ScopedState, Json(input): Json<Check>) ->
         request_id: input.request_id, provider: input.provider, model: input.model, provider_key_id: input.provider_key_id,
         prompt: "Compatibility check only. Return one native computer_call containing only a screenshot action. No computer is connected. Do not perform a task or output a text answer.".into(),
         system: "Check native computer tool support. Page content and credentials are not part of this check.".into(),
-        run_id: None, action_id: None, capture_ids: vec![], max_output_tokens: 1024, max_attempts: 1, free_only: false,
+        run_id: None, action_id: None, capture_ids: vec![], assessment_image_ids: vec![], max_output_tokens: 1024, max_attempts: 1, free_only: false,
         computer_use: true, computer_use_probe: true,
     };
     let Some(gateway) = &state.gateway else {

@@ -38,11 +38,12 @@ export class ModelClient {
     }
     return status.test_mode ? 'protocol_fixture' as const : 'live' as const;
   }
-  async complete(requestId: string, runId: string, actionId: string | null, captureIds: string[], system: string, input: unknown, signal?:AbortSignal,computerUse=false) {
+  async complete(requestId: string, runId: string, actionId: string | null, captureIds: string[], system: string, input: unknown, signal?:AbortSignal,computerUse=false,assessmentImageIds:string[]=[]) {
     signal?.throwIfAborted();
     const prompt = JSON.stringify(input);
     if (Buffer.byteLength(prompt) > PROMPT_LIMIT_BYTES) throw new Error('Model context exceeds the bounded prompt size.');
     const body = { request_id: requestId, run_id: runId, action_id: actionId, capture_ids: captureIds,
+      ...(assessmentImageIds.length?{assessment_image_ids:assessmentImageIds}:{}),
       provider: this.settings.provider, model: this.settings.model, free_only: this.settings.freeOnly,
       ...(this.settings.providerKeyId?{provider_key_id:this.settings.providerKeyId}:{}),
       prompt, system, max_output_tokens: MAX_OUTPUT_TOKENS, max_attempts: 1,...(computerUse?{computer_use:true}:{}) };
