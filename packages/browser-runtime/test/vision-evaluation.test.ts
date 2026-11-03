@@ -44,3 +44,12 @@ test('nth-action planted bugs are labelled per source run and fixed builds remai
  const manifest={bugs:[{id:'flaky',viewport:'any',match:{control:'^Add$',every:2},expected:'Added',actual:'No add'}],decoys:[]};
  const labels=labelActions({captures,actions,run:{config:{}}},manifest,'faulty');assert.deepEqual([...labels.keys()],['2']);assert.equal(labels.get('2').expected,'bug');assert.equal(labelActions({captures,actions,run:{config:{}}},manifest,'fixed').get('2').expected,'correct');
 });
+
+test('shared misses do not prove equivalence and ambiguous grading is not a confirmed regression',()=>{
+ const negative=pair({case_id:'negative',label:{expected:'correct',rubrics:[]},full:arm({verdict:'no_issue_observed'}),optimized:arm({verdict:'no_issue_observed'})});
+ const bothMiss=pair({full:arm({verdict:'no_issue_observed'}),optimized:arm({verdict:'no_issue_observed'}),judgment:{full:{same_failure:false},optimized:{same_failure:false},optimized_initial:{same_failure:false}}});
+ assert.equal(summarize(experiment([bothMiss,negative])).quality_gate,'insufficient_evidence');
+ const ambiguous=pair({judgment:{full:{same_failure:true},optimized:{same_failure:null},optimized_initial:{same_failure:null}}});const s=summarize(experiment([ambiguous,negative]));
+ assert.equal(s.quality_gate,'insufficient_evidence');assert.equal(s.retention,null);assert.equal(s.retained,0);assert.equal(s.lost.length,0);assert.equal(s.unresolved_retention,1);
+ const falseAlarm={...negative,optimized:arm(result('An ordinary validation message is a bug'))};assert.equal(summarize(experiment([pair(),falseAlarm])).quality_gate,'regression');
+});
