@@ -21,7 +21,9 @@ test('the full catalog keeps older websites selectable independently of the late
   assert.equal(sites[0].run_count,80);assert.equal(sites[1].run_count,2);
   const html=ui.websiteSidebar({websites:sites,origin:'https://old.example',page:'tests'});
   assert.match(html,/old\.example/);assert.match(html,/80 tests/);assert.match(html,/origin=https%3A%2F%2Fold\.example/);
-  assert.equal((html.match(/href="#\/website\/https%3A%2F%2Fold\.example"/g)||[]).length,3);
+  assert.equal((html.match(/href="#\/website\/https%3A%2F%2Fold\.example"/g)||[]).length,2);
+  assert.match(html,/<a class="brand" href="#\/workspace"/);assert.match(html,/<a class="all-projects" href="#\/workspace">/);
+  assert.match(ui.websiteSidebar({websites:sites,origin:'https://old.example',external:true}),/<a class="all-projects" href="\/#\/workspace">/);
 });
 test('recent shortcuts use their destination and stay scoped to the selected website',()=>{
   const ui=websiteUI(),run={run_id:runId,target_url:'https://a.example/checkout',created_at:'2026-11-01T10:00:00Z'};
@@ -74,5 +76,5 @@ test('the switcher on standalone customer pages shows Docker guidance and submit
   handlers.input({target:{id:'website-url',value:'localhost:4100'}});assert.match(hint.textContent,/host.docker.internal:4100/);assert.equal(draws,1,'Typing must preserve the input and its focus.');
   handlers.input({target:{id:'website-url',value:'larchwood:8084/shop'}});assert.doesNotMatch(hint.textContent,/where localhost/);
   await handlers.submit({target:{id:'website-launch-form'},preventDefault(){}});
-  assert.equal(writes[0].target_url,'http://larchwood:8084/shop');assert.equal(writes[0].auth_mode,'auto');assert.deepEqual(destinations,['/#/workspace']);
+  assert.equal(writes[0].target_url,'http://larchwood:8084/shop');assert.equal(writes[0].auth_mode,'auto');assert.deepEqual(destinations,['/#/website/http%3A%2F%2Flarchwood%3A8084'],'A new test opens its project, which follows the job.');
 });

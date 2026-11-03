@@ -5,7 +5,7 @@ Scout assigns a permanent UUID to a completed, evidence-backed suspected behavio
 
 ## Follow an issue in the dashboard
 
-Open **Issues & fixes** in your workspace. Select an issue to read its expected and actual behavior, reproduction steps, diagnostics link and original before/after screenshots. Choose **Copy for my agent** to preview the same Markdown description returned to API agents, then choose **Copy description**. It includes the page and control, expected and observed behavior, recorded steps, evidence references, uncertainty, decisions, tracking and CLI commands. Opening or copying the preview makes no model calls. The open preview stays frozen while the page refreshes.
+Open **Issues & fixes** in your workspace. Select an issue to read its expected and actual behavior, reproduction steps, diagnostics link and original before/after screenshots. Choose **Copy for a coding agent** to preview the same Markdown description returned to API agents, then choose **Copy description**. It includes the page and control, expected and observed behavior, recorded steps, evidence references, uncertainty, decisions, tracking and CLI commands. Opening or copying the preview makes no model calls. The open preview stays frozen while the page refreshes.
 
 **Seen in runs** shows each matching occurrence with its time, expected/observed result and a link to the run/action. **Related findings** links manually recorded duplicates and other failures on the same interface; those suggestions are not automatically treated as the same bug. Human decisions and original evidence remain available across reruns.
 

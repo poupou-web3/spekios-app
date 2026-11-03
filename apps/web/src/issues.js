@@ -75,7 +75,7 @@ async function list(){
 }
 function renderOriginal(){
   const {issue,original,handoff}=detail,root=$('#issue-original');root.replaceChildren();
-  const head=make('div',undefined,'issue-section-heading'),copy=make('button','Copy for my agent','button');copy.addEventListener('click',copyHandoff);head.append(make('span','ORIGINAL FINDING','eyebrow'),copy);root.append(head,make('h2',issue.title));
+  const head=make('div',undefined,'issue-section-heading'),copy=make('button','Copy for a coding agent','button');copy.addEventListener('click',copyHandoff);head.append(make('span','ORIGINAL FINDING','eyebrow'),copy);root.append(head,make('h2',issue.title));
   const id=make('p',undefined,'small');id.append(make('span','Issue ID · '),make('code',issue.issue_id));root.append(id,make('p',issue.source_target_url,'small muted'),trackingBadge(issue));
   if(issue.tracking?.status==='observed_again')root.append(make('p','This behavior was observed in a later run. Earlier candidate check results remain in the history; they do not establish a fix on this run’s deployment.','small muted'));
   root.append(make('p',`Last observed ${stamp(issue.tracking?.last_observed_at||issue.last_seen_at)}`,'small muted'));

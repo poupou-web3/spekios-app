@@ -9,7 +9,7 @@ function workspace(options={}){
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
   const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,continueRequest,selectWebsite,workspaceWebsites};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,landingView,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,continueRequest,selectWebsite,workspaceWebsites};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
 }
 const run=(id,extra={})=>({run_id:id,target_url:'https://'+id+'.test',lifecycle:'completed',config:{runtime_version:'explorer-v1',replay_of:null,execution_mode:'live',viewport_profile:'desktop'},summary:{actions:3,candidates:1,pending_findings:1,confirmed_findings:0,dismissed_findings:0},...extra});
@@ -62,7 +62,7 @@ test('switching websites during a refresh rejects the old page and immediately f
 test('switcher launches from settings return to the website while manual navigation wins a late admission',async()=>{
   const data=payloads(),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job:{job_id:'new'}}:data[path])});connect(ui);ui.state.view='settings';ui.location.hash='#/settings/models';
   await ui.submitJob({kind:'explore',target_url:'https://new.test'},{fromSwitcher:true});
-  assert.equal(ui.state.view,'workspace');assert.equal(ui.state.websiteOrigin,'https://new.test');assert.equal(ui.location.hash,'#/workspace');
+  assert.equal(ui.state.view,'workspace');assert.equal(ui.state.websiteOrigin,'https://new.test');assert.equal(ui.location.hash,'#/website/https%3A%2F%2Fnew.test');
   let release,entered;const started=new Promise(resolve=>entered=resolve),other=workspace({fetch:async(path,options)=>{
     if(options.method==='POST'){entered();return new Promise(resolve=>release=()=>resolve(response({job:{job_id:'late'}})));}return response(data[path]);
   }});connect(other);other.selectWebsite('https://a.test');
@@ -93,7 +93,7 @@ test('new jobs stay in Workspace, follow exactly one linked run, and retain dura
   const job={job_id:'00000000-0000-4000-8000-000000000088',status:'queued',request:{kind:'explore',target_url:'https://test.app'}};
   const data=payloads([job]),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job,reused:false}:data[path])});connect(ui);
   await ui.submitJob({kind:'explore',target_url:'https://test.app'});
-  assert.equal(ui.location.hash,'#/workspace');assert.equal(ui.state.view,'workspace');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.tracked-job'),job.job_id);
+  assert.equal(ui.location.hash,'#/website/https%3A%2F%2Ftest.app');assert.equal(ui.state.view,'workspace');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.tracked-job'),job.job_id);
   assert.match(ui.activityView(),/Your test will open here/);assert.equal(ui.followSubmittedJob(),false);
   job.run_id='00000000-0000-4000-8000-000000000099';assert.equal(ui.followSubmittedJob(),true);assert.equal(ui.location.hash,'#/workspace/'+job.run_id);assert.equal(ui.state.trackedJobId,null);assert.equal(ui.followSubmittedJob(),false);
 });
@@ -128,7 +128,7 @@ test('a stopped test starts again with the request that launched it',async()=>{
   ui.state.submitting=true;assert.match(ui.home(),/data-id="broken" aria-label="Run broken.test again" title="Run again" disabled/);ui.state.submitting=false;
   session.expires_at='2000-01-01T00:00:00Z';await click(ui,'restart-run','broken');
   assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'explore',target_url:'https://broken.test',viewport_profile:'mobile',auth_mode:'sign_in',auto_reproduce:true,project_id:'project'});
-  assert.equal(ui.state.trackedJobId,'new');assert.equal(ui.location.hash,'#/workspace');
+  assert.equal(ui.state.trackedJobId,'new');assert.equal(ui.location.hash,'#/website/https%3A%2F%2Fbroken.test');
 });
 test('a failed model plan names the request, the provider error and the reasoning budget',()=>{
   const ui=workspace(),requestId='f4b6e31f-07ee-4ab5-85d8-dcbc224bb977';
@@ -395,7 +395,7 @@ test('price links from a website wait for an ongoing refresh before targeting th
   const focused=[];ui.document.getElementById=id=>id==='saved-0-input_usd_per_million'?{focus:()=>focused.push(id),scrollIntoView(){}}:null;
   const pending=ui.refresh();await started;ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';const routed=ui.route();await new Promise(setImmediate);
   assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3','Keep the price target until the saved list has loaded.');release();await pending;await routed;await new Promise(setImmediate);
-  assert.equal(ui.state.websiteOrigin,'https://app.test');assert.equal(ui.state.priceTarget,null);assert.deepEqual(focused,['saved-0-input_usd_per_million']);
+  assert.equal(ui.state.websiteOrigin,'','Settings cover the whole workspace, so no project stays selected.');assert.equal(ui.state.priceTarget,null);assert.deepEqual(focused,['saved-0-input_usd_per_million']);
 });
 
 
@@ -427,4 +427,31 @@ test('run again and continue keep the project and the model chosen for that run'
   assert.deepEqual({...ui.restartRequest('job',ui.state.jobs[1]).model},model);
   ui.state.jobs[0].request={kind:'explore',target_url:'https://stopped.test'};
   assert.equal(ui.restartRequest('run',stopped).model,undefined,'Without a run choice the new job resolves its model again.');
+});
+
+test('#/workspace lists every project with counts across all of its tests instead of opening the first website',async()=>{
+  const paths=[],runs=[run('a',{target_url:'https://a.test/shop',summary:{actions:9,pending_findings:2,confirmed_findings:0}}),run('live',{target_url:'https://b.test/',lifecycle:'active',summary:{actions:42,pending_findings:0}})];
+  const websites=[{origin:'https://a.test',run_count:12,target_url:'https://a.test/shop',last_test_at:'2026-11-02T09:00:00Z',active_runs:0,pending_findings:5,confirmed_findings:3},{origin:'https://b.test',run_count:1,target_url:'https://b.test/',last_test_at:'2026-11-02T10:00:00Z',active_runs:1,pending_findings:0,confirmed_findings:0}];
+  const ui=workspace({fetch:async path=>{paths.push(path);return response(path==='/v1/runs'?{runs,websites,total:2}:payloads()[path]);}});connect(ui);
+  ui.location.hash='#/workspace';await ui.route();
+  assert.equal(ui.state.websitePage,'landing');assert.equal(ui.state.websiteOrigin,'','No project is chosen for the person.');assert.ok(paths.includes('/v1/runs'));
+  const html=ui.node.innerHTML;
+  assert.match(html,/<h1>Your projects<\/h1>/);assert.match(html,/2 projects · 1 running · 5 findings waiting for review/);
+  assert.match(html,/<dt>To review<\/dt><dd class="attention">5<\/dd><\/div><div><dt>Confirmed<\/dt><dd>3<\/dd><\/div><div><dt>Tests<\/dt><dd>12<\/dd>/,'Counts come from every run of the website, not only the loaded page.');
+  assert.match(html,/<a class="attention-card" href="#\/workspace\/a\/findings">[\s\S]*?5 findings to review/);
+  assert.match(html,/href="#\/workspace\/live"><i class="dot green" aria-hidden="true"><\/i>Running now · 42 steps/);
+  assert.match(html,/class="sidebar project-sidebar workspace-sidebar"/);assert.match(html,/Recent projects/);assert.doesNotMatch(html,/website-switcher/);
+  assert.match(html,/<div class="breadcrumb">[\s\S]*?<span>All projects<\/span>/);assert.match(html,/id="website-launch-form" class="workspace-launch"/);
+  ui.location.hash='#/website/https%3A%2F%2Fa.test';await ui.route();assert.equal(ui.state.websitePage,'overview');assert.equal(ui.state.websiteOrigin,'https://a.test');
+  assert.match(ui.node.innerHTML,/<a class="all-projects" href="#\/workspace">/);
+  ui.location.hash='#/workspace';await ui.route();assert.equal(ui.state.websiteOrigin,'','Returning to the list leaves the project.');
+  ui.state.websites=[{origin:'https://a.test',run_count:1,target_url:'https://a.test/shop'}];
+  assert.match(ui.landingView(),/<dd class="attention">2<\/dd>/,'An API without catalog counts falls back to the loaded runs.');
+});
+test('an empty workspace landing is the first-test page and settings use the workspace sidebar',async()=>{
+  const ui=workspace({fetch:async path=>response(payloads()[path])});connect(ui);
+  ui.location.hash='#/workspace';await ui.route();
+  assert.match(ui.node.innerHTML,/What should we explore\?/);assert.match(ui.node.innerHTML,/id="run-form"/);assert.doesNotMatch(ui.node.innerHTML,/Your projects/);
+  ui.location.hash='#/settings/models';await ui.route();
+  assert.match(ui.node.innerHTML,/workspace-sidebar/);assert.match(ui.node.innerHTML,/<a class="nav-item active" href="#\/settings" aria-current="page">/);assert.doesNotMatch(ui.node.innerHTML,/website-switcher/);
 });

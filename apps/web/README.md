@@ -10,7 +10,7 @@ src/
   state.js         shared state; values several modules change live on `state`
   api.js, images.js, jobs.js, shell.js, private-login.js
   websites.js, website-state.js, website-page.js  grouping, switcher and shared page navigation
-  views/           home, run, action, review, steering, automatic, flow, settings, activity, drawer, export
+  views/           landing, home, run, action, review, steering, automatic, flow, settings, activity, drawer, export
   report/          Markdown / evidence ZIP / JSON report builders (pure modules)
   connect.js       agent connection page
   issues.js        issue history and fix verification page
@@ -21,6 +21,8 @@ test/              node --test suites; support.mjs links src/ for the vm sandbox
 `apps/api/build.rs` lists every `.js` and `.css` file under `src/` at compile time. Adding a module needs no Rust change, but the API embeds these files, so serve a UI change with `just reload` (or `just reload-api`). `just dev` is only needed to bring the whole stack up.
 
 Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`.
+
+`#/workspace` is the project list: one project per website origin, with counts of findings to review, confirmed findings and tests across every run of that origin (from the `/v1/runs` website catalog), what needs attention across projects and the latest tests. It opens no project by itself; with no project yet it is the first-test page. The project list and settings use a workspace sidebar; every project page links back with **All projects**. A newly submitted test opens its project's overview, which follows the job to its run.
 
 The website switcher groups entry URLs by origin, keeping staging subdomains and local ports separate. Its catalog covers the complete owned run history; selected-website test history pages through 50 runs at a time. The overview shows the latest tests, while Tests retains search, filters and usage. Stopped explorations offer Continue exploration and Run again from their cards, history and report. Issues use the same exact origin filter. Recent shortcuts are limited to three per website in this tab, with icons for reports, findings, flow maps and pages. Settings and agent connection remain workspace actions at the bottom.
 

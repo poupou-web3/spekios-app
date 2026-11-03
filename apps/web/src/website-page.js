@@ -1,5 +1,5 @@
 // Keep the selected website visible when opening the separately served customer pages.
-import {bindWebsiteFavicons,browserTargetUrl,groupWebsites,launchUrlError,rememberWebsiteShortcut,savedWebsite,saveWebsite,updateWebsiteLaunchHint,websiteLabel,websiteOrigin,websiteSidebar} from './websites.js';
+import {bindWebsiteFavicons,browserTargetUrl,groupWebsites,launchUrlError,rememberWebsiteShortcut,savedWebsite,saveWebsite,updateWebsiteLaunchHint,websiteHref,websiteLabel,websiteOrigin,websiteSidebar} from './websites.js';
 
 export async function mountWebsitePage({page,request}){
   const slot=document.querySelector('[data-workspace-sidebar]');
@@ -25,7 +25,7 @@ export async function mountWebsitePage({page,request}){
       const result=await request('/v1/browser-jobs',{job_id:pending.job_id,...spec});
       sessionStorage.removeItem('scout.pending-job');saveWebsite(websiteOrigin(target));
       if(result.job?.job_id)sessionStorage.setItem('scout.tracked-job',result.job.job_id);
-      location.assign('/#/workspace');
+      location.assign(websiteHref(websiteOrigin(target),'overview',true));
     }catch(e){error=e.message;submitting=false;draw(true);slot.querySelector('input')?.focus();}
   });
   document.addEventListener('click',event=>{if(!event.target.closest?.('.website-switcher')){const details=slot.querySelector('details');if(details)details.open=false;}});
