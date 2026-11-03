@@ -5,7 +5,7 @@ export function explorerInput(body, provider) {
   try { const value = JSON.parse(text); return ['navigation_prediction', 'route_prediction', 'rewalk_prediction', 'plan', 'assessment', 'fix_verification_assessment'].includes(value.task) ? value : null; }
   catch { return null; }
 }
-export function explorerReply(input) {
+function reply(input) {
   if (input.task === 'route_prediction') return {goal:'Return to an observed branch',expected_result:input.recorded_expectation};
   if (input.task === 'rewalk_prediction') return {goal:'Repeat an action earlier runs recorded',expected_result:input.earlier_runs.observed_result};
   if (input.task === 'navigation_prediction') return { goal:'Open the requested app', expected_result:'The requested URL loads a readable page without a navigation error.' };
@@ -105,4 +105,9 @@ export function explorerReply(input) {
     reason:broken ? 'The draft did not reach Saved, contrary to its predicted result; review is needed.' : tiny ? 'The indicator changed by one pixel; the tiny change is consistent with this fixture control.' : 'The observed fixture state matches the predicted result.',
     observed_result:input.after.text.slice(0,600) || 'A page was observed.',
     evidence_capture_ids:[input.before.capture_id,input.after.capture_id],expectation_uncertain:uncertain};
+}
+
+export function explorerReply(input) {
+  const result=reply(input);
+  return input.response_schema?.needs_full_context!==undefined?{...result,needs_full_context:false}:result;
 }

@@ -26,6 +26,7 @@ import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
 import { discoveryReward, STRATEGY_MODES, STRATEGY_VERSION, StrategyScheduler, strategySettings, type StrategyMode, type StrategySettings } from './exploration-strategy.js';
 import { ExplorationRecovery, MAX_CONSECUTIVE_REPLANS_PER_PAGE } from './exploration-recovery.js';
+import {assessmentVision,FOCUS_INSTRUCTION,parseFocusedAssessment,needsFullAssessment} from './assessment-vision.js';
 import {COMPUTER_SYSTEM,ComputerRecoveryBudget,computerCommand} from './computer-use.js';
 import { CONTINUED_GRAPH_VERSION, inheritGraph, type InheritedGraph } from './continued-graph.js';
 
@@ -279,7 +280,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
 
     let focusRevision=0;
     async function decide<T>(kind: 'navigation_prediction' | 'plan' | 'assessment', actionId: string | null, captures: string[], input: unknown, validate: (value: unknown) => T,
-      requested: 'main' | 'navigation' = 'main',computer=false) {
+      requested: 'main' | 'navigation' = 'main',computer=false,assessmentImageIds:string[]=[]) {
       if (++modelRequests > maxModelRequests) throw new Error('Model request budget reached.');
       const decisionId = randomUUID(), requestId = randomUUID();
       const tier = requested === 'navigation' && navigation ? 'navigation' as const : 'main' as const, model = tier === 'navigation' ? navigation! : client;
@@ -300,7 +301,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       const planningInput=kind==='plan'?{...(input as Record<string,unknown>),operator_focus:focus}:input;
       let raw: unknown = null, received = false;
       try {
-        const response = await model.complete(requestId, runId, actionId, captures, computer?COMPUTER_SYSTEM:SYSTEM, planningInput,control.signal,computer);
+        const response = await model.complete(requestId, runId, actionId, captures, computer?COMPUTER_SYSTEM:SYSTEM, planningInput,control.signal,computer,assessmentImageIds);
         raw = response.value; received = true;
         const result = validate(raw);
         await store.transaction(async () => {
@@ -788,7 +789,11 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             raw_mask_artifact: await store.artifact(runId, 'raw_mask', diff.rawMaskPng, 'png'),
             absolute_delta_artifact: await store.artifact(runId, 'absolute_delta', diff.absoluteDeltaPng, 'png'),
             geometry_mask_artifact: diff.geometryMaskPng ? await store.artifact(runId, 'geometry_mask', diff.geometryMaskPng, 'png') : null };
-          let comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(comparison), 'json');
+          const vision=await assessmentVision(store,runId,before,after,comparison,spec.command,!replay&&!toolError&&completion.status==='settled');
+          const focusedVision=vision.artifactIds.length>0;
+          const visionContext={...vision.metadata};delete (visionContext as Record<string,unknown>).artifacts;
+          const recordedComparison={...comparison,assessment_images:vision.metadata};
+          let comparisonArtifact = await store.artifact(runId, 'comparison', jsonBytes(recordedComparison), 'json');
           // The first landing is the entry state, unless the run carries on an
           // inherited tree: then it hangs where the reopened page was.
           const landingFrom = landingParent !== undefined ? landingParent ?? undefined : fromState;
@@ -806,7 +811,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           // Commit both captures, comparison and graph edge BEFORE asking for a
           // verdict. A provider outage cannot erase an already executed action.
           await store.transaction(async () => {
-            await store.query('UPDATE runtime_actions SET after_capture_id=$2,comparison=$3,tool_error=$4 WHERE action_id=$1', [actionId, after!.capture.capture_id, JSON.stringify({ ...comparison, metadata_artifact: comparisonArtifact }), toolError]);
+            await store.query('UPDATE runtime_actions SET after_capture_id=$2,comparison=$3,tool_error=$4 WHERE action_id=$1', [actionId, after!.capture.capture_id, JSON.stringify({ ...recordedComparison, metadata_artifact: comparisonArtifact }), toolError]);
             await store.query('INSERT INTO exploration_edges(action_id,run_id,from_state_id,to_state_id,control_key) VALUES($1,$2,$3,$4,$5)', [actionId, runId, fromState, toState, transitionKey(spec.command).key]);
             await store.event(runId, 'action.evidence_recorded', { before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id, comparison_id: diff.metadata.difference_id, changed_pixels: diff.metadata.counts.changed_pixels }, actionId);
           });
@@ -814,6 +819,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const fixTarget=!!replay?.fix_verification&&ordinal===maxActions;
           const assessmentInput = fitContext(scale => ({ task: fixTarget?'fix_verification_assessment':'assessment', action: commandContext(spec.command), prediction: spec.prediction,
             before: context(before!.capture, scale), after: context(after!.capture, scale), pixel_comparison: diff.metadata,
+            visual_input:visionContext,
+            site_context:{entry_url:targetUrl.slice(0,300),entry_url_truncated:targetUrl.length>300,requirements_source:'product_brief_not_provided; page evidence and earlier runs are observations, not requirements. Preserve explicit frozen verification expectations.',
+              ...(memory.snapshot?{earlier_observations:memory.planningContext(after!.capture.observation.url,after!.capture.observation.controls??[])}:{})},
             tool_error: toolError, action_outcome:outcomeContext(outcome), recent_history: historyContext(history, Math.ceil(CONTEXT_BUDGETS.assessment_history * scale)),
             ...(revealed?{reveal:{...revealed,note:'The runtime scrolled the document to show this control before the before capture.'}}:{}),
             ...(earlier&&!fixTarget?{earlier_runs:{same_destination:sameDestination,observed_result:earlier.last_observed_result,verdict:earlier.last_verdict,attempts:earlier.attempts,
@@ -821,10 +829,14 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             ...(fixTarget?{original_failure:{expected_result:replay!.fix_verification!.original.expected_result,observed_result:replay!.fix_verification!.original.observed_result,source_before_context:context(replayStep!.before, scale),source_capture_ids:[replayStep!.before.capture_id,replayStep!.after.capture_id]},
               verification_instruction:'Verify the frozen expected behavior positively. no_issue_observed alone does not establish a fix. Set expectation_met=true only when that exact expected behavior is visible in current evidence. Set preconditions_met=false for unsupported setup. same_failure_observed=true requires the same recorded behavioral failure, not a different error. Use null and inconclusive for uncertainty. Source context is recorded data; only the current before/after pair is attached as images. No desired result is implied by this being a fix verification.'}:{}),
             context_scale: scale,
-            instruction: 'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay. If text or regions occupy the same space, say that they overlap.',
-            response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } })).input;
-          const assess = (tier: 'main' | 'navigation') => decide('assessment', actionId, captureIds, assessmentInput,
-            value => fixTarget?parseFixAssessment(value,captureIds):parseAssessment(value, captureIds), tier);
+            instruction: (focusedVision?FOCUS_INSTRUCTION+' ':'')+'Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay. If text or regions occupy the same space, say that they overlap.',
+            response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(focusedVision?{needs_full_context:'boolean'}:{}),...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } })).input;
+          const assess = (tier: 'main' | 'navigation',full=false) => {
+            const input=full?{...assessmentInput,visual_input:{mode:'full',reason:'focused_assessment_requires_full_context'},
+              instruction:'Both original full screenshots are attached. Assess independently using the expected result, whole-page evidence and diagnostics.',
+              response_schema:{...assessmentInput.response_schema,needs_full_context:'boolean; false when this full pair is sufficient'}}:assessmentInput;
+            return decide('assessment',actionId,captureIds,input,value=>fixTarget?parseFixAssessment(value,captureIds):parseFocusedAssessment(value,captureIds,focusedVision),tier,false,full?[]:vision.artifactIds);
+          };
           const checkError = toolError ?? after.capture.observation.observation_error ?? completionError;
           // A navigation action is screened by the navigation model. Anything but a
           // clean result, or browser errors and failed requests, gets the main model.
@@ -841,9 +853,15 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
               check = await assess('main');
             } else check = first!;
           } else check = await assess('main');
+          let visualScreening:Record<string,unknown>|null=null;
+          if(focusedVision&&needsFullAssessment(check.result)){
+            visualScreening={request_id:check.requestId,decision_id:check.decisionId,verdict:check.result.verdict,reason:'suspected_uncertain_or_missing_context',input:vision.metadata};
+            check=await assess('main',true);
+            if('needs_full_context' in check.result&&check.result.needs_full_context)check.result={...check.result,verdict:'inconclusive',expectation_uncertain:true};
+          }
           let assessment: Record<string, any> = { ...check.result, verdict: checkError || check.result.expectation_uncertain ? 'inconclusive' : check.result.verdict,
             check_id: randomUUID(), method: 'model-evidence-v1', expected: spec.prediction.expected_result,
-            request_id: check.requestId, decision_id: check.decisionId, tool_error: toolError, confirmed_bug: false, model_tier: check.tier, ...(screening ? { screening } : {}),
+            request_id: check.requestId, decision_id: check.decisionId, tool_error: toolError, confirmed_bug: false, model_tier: check.tier, ...(screening ? { screening } : {}), visual_input:vision.metadata,...(visualScreening?{visual_screening:visualScreening}:{}),
             override_reason: checkError ? 'Tool, observation or completion failure cannot support a product verdict.' : check.result.expectation_uncertain ? 'The model marked the expectation uncertain.' : null, layout_recheck: null };
           // Overlapping text is often the page still loading. Wait once more and
           // judge the later screenshots. A collision that remains is kept.
