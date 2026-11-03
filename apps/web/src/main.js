@@ -1,3 +1,4 @@
+import {checkComputerUse} from './computer-use.js';
 import {showAgentHandoff,closeAgentHandoff} from './agent-handoff.js';
 // Workspace entry: delegated DOM events, polling and startup. Rendering lives in app.js.
 import {toast} from '/assets/ui/components.js';
@@ -15,7 +16,7 @@ import {cancelAutomatic} from './views/automatic.js';
 import {closeReportExport,downloadReport,openReportExport} from './views/export.js';
 import {explorationRequest,updateTargetUrl} from './views/home.js';
 import {submitReview,updateReviewDraft} from './views/review.js';
-import {addCatalogModel,addSavedModel,editOverrides,editProjectModels,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel,useDemoModel} from './views/settings.js';
+import {computerCheckReference,configurationDraft,addCatalogModel,addSavedModel,editOverrides,editProjectModels,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel,useDemoModel} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 import {rememberWorkspacePage} from './website-state.js';
 import {bindWebsiteFavicons,clearWebsiteNavigation,launchUrlError,updateWebsiteLaunchHint,websiteHref} from './websites.js';
@@ -89,13 +90,14 @@ root.addEventListener('click',async e=>{
   if(action==='revoke-session'){try{await api('/v1/browser-sessions/'+el.dataset.id+'/revoke',{});if(state.sessionId===el.dataset.id)state.sessionId='';await refresh();toast('Saved session removed. A running browser remains signed in until it closes.');}catch(error){toast(error.message);}}
   if(action==='forget-memory'){try{await api('/v1/app-memory/'+el.dataset.id+'/forget',{});await refresh();toast('App memory forgotten. Recorded runs and evidence are unchanged.');}catch(error){toast(error.message);}}
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Workspace refreshed.');}
-  if(action==='logout'&&state.browserAuth){closeAgentHandoff();clearWebsiteNavigation();location.assign('/logout');return;}
-  if(action==='logout'){closeAgentHandoff();closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
+  if(action==='logout'&&state.browserAuth){state.computerUseCheck=null;state.computerUseResult=null;closeAgentHandoff();clearWebsiteNavigation();location.assign('/logout');return;}
+  if(action==='logout'){state.computerUseCheck=null;state.computerUseResult=null;closeAgentHandoff();closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
   if(action==='add-project-model'||action==='remove-project-model'){editProjectModels(action==='add-project-model',Number(el.dataset.index));render();}
   // After adding, the model ID field is ready for the next one (or for fixing this one).
   if(action==='add-catalog-model'){addCatalogModel(el.dataset.provider,el.dataset.model);render();}
+  if(action==='check-computer-use'){const index=Number(el.dataset.index),m=configurationDraft().values.saved_models[index];await checkComputerUse(m,index,computerCheckReference(m));}
   if(action==='add-saved-model')addModelAndRefocus();
   if(action==='remove-saved-model'&&removeSavedModel(Number(el.dataset.index)))render();
   if(action==='prev-action'||action==='next-action'){navigateAction(action==='prev-action'?-1:1,el.dataset.id);}

@@ -467,6 +467,7 @@ mod tests {
             ("POST", "/v1/actions/x/reviews"),
             ("GET", "/v1/operations"),
             ("GET", "/v1/model-requests/x"),
+            ("POST", "/v1/computer-use/check"),
             ("POST", "/v1/agent-connections/x/decision"),
         ] {
             assert!(!permitted(&p, method, path), "{path}");

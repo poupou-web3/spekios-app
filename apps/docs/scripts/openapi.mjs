@@ -199,6 +199,11 @@ export function openapi(catalog) {
     description: 'Works for a project with no jobs yet: it resolves to the defaults until settings name it. No model call.',
   });
   add('/v1/model-providers', 'get', 'getProviders', 'Models', 'Read provider availability without keys');
+  add('/v1/computer-use/check','post','checkComputerUse','Models','Check a Meta connection for native computer-tool support',{
+    description:'Manager/operator only. One metered request through the selected saved key, with no app screenshots and no action execution. Poll /v1/model-requests/{request_id}; completed confirms the native protocol. Proof is account, key and execution-mode scoped and expires after 30 days. Read successful checks in /v1/model-providers computer_use. Does not enable recovery by itself.',
+    requestBody:body(strict({request_id:uuid,provider:{const:'meta'},model:{type:'string',minLength:1,maxLength:200},provider_key_id:{type:['string','null'],description:'Saved key UUID or demo; absent uses the provider default.'}},['request_id','provider','model'])),
+    responses:{'202':response('Compatibility check admitted. Poll using the supplied request ID.'),...errors,'402':response('Insufficient demo credit.')},
+  });
   add('/v1/usage', 'get', 'getUsage', 'Models', 'Read nullable provider-reported token/cost totals', {
     description: 'known_input_tokens, known_output_tokens and known_total_tokens count only what providers reported; null means unknown, not zero. by_model has the same counts and reported cost for each provider and model, and by_agent for each agent. Run reports (model_usage) and the run list use the same fields for one run.',
   });
@@ -314,6 +319,7 @@ export function openapi(catalog) {
           navigation_model: { ...strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 } }, ['provider','model']), type: ['object','null'],
             description: 'A cheaper model that predicts and assesses navigation actions: opening a URL, following a link and scrolling. Any result other than a clean no_issue_observed, or one with browser errors or failed requests, is reassessed by the exploration model. Free-only applies to an OpenRouter navigation model. Omitted or null: one model for everything.' },
           saved_models: { type: 'array', maxItems: 30, default: [], items: strict({ provider: choice('openai','anthropic','openrouter','meta'), model: { type: 'string', minLength: 1, maxLength: 200 }, label: { type: 'string', maxLength: 60, description: 'Optional display name, trimmed; no control characters.' },
+            computer_use:{type:'boolean',description:'Allow bounded computer-use recovery for this exact direct Meta model. Absent defaults on only for muse-spark-1.3 and muse-wonder-1.0. Other Meta models additionally need a successful compatibility check on the selected key. Explicit false persists an opt-out. Other providers cannot enable this integration.'},
             input_usd_per_million: { type: ['number','null'], minimum: 0, maximum: 10000, description: 'Optional price in US dollars per million input tokens, used to estimate cost. Absent or null keeps the known price, if any.' },
             output_usd_per_million: { type: ['number','null'], minimum: 0, maximum: 10000, description: 'Optional price in US dollars per million output tokens. Absent or null keeps the known price, if any.' } }, ['provider','model']),
             description: 'The models the settings page offers for exploration and navigation, such as several Meta models. Each provider and trimmed model ID appears once; different providers can share an ID. Only names and IDs are saved, never credentials. Listed models can be paid while free_only is on; only the exploration and navigation models must be free. Jobs do not freeze this list. Omitted: an empty list.' },
@@ -324,6 +330,8 @@ export function openapi(catalog) {
           system: { type: 'string', maxLength: 16384, default: '', description: 'No NUL; at most 16384 UTF-8 bytes.' },
           run_id: uuid, action_id: uuid, capture_ids: { type: 'array', maxItems: 2, uniqueItems: true, items: uuid, default: [] },
           max_output_tokens: bounded(1,4096,1024), max_attempts: bounded(1,3,2), free_only: { type: 'boolean', default: true },
+          computer_use:{type:'boolean',default:false,description:'Trusted worker/operator native Meta computer request. Requires an enabled run and exactly one linked screenshot, or computer_use_probe.'},
+          computer_use_probe:{type:'boolean',default:false,description:'Non-executing Meta compatibility probe. Requires computer_use; cannot attach a run or screenshots. Prefer the manager check endpoint.'},
         }, ['request_id','provider','model','prompt']),
         ModelAdmission: { type: 'object', properties: { request_id: uuid, created: bool, status_url: string }, required: ['request_id','created','status_url'], additionalProperties: true },
       },

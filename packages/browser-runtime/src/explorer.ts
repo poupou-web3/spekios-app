@@ -26,6 +26,7 @@ import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
 import { discoveryReward, STRATEGY_MODES, STRATEGY_VERSION, StrategyScheduler, strategySettings, type StrategyMode, type StrategySettings } from './exploration-strategy.js';
 import { ExplorationRecovery, MAX_CONSECUTIVE_REPLANS_PER_PAGE } from './exploration-recovery.js';
+import {COMPUTER_SYSTEM,ComputerRecoveryBudget,computerCommand} from './computer-use.js';
 import { CONTINUED_GRAPH_VERSION, inheritGraph, type InheritedGraph } from './continued-graph.js';
 
 const message = (error: unknown) => error instanceof Error ? error.message.slice(0, 800) : 'Unknown exploration failure';
@@ -43,6 +44,7 @@ type ModelPrediction = { source: 'model'; request_id: string; decision_id: strin
   reused_ranking?: { request_id: string; run_id: string } };
 type ReplayPrediction = { source: 'recorded_replay'; source_prediction_id: string; source_model_request_id: string; goal: string; expected_result: string; context_capture_id: string | null };
 type Spec = { command: BrowserCommand; prediction: ModelPrediction | ReplayPrediction; worker_id: string; agent_id: string; replay_source_action_id?: string;
+  computer_recovery?:{reason:string;request_id:string;decision_id:string;source_capture_id:string};
   exploration?: { purpose: 'explore' | 'return' | 'resume'; target_state_id: string; control_id: string; priority: number; likelihood: number; reason: string; return_step?: RouteStep;
     strategy?: { mode: StrategyMode; turn: number; continued: boolean } } };
 // Limits are optional: null means none. Undefined falls back to the server environment.
@@ -168,6 +170,9 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     // A navigation model can add one reassessment per action.
     const maxModelRequests = replay ? maxActions : maxActions * (navigation ? 4 : 3) + MAX_CONSECUTIVE_REPLANS_PER_PAGE * 2;
     const recovery = new ExplorationRecovery();
+    const computerBudget = new ComputerRecoveryBudget();
+    let computerReason:string|null=null;
+    let computerAttempts=0,computerActions=0;
     let modelRequests = 0, executed = 0, replans = 0, revealFailures = 0, stopReason = replay ? 'replay_path_completed' : 'action_budget_reached';
     const skippedMismatches = new Set<string>();
     // Consecutive actions that reached only states already recorded in this run.
@@ -274,7 +279,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
 
     let focusRevision=0;
     async function decide<T>(kind: 'navigation_prediction' | 'plan' | 'assessment', actionId: string | null, captures: string[], input: unknown, validate: (value: unknown) => T,
-      requested: 'main' | 'navigation' = 'main') {
+      requested: 'main' | 'navigation' = 'main',computer=false) {
       if (++modelRequests > maxModelRequests) throw new Error('Model request budget reached.');
       const decisionId = randomUUID(), requestId = randomUUID();
       const tier = requested === 'navigation' && navigation ? 'navigation' as const : 'main' as const, model = tier === 'navigation' ? navigation! : client;
@@ -295,7 +300,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
       const planningInput=kind==='plan'?{...(input as Record<string,unknown>),operator_focus:focus}:input;
       let raw: unknown = null, received = false;
       try {
-        const response = await model.complete(requestId, runId, actionId, captures, SYSTEM, planningInput,control.signal);
+        const response = await model.complete(requestId, runId, actionId, captures, computer?COMPUTER_SYSTEM:SYSTEM, planningInput,control.signal,computer);
         raw = response.value; received = true;
         const result = validate(raw);
         await store.transaction(async () => {
@@ -313,6 +318,31 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           await store.event(runId, cancelled?'model.decision_cancelled':'model.decision_failed', { decision_id: decisionId, request_id: requestId, kind, error: message(error) }, actionId);
         });
         throw error;
+      }
+    }
+    async function recoverWithComputer(reason:string):Promise<Spec|null> {
+      if(replay||!last||client.settings.computerUse!==true||client.settings.provider!=='meta'||modelRequests+3>maxModelRequests||!computerBudget.take(last.capture))return null;
+      const source=last.capture;
+      computerAttempts++;
+      await store.transaction(()=>store.event(runId,'computer.recovery_requested',{reason,capture_id:source.capture_id,attempt:computerAttempts}));
+      try{
+        const decision=await decide('plan',null,[source.capture_id],{task:'computer_recovery',reason,page:context(source),recent_history:historyContext(history,8),instruction:'Choose one safe missing gesture. Do not repeat attempted controls or an uncertain submission. Prefer a useful panel scroll, hover or drag. Stop if none is useful.'},raw=>computerCommand(raw,source),'main',true);
+        const command=decision.result;
+        if(command.action.type==='click'){
+          const point=command.action;
+          const repeated=(source.observation.controls??[]).some(c=>c.rect&&point.x>=c.rect.x&&point.x<c.rect.x+c.rect.width&&point.y>=c.rect.y&&point.y<c.rect.y+c.rect.height&&Array.from(planner.nodes.values()).some(n=>n.capture.observation.url===source.observation.url&&n.attempted.has(c.control_id)));
+          if(repeated)throw new Error('Recovery cannot repeat an attempted control.');
+        }
+        const prediction=await predict(command,[source.capture_id],{task:'recovery_prediction',page:context(source),command:commandContext(command),instruction:'Predict the observable outcome of this single recovery gesture. The goal and expectation must be grounded in this screen; this is not evidence of a bug.',response_schema:{goal:'string',expected_result:'string'}});
+        return {command,prediction:{source:'model',request_id:prediction.requestId,decision_id:prediction.decisionId,...prediction.result,context_capture_id:source.capture_id},worker_id:workerId,agent_id:agentId,
+          computer_recovery:{reason,request_id:decision.requestId,decision_id:decision.decisionId,source_capture_id:source.capture_id}};
+      }catch(error){
+        await control.check();
+        // A provider rejection, refusal, pending safety check or invalid action
+        // disables recovery for this run. Ordinary exploration can continue.
+        computerBudget.disabled=true;
+        await store.transaction(()=>store.event(runId,'computer.recovery_unavailable',{reason:message(error),capture_id:source.capture_id}));
+        return null;
       }
     }
     // Predictions for navigation actions go to the navigation model when there
@@ -409,7 +439,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
     let last: { capture: Capture; bytes: Buffer } | undefined, lastState: string | undefined;
     const history: unknown[] = [];
     // How the actions were shared and how much of each depth was covered.
-    const progress = () => replay ? {} : { strategy: strategy.summary(), coverage_by_depth: planner.coverage(), model_use: economy };
+    const progress = () => replay ? {} : { strategy: strategy.summary(), coverage_by_depth: planner.coverage(), model_use: economy,computer_recovery:{enabled:client.settings.computerUse===true,attempts:computerAttempts,actions:computerActions,disabled:computerBudget.disabled} };
     try {
       await control.check();
       if(replay?.fix_verification?.requires_session&&!authContext?.session_id)throw new AccessStopped('candidate_sign_in_required');
@@ -490,7 +520,10 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         let selectionRecord: Record<string,unknown> | undefined;
         landingParent = undefined;
         const replayStep = replay?.steps[ordinal - 1];
-        if (replayStep) {
+        const recovered=computerReason?await recoverWithComputer(computerReason):null;
+        computerReason=null;
+        if(recovered){spec=recovered;
+        } else if (replayStep) {
           spec = { command: replayStep.command, prediction: { source: 'recorded_replay', source_prediction_id: replayStep.source_prediction_id,
             source_model_request_id: replayStep.source_model_request_id, goal: replayStep.goal, expected_result: replayStep.expected_result,
             context_capture_id: last?.capture.capture_id ?? null }, worker_id: workerId, agent_id: agentId, replay_source_action_id: replayStep.source_action_id };
@@ -572,10 +605,13 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const choice = strategy.choose({ breadth: ranks.breadth[0] ?? unranked, depth: ranks.depth[0] ?? unranked, rewalk: ranks.rewalk[0] });
           const ranked = choice ? ranks[choice.mode] : [], selected = ranked[0];
           if (!choice || !selected) {
+            const recovered=await recoverWithComputer('No reachable native controls remain; inspect for a useful missing gesture.');
+            if(recovered){spec=recovered;}else{
             stopReason = STRATEGY_MODES.some(m => strategy.settings[m] > 0 && (m !== 'rewalk' || !focused) && planner.rank(lastState!,Number.MAX_SAFE_INTEGER,m).length) ? 'insufficient_budget_to_reach_frontier'
               : available.length ? 'model_stopped_or_no_reachable_frontier' : 'no_reachable_unexplored_controls';
             break;
-          }
+            }
+          }else{
           const returnStep = selected.route[0];
           const exploration: NonNullable<Spec['exploration']> = { purpose: returnStep?.memory || returnStep?.recovery ? 'resume' : returnStep ? 'return' : 'explore',
             target_state_id: selected.state_id, control_id: selected.control_id, priority: selected.priority,
@@ -620,6 +656,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             ranked_paths:ranked.slice(0,8).map(({route,...path})=>path),probability_calibrated:false,
             strategy:{version:STRATEGY_VERSION,mode:choice.mode,turn:choice.turn,continued:choice.continued,...strategy.state(),
               candidates:Object.fromEntries(STRATEGY_MODES.map(m=>[m,ranks[m].length]))} };
+          }
         }
         if (modelRequests >= maxModelRequests) { stopReason = 'model_request_budget_reached'; break; }
         Object.assign(spec,{auth_context_id:authContext?.context_id??null});
@@ -627,6 +664,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
         await store.transaction(async () => {
           await store.query("INSERT INTO runtime_actions(action_id,run_id,ordinal,prediction_id,spec,state) VALUES($1,$2,$3,$4,$5,'prepared')", [actionId, runId, ordinal, predictionId, JSON.stringify(spec)]);
           if (spec.prediction.source === 'model') await store.query('UPDATE exploration_decisions SET action_id=$2 WHERE decision_id=$1', [spec.prediction.decision_id, actionId]);
+          if(spec.computer_recovery)await store.query('UPDATE exploration_decisions SET action_id=$2 WHERE decision_id=$1',[spec.computer_recovery.decision_id,actionId]);
           if (selectionRecord) await store.event(runId,'exploration.selected',{...selectionRecord,action_id:actionId},actionId);
           await store.event(runId, 'action.prepared', { prediction_id: predictionId, ordinal, spec }, actionId);
         });
@@ -675,6 +713,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             continue;
           }
           const fromState = await state(before.capture,lastState);
+          if(spec.command.type==='computer'&&client.settings.computerUse!==true)throw new Error('Computer-use recovery is disabled for this model.');
           // The planning state keeps its own frontier when a reveal moved the view.
           const planningState = revealed && lastState && lastState !== fromState ? lastState : null;
           let observed: BrowserCommand | null = null;
@@ -702,6 +741,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             if (spec.exploration?.purpose === 'return' && spec.exploration.return_step) planner.transition({...spec.exploration.return_step,to_state_id:fromState},'inconclusive',spec.exploration.return_step,false);
             last = before; lastState = fromState;
             if (revealedControl) revealFailures++;
+            if(spec.command.type!=='submit'&&spec.command.type!=='computer')computerReason='A native control could not be reached before dispatch. Find a safe alternate gesture without bypassing an overlay or disabled control.';
             continue;
           }
           const command = observed ?? spec.command;
@@ -711,13 +751,14 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             await store.query("UPDATE runtime_actions SET state='dispatched',before_capture_id=$2,dispatched_at=now() WHERE action_id=$1", [actionId, before!.capture.capture_id]);
             if (spec.command.type !== 'navigate') {
               await store.query("UPDATE exploration_frontier SET status='attempted',action_id=COALESCE(action_id,$4) WHERE run_id=$1 AND state_id=ANY($2::uuid[]) AND control_id=$3", [runId, [fromState,planningState].filter(Boolean), spec.command.control.control_id, actionId]);
-              if (spec.command.control.role !== 'scroll') await memory.attempted(pageUrl, spec.command.control.control_id, actionId);
+              if (spec.command.control.role !== 'scroll' && spec.command.type!=='computer') await memory.attempted(pageUrl, spec.command.control.control_id, actionId);
             }
             await store.event(runId, 'action.dispatched', { before_capture_id: before!.capture.capture_id, prediction_id: predictionId }, actionId);
           });
           planner.attempted(fromState,spec.command,spec.exploration?.purpose==='return');
           if (planningState) planner.attempted(planningState,spec.command,true);
           executed++;
+          if(spec.command.type==='computer')computerActions++;
           await hooks.afterDispatch?.(ordinal);
           await control.check();
           diagnostics=new ActionDiagnostics(page);
@@ -869,8 +910,8 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             }
             await store.query("UPDATE runtime_actions SET state='completed',assessment=$2,finished_at=now() WHERE action_id=$1", [actionId, JSON.stringify(assessment)]);
             await store.event(runId, 'action.assessed', { assessment, before_capture_id: before!.capture.capture_id, after_capture_id: after!.capture.capture_id }, actionId);
-            if (spec.command.type !== 'navigate' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);
-            if (fromKey && toKey) await memory.mapTransition(fromKey, toKey, spec.command, assessment.verdict, assessment.observed_result, actionId);
+            if (spec.command.type !== 'navigate' && spec.command.type!=='computer' && spec.command.control.role !== 'scroll') await memory.assessed(pageUrl, spec.command.control.control_id, actionId, assessment.verdict, assessment.observed_result);
+            if (fromKey && toKey && spec.command.type!=='computer') await memory.mapTransition(fromKey, toKey, spec.command, assessment.verdict, assessment.observed_result, actionId);
             if (compared) await store.event(runId, 'exploration.compared', { from_key: fromKey, to_key: toKey, control_key: transitionKey(spec.command).key,
               known_to_keys: earlier!.known_to_keys, same_destination: sameDestination, earlier_verdict: earlier!.last_verdict, verdict: assessment.verdict,
               outcome: compared, strategy: spec.exploration?.strategy?.mode ?? null }, actionId);
@@ -881,7 +922,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
           const returning = spec.exploration?.purpose === 'return' ? spec.exploration.return_step : undefined;
           // Routes start where the action was planned: replaying this step from
           // there scrolls to the control again. The evidence edge keeps fromState.
-          planner.transition({from_state_id:planningState??fromState,to_state_id:toState,command:spec.command,source_action_id:actionId,expected_result:spec.prediction.expected_result},assessment.verdict,returning,!checkError);
+          planner.transition({from_state_id:planningState??fromState,to_state_id:toState,command:spec.command,source_action_id:actionId,expected_result:spec.prediction.expected_result},assessment.verdict,returning,!checkError&&spec.command.type!=='computer');
           if (returning && toState !== returning.to_state_id) await store.transaction(() => store.event(runId,'exploration.return_changed',{expected_state_id:returning.to_state_id,observed_state_id:toState,action_id:actionId}));
           history.push({ action: commandContext(spec.command), expected_result: spec.prediction.expected_result.slice(0,300), verdict: assessment.verdict, observed_result: assessment.observed_result.slice(0,300) });
           last = after; lastState = toState;

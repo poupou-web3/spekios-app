@@ -31,6 +31,10 @@ export function preconditionsMatch(source:Capture,fresh:Capture,sourceEntry:stri
 export function bindVerificationCommand(step:ReplayStep,fresh:Capture,verification:FixVerification):BrowserCommand {
   if(!preconditionsMatch(step.before,fresh,verification.source_entry,verification.candidate_url))throw new Error('Candidate preconditions differ from the recorded behavior. No action dispatched.');
   if(step.command.type==='navigate')return step.command;
+  if(step.command.type==='computer'){
+    if(step.command.screenshot_sha256!==fresh.sha256)throw new Error('Candidate visual preconditions changed. No computer gesture dispatched.');
+    return step.command;
+  }
   const control=findObservedControl(step.command.control,fresh.observation.controls??[]);
   if(!control)throw new Error('The recorded candidate control does not resolve uniquely. No action dispatched.');
   return {...step.command,control};

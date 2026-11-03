@@ -535,6 +535,10 @@ fn artifact_ref(report: &Value, reference: &Value) -> Value {
 }
 fn command_view(command: &Value) -> Value {
     let mut value = fields(command, &["type", "checked"]);
+    if command["type"] == "computer" {
+        value["action"] = command["action"].clone();
+        value["screenshot_sha256"] = command["screenshot_sha256"].clone();
+    }
     for key in ["url", "value", "button"] {
         if !command[key].is_null() {
             value[key] = text(&command[key], 600);

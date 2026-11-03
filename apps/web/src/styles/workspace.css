@@ -243,6 +243,11 @@
 .model-row-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .model-row-tags:empty { display: none; }
 .model-row-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.model-computer-use { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 8px; }
+.configuration-form .model-computer-use label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.configuration-form .model-computer-use input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; margin: 0; }
+.model-computer-use p { margin: 0; }
+.model-computer-use .button { justify-self: start; }
 .configuration-form .model-row-prices label, .configuration-form .model-add-fields label { gap: 4px; font-size: 12px; }
 .configuration-form .model-row-prices input { min-height: 34px; }
 .model-row-prices label small, .model-add-fields label small { color: var(--muted); font-size: 11px; font-weight: 400; }

@@ -4,16 +4,24 @@ import { blockedReason, findObservedControl, observeControls } from './explorati
 import { testFormRules, type TestFormRule } from './form-policy.js';
 import { commandAction, commandFor } from './interaction-contract.js';
 import { isDeepStrictEqual } from 'node:util';
+import {dispatchComputer,validateComputerDispatch,validateComputerAction} from './computer-use.js';
 
 export function observedCommand(command: BrowserCommand, capture: Capture, origin: string): BrowserCommand {
   if (command.type === 'navigate') return command;
+  if(command.type==='computer'){
+    validateComputerAction(command.action,capture.observation.viewport);
+    if(command.screenshot_sha256!==capture.sha256)throw new Error('Computer screenshot changed. No gesture dispatched.');
+    return command;
+  }
   const control = findObservedControl(command.control, capture.observation.controls ?? []);
   if (!control || blockedReason(control, origin)) throw new Error('Selected control is no longer available.');
   if (command.type==='submit' && !isDeepStrictEqual(control.form,command.control.form)) throw new Error('Recorded form contract has changed.');
   return commandFor(control,commandAction(command));
 }
 export async function validateDispatch(page: Page, command: BrowserCommand, rules: TestFormRule[] = testFormRules()) {
+  if(command.type==='computer'){await validateComputerDispatch(page,command);return;}
   if (command.type==='navigate' || command.control.role==='scroll') return;
+  if(command.control.role==='visual')throw new Error('Invalid native control.');
   const locator=page.getByRole(command.control.role,{name:command.control.name,exact:true});
   if (await locator.count()!==1) throw new Error('Selected control does not resolve uniquely.');
   if(command.type==='submit') {
@@ -26,7 +34,10 @@ export type Reveal = { from: { x: number; y: number }; to: { x: number; y: numbe
 // action's before capture, using the same document scroll as a scroll action.
 // Nested scrolling containers are never scrolled.
 export async function revealControl(page: Page, command: BrowserCommand): Promise<Reveal|null> {
+  if(command.type==='computer')return null;
+  if(command.type!=='navigate'&&command.control.role==='visual')throw new Error('Invalid native control.');
   if (command.type==='navigate' || command.control.role==='scroll' || command.control.in_viewport!==false) return null;
+  if(command.control.role==='visual')throw new Error('Invalid native control.');
   const locator=page.getByRole(command.control.role,{name:command.control.name,exact:true});
   if (await locator.count()!==1) throw new Error('Selected control does not resolve uniquely.');
   return locator.evaluate(async element => {
@@ -38,6 +49,7 @@ export async function revealControl(page: Page, command: BrowserCommand): Promis
   },undefined,{timeout:2000});
 }
 export async function dispatch(page: Page, command: BrowserCommand, rules?: TestFormRule[]): Promise<string|null> {
+  if(command.type==='computer'){await dispatchComputer(page,command);return null;}
   if (command.type==='navigate') {
     const response=await page.goto(command.url,{waitUntil:'domcontentloaded',timeout:10000});
     return response && response.status()>=400 ? `Navigation returned HTTP ${response.status()}` : null;
@@ -50,7 +62,7 @@ export async function dispatch(page: Page, command: BrowserCommand, rules?: Test
     },target);
     return null;
   }
-  if (command.control.role==='scroll') throw new Error('Invalid scroll command.');
+  if (command.control.role==='scroll'||command.control.role==='visual') throw new Error('Invalid scroll command.');
   const locator=page.getByRole(command.control.role,{name:command.control.name,exact:true});
   switch(command.type) {
     case 'submit':

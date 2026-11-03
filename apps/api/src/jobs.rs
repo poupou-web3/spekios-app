@@ -98,6 +98,8 @@ struct SavedModel {
     input_usd_per_million: Option<f64>,
     #[serde(default)]
     output_usd_per_million: Option<f64>,
+    #[serde(default)]
+    computer_use: Option<bool>,
 }
 const MAX_SAVED_MODELS: usize = 30;
 const MAX_MODEL_LABEL_CHARS: usize = 60;
@@ -128,6 +130,12 @@ impl SavedModel {
         }
         if let Some(price) = self.output_usd_per_million {
             saved["outputUsdPerMillion"] = json!(price);
+        }
+        if let Some(allowed) = self.computer_use {
+            if allowed && self.provider != "meta" {
+                return Err("computer_use_provider_unsupported");
+            }
+            saved["computerUse"] = json!(allowed);
         }
         Ok(saved)
     }
@@ -316,6 +324,24 @@ fn resolve_model(settings: &mut Value, project_id: Option<Uuid>, run: Option<&Va
         apply_model(settings, choice);
         source = "run";
     }
+    let preference = settings["computerUseModels"].as_array().and_then(|models| {
+        models
+            .iter()
+            .find(|m| m["provider"] == settings["provider"] && m["model"] == settings["model"])
+    });
+    settings["computerUse"] = json!(
+        settings["provider"] == "meta"
+            && preference
+                .and_then(|m| m["computerUse"].as_bool())
+                .unwrap_or_else(|| matches!(
+                    settings["model"].as_str(),
+                    Some("muse-spark-1.3" | "muse-wonder-1.0")
+                ))
+    );
+    settings
+        .as_object_mut()
+        .unwrap()
+        .remove("computerUseModels");
     // A free-only choice can inherit a paid OpenRouter navigation model from
     // the defaults. Free-only never runs a paid model: use one model instead.
     let navigation = &settings["navigationModel"];
@@ -730,6 +756,7 @@ fn settings_snapshot(base: &Value, saved: Option<&Value>, revision: i64) -> Valu
         }
     }
     settings["settingsRevision"] = json!(revision);
+    settings["computerUseModels"] = json!(saved.and_then(|s|s["savedModels"].as_array()).into_iter().flatten().filter(|m|m["computerUse"].is_boolean()).map(|m|json!({"provider":m["provider"],"model":m["model"],"computerUse":m["computerUse"]})).collect::<Vec<_>>());
     settings
 }
 
@@ -1736,6 +1763,29 @@ pub async fn cancel_automatic(ScopedState(state): ScopedState, Path(id): Path<Uu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn computer_recovery_defaults_and_opt_out_follow_the_resolved_model() {
+        let mut input=settings_input();
+        input["saved_models"]=serde_json::json!([
+            {"provider":"meta","model":"muse-spark-1.3","computer_use":false},
+            {"provider":"meta","model":"muse-spark-1.3-contributor","computer_use":true}
+        ]);
+        let saved=normalize_settings(input).unwrap().settings;
+        let mut settings=settings_snapshot(&defaults(),Some(&saved),1);
+        resolve_model(&mut settings,None,Some(&serde_json::json!({"provider":"meta","model":"muse-spark-1.3"})));
+        assert_eq!(settings["computerUse"],false);
+        let mut settings=settings_snapshot(&defaults(),Some(&saved),1);
+        resolve_model(&mut settings,None,Some(&serde_json::json!({"provider":"meta","model":"muse-spark-1.3-contributor"})));
+        assert_eq!(settings["computerUse"],true,"Connection verification is checked separately during key binding and gateway admission");
+        assert!(settings.get("computerUseModels").is_none());
+        for (provider,model,expected) in [("meta","muse-wonder-1.0",true),("meta","muse-spark-1.3-contributor",false),("openrouter","muse-spark-1.3",false)] {
+            let mut settings=settings_snapshot(&defaults(),None,0);
+            resolve_model(&mut settings,None,Some(&serde_json::json!({"provider":provider,"model":model})));
+            assert_eq!(settings["computerUse"],expected);
+        }
+        let mut invalid=settings_input();invalid["saved_models"]=serde_json::json!([{"provider":"openai","model":"muse-spark-1.3","computer_use":true}]);
+        assert!(normalize_settings(invalid).is_err());
+    }
     use super::*;
 
     fn submission(value: Value) -> Submission {

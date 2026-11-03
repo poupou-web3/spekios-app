@@ -5,6 +5,7 @@ export const state = { token: sessionStorage.getItem('scout.workspace-token') ||
 Object.assign(state,{settingsSection:'models',priceTarget:null,runFilter:'all',runMode:'all',lastUpdatedAt:null,trackedJobId:null,developmentAccess:false,settingsRevision:0,configurationDraft:null,composing:false,launchError:'',memory:null,memoryError:''});
 // Per-launch choices: a project ID from settings and a model from the saved list ('provider|model'). Empty uses the defaults.
 Object.assign(state,{launchProject:'',launchModel:'',launchKey:''});
+Object.assign(state,{computerUseCheck:null,computerUseResult:null});
 Object.assign(state,{websites:[],websiteOrigin:'',websitePage:'overview',websiteUrl:'',websiteLaunchError:'',runOffset:0,runNextOffset:null,runTotal:0,runListOrigin:''});
 const storedTrackedJob=sessionStorage.getItem('scout.tracked-job');
 if(/^[\da-f-]{36}$/.test(storedTrackedJob||''))state.trackedJobId=storedTrackedJob;

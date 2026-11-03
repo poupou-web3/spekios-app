@@ -4,7 +4,7 @@ import { PROMPT_LIMIT_BYTES } from './model-context.js';
 // Reasoning models spend part of this budget before any visible JSON. 4096 is
 // the gateway maximum, so a light reasoning pass can still finish a plan.
 export const MAX_OUTPUT_TOKENS = 4096;
-export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean; providerKeyId?:string|null };
+export type ModelSettings = { provider: 'openai' | 'anthropic' | 'openrouter' | 'meta'; model: string; freeOnly: boolean; providerKeyId?:string|null;computerUse?:boolean };
 export function modelSettings(): ModelSettings {
   const provider = process.env.SCOUT_EXPLORER_PROVIDER ?? 'openrouter';
   if (!['openai', 'anthropic', 'openrouter', 'meta'].includes(provider)) throw new Error('Unsupported explorer provider.');
@@ -38,14 +38,14 @@ export class ModelClient {
     }
     return status.test_mode ? 'protocol_fixture' as const : 'live' as const;
   }
-  async complete(requestId: string, runId: string, actionId: string | null, captureIds: string[], system: string, input: unknown, signal?:AbortSignal) {
+  async complete(requestId: string, runId: string, actionId: string | null, captureIds: string[], system: string, input: unknown, signal?:AbortSignal,computerUse=false) {
     signal?.throwIfAborted();
     const prompt = JSON.stringify(input);
     if (Buffer.byteLength(prompt) > PROMPT_LIMIT_BYTES) throw new Error('Model context exceeds the bounded prompt size.');
     const body = { request_id: requestId, run_id: runId, action_id: actionId, capture_ids: captureIds,
       provider: this.settings.provider, model: this.settings.model, free_only: this.settings.freeOnly,
       ...(this.settings.providerKeyId?{provider_key_id:this.settings.providerKeyId}:{}),
-      prompt, system, max_output_tokens: MAX_OUTPUT_TOKENS, max_attempts: 1 };
+      prompt, system, max_output_tokens: MAX_OUTPUT_TOKENS, max_attempts: 1,...(computerUse?{computer_use:true}:{}) };
     // Re-submit only the identical logical request. A lost HTTP acknowledgement
     // cannot turn into a second charge or a second model-generated action.
     try { await this.request('/v1/model-requests', body,signal); }
