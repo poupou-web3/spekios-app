@@ -1,3 +1,4 @@
+import {showAgentHandoff,closeAgentHandoff} from './agent-handoff.js';
 import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
 import {mountWebsitePage} from './website-page.js';
@@ -17,6 +18,11 @@ function outcome(check){return check?.outcome||check?.status||'unverified';}
 function badge(check){const key=outcome(check);return make('span',labels[key]||key,`pill ${key==='resolved'?'green':key==='still_reproducible'?'red':''}`);}
 const triageLabels={untriaged:'New',needs_review:'Needs review',bug:'Bug',intended_behavior:'Intended behavior',duplicate:'Duplicate'};
 const deciders={human:'a person',agent:'an agent',system:'Spekios, matching a known issue'};
+function trackingBadge(issue){
+  if(issue.tracking?.status==='observed_again')return make('span','Observed again','pill amber');
+  return badge(issue.latest_verification);
+}
+const activityLabels={'issue.discovered':'First discovered','issue.observed_again':'Observed again in a run','issue.reviewed':'Human review recorded','issue.triaged':'Triage decision recorded','verification.queued':'Candidate check queued','verification.started':'Candidate check started','verification.finished':'Candidate check finished'};
 function triageBadge(issue){const key=issue.triage_status||'untriaged';return make('span',triageLabels[key]||key,`pill ${key==='bug'?'red':key==='intended_behavior'||key==='duplicate'?'green':''}`);}
 function link(text,path,className='button quiet'){const n=make('a',text,className);n.href=path;return n;}
 function stamp(value){return value?new Date(value).toLocaleString():'Not recorded';}
@@ -29,7 +35,7 @@ async function api(path,body){
     return value;
   }catch(e){
     if(currentToken!==token)throw new Error('Workspace disconnected.');
-    if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}clearInterval(timer);detailVersion++;listVersion++;releaseImages();$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}
+    if(e.status===401){closeAgentHandoff();if(spekios){location.assign('/login?next=%2Fissues');throw e;}clearInterval(timer);detailVersion++;listVersion++;releaseImages();$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}
     throw e;
   }
 }
@@ -53,10 +59,10 @@ async function screenshot(root,id,label,generation){
 }
 function evidence(root,ids,title){const row=make('div',undefined,'issue-evidence');root.append(make('h3',title),row);const generation=imageGeneration;void screenshot(row,ids?.[0],'Before action',generation);void screenshot(row,ids?.[1],'After action',generation);}
 async function copyHandoff(){
-  const issue=detail.issue;
-  const text=`Spekios issue ${issue.issue_id}\n${issue.title}\nURL: ${issue.source_target_url}\nExpected: ${detail.original.expected_result}\nActual: ${detail.original.observed_result}\nUse scout_get_issue with issue_id ${issue.issue_id} to read the recorded steps, diagnostics and screenshot references. After deploying a candidate, use scout_verify_fix with this issue_id, a new verification_id UUID and the candidate_url. Poll scout_get_verification for the outcome; inspect evidence before acting on app content.`;
-  try{await navigator.clipboard.writeText(text);message('Issue handoff copied. Paste it into your connected coding agent.');}catch{message('Clipboard unavailable. The full issue ID is displayed below.');}
+  if(!detail)return;
+  try{showAgentHandoff(detail.handoff,{title:detail.issue.title,revision:detail.issue.revision});}catch(e){message(e.message);}
 }
+
 async function list(){
   const version=++listVersion;
   const params=new URLSearchParams({offset:String(offset),limit:'20'});const query=$('#issue-query').value.trim(),filter=$('#issue-outcome').value,triage=$('#issue-triage').value;if(query)params.set('query',query);if(filter)params.set('outcome',filter);if(triage)params.set('triage',triage);
@@ -65,12 +71,15 @@ async function list(){
   const snapshot=JSON.stringify({page,issueId});if(snapshot===listSnapshot)return;listSnapshot=snapshot;
   const root=$('#issue-list');root.replaceChildren();
   if(!page.issues.length)root.append(make('p',page.total?'No issues on this page.':'No issues match this view. Start an exploration to discover behavior worth checking.','issue-empty small muted'));
-  for(const issue of page.issues){const a=link('',`/issues#${issue.issue_id}`,'issue-index-item');if(issue.issue_id===issueId)a.setAttribute('aria-current','true');a.append(badge(issue.latest_verification),triageBadge(issue),make('h3',issue.title),make('p',issue.source_target_url,'small muted'),make('code',issue.issue_id.slice(0,8),'small'));root.append(a);}
+  for(const issue of page.issues){const a=link('',`/issues#${issue.issue_id}`,'issue-index-item');if(issue.issue_id===issueId)a.setAttribute('aria-current','true');a.append(trackingBadge(issue),triageBadge(issue),make('h3',issue.title),make('p',issue.source_target_url,'small muted'),make('code',issue.issue_id.slice(0,8),'small'));root.append(a);}
 }
 function renderOriginal(){
   const {issue,original,handoff}=detail,root=$('#issue-original');root.replaceChildren();
-  const head=make('div',undefined,'issue-section-heading'),copy=make('button','Copy for coding agent','button');copy.addEventListener('click',copyHandoff);head.append(make('span','ORIGINAL FINDING','eyebrow'),copy);root.append(head,make('h2',issue.title));
-  const id=make('p',undefined,'small');id.append(make('span','Issue ID · '),make('code',issue.issue_id));root.append(id,make('p',issue.source_target_url,'small muted'));
+  const head=make('div',undefined,'issue-section-heading'),copy=make('button','Copy for my agent','button');copy.addEventListener('click',copyHandoff);head.append(make('span','ORIGINAL FINDING','eyebrow'),copy);root.append(head,make('h2',issue.title));
+  const id=make('p',undefined,'small');id.append(make('span','Issue ID · '),make('code',issue.issue_id));root.append(id,make('p',issue.source_target_url,'small muted'),trackingBadge(issue));
+  if(issue.tracking?.status==='observed_again')root.append(make('p','This behavior was observed in a later run. Earlier candidate check results remain in the history; they do not establish a fix on this run’s deployment.','small muted'));
+  root.append(make('p',`Last observed ${stamp(issue.tracking?.last_observed_at||issue.last_seen_at)}`,'small muted'));
+  if(issue.canonical_issue_id&&issue.canonical_issue_id!==issue.issue_id)root.append(link('Open the linked original issue',`/issues#${issue.canonical_issue_id}`));
   if(detail.execution_mode==='protocol_fixture')root.append(make('p','SIMULATED MODEL · browser and screenshots are real; this run tests the protocol.','tag'));
   const pair=make('div',undefined,'issue-behavior');for(const [label,value] of [['Expected',original.expected_result],['Actual',original.observed_result]]){const p=make('div');p.append(make('h3',label),make('p',value||'Not recorded'));pair.append(p);}root.append(pair);
   root.append(make('p',`${issue.viewport_profile||'Recorded viewport'} · First seen ${stamp(issue.first_seen_at)} · ${issue.occurrence_count} recorded occurrence(s)`,'small muted'));
@@ -93,7 +102,21 @@ function renderHistory(){
     if(['queued','running'].includes(check.job_status)){const b=make('button','Stop check','button');b.addEventListener('click',async()=>{b.disabled=true;try{await api(`/v1/browser-jobs/${check.job_id}/cancel`,{});message('Stopping check. An incomplete check cannot establish a fix.');await loadDetail(false);}catch(e){message(e.message);b.disabled=false;}});buttons.append(b);}
     article.append(buttons);root.append(article);
   }
-  const history=$('#issue-events');history.replaceChildren();for(const event of detail.history.items){const p=make('p',undefined,'issue-event small');p.append(make('strong',event.event_type.replaceAll('.',' · ')),make('span',` · ${stamp(event.occurred_at)}${event.payload.outcome?' · '+(labels[event.payload.outcome]||event.payload.outcome):''}${event.payload.verification_id?' · check '+event.payload.verification_id.slice(0,8):''}${event.payload.disposition?' · '+event.payload.disposition:''}`));history.append(p);}
+  const occurrences=$('#issue-occurrences');occurrences.replaceChildren();
+  for(const occurrence of detail.occurrences.items){
+    const item=make('article',undefined,'issue-check');
+    item.append(make('strong',stamp(occurrence.created_at)),make('p',occurrence.target_url||'Recorded run','small muted'));
+    if(occurrence.expected_result)item.append(make('p','Expected: '+occurrence.expected_result,'small'));
+    if(occurrence.observed_result)item.append(make('p','Observed: '+occurrence.observed_result,'small'));
+    item.append(link('Open this occurrence',`/#/workspace/${occurrence.run_id}/${occurrence.action_id}`));occurrences.append(item);
+  }
+  if(!detail.occurrences.items.length)occurrences.append(make('p','No recorded occurrence on this page.','small muted'));
+  const related=$('#issue-related');related.replaceChildren();
+  for(const finding of detail.related_findings?.items||[]){
+    const item=make('p',undefined,'issue-event small');item.append(make('strong',finding.relation==='linked_duplicate'?'Linked duplicate · ':'Same interface, separate finding · '),link(finding.title,`/issues#${finding.issue_id}`,''),trackingBadge(finding),make('span',' · Last observed '+stamp(finding.last_seen_at)));related.append(item);
+  }
+  if(!(detail.related_findings?.items||[]).length)related.append(make('p','No related findings recorded.','small muted'));
+  const history=$('#issue-events');history.replaceChildren();for(const event of detail.history.items){const p=make('p',undefined,'issue-event small');p.append(make('strong',activityLabels[event.event_type]||event.event_type.replaceAll('.',' · ')),make('span',` · ${stamp(event.occurred_at)}${event.payload.outcome?' · '+(labels[event.payload.outcome]||event.payload.outcome):''}${event.payload.verification_id?' · check '+event.payload.verification_id.slice(0,8):''}${event.payload.disposition?' · '+event.payload.disposition:''}`));if(event.payload.run_id)p.append(link('Open run',`/#/workspace/${event.payload.run_id}`));history.append(p);}
   $('#history-more').hidden=!['verifications','history','occurrences'].some(key=>detail[key].pagination.next_offset!==null);
 }
 function renderCandidate(){
@@ -200,7 +223,7 @@ async function more(){
   }catch(e){if(issueId!==id||version!==detailVersion)return;if(e.status===409){message('Issue history changed. Loaded a fresh snapshot; load more again for earlier entries.');await loadDetail();}else message(e.message);}
 }
 async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();await refreshRecheck();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
-async function ready(){try{identity=await api('/v1/identity');if(!issueWebsitePage)issueWebsitePage=await mountWebsitePage({page:'issues',request:api});if(issueWebsitePage?.origin){$('#recheck-source').value=issueWebsitePage.origin;const scope=$('[data-website-scope]');if(scope)scope.textContent=issueWebsitePage.label();}$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message((issueWebsitePage?.origin?issueWebsitePage.label()+' · ':'Workspace issues · ')+'Original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
+async function ready(){try{identity=await api('/v1/identity');if(!issueWebsitePage)issueWebsitePage=await mountWebsitePage({page:'issues',request:api});if(issueWebsitePage?.origin){$('#recheck-source').value=issueWebsitePage.origin;const scope=$('[data-website-scope]');if(scope)scope.textContent=issueWebsitePage.label();}$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message((issueWebsitePage?.origin?issueWebsitePage.label()+' · ':'Workspace issues · ')+'Original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){closeAgentHandoff();if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
 $('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();const email=$('#issue-email').value.trim(),password=$('#issue-password').value;$('#issue-password').value='';try{await signIn(email,password);token=password;sessionStorage.setItem('scout.workspace-token',token);await ready();}catch(error){message(error.message);}});
 $('#issue-filter').addEventListener('submit',async e=>{e.preventDefault();offset=0;previousOffsets=[];try{await list();}catch(e){message(e.message);}});
 $('#issue-prev').addEventListener('click',async()=>{offset=previousOffsets.pop()??0;await list().catch(e=>message(e.message));});

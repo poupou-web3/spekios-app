@@ -802,6 +802,18 @@
                   "meta"
                 ],
                 "type": "string"
+              },
+              "provider_key_id": {
+                "anyOf": [
+                  {
+                    "const": "demo"
+                  },
+                  {
+                    "format": "uuid"
+                  }
+                ],
+                "description": "Saved provider key UUID or demo; omit to use the configured default. Never send an API secret.",
+                "type": "string"
               }
             },
             "required": [
@@ -1303,6 +1315,18 @@
                   "openrouter",
                   "meta"
                 ],
+                "type": "string"
+              },
+              "provider_key_id": {
+                "anyOf": [
+                  {
+                    "const": "demo"
+                  },
+                  {
+                    "format": "uuid"
+                  }
+                ],
+                "description": "Saved provider key UUID or demo; omit to use the configured default. Never send an API secret.",
                 "type": "string"
               }
             },

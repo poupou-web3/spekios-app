@@ -1,6 +1,6 @@
 {
   "name": "spekios-cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Agent CLI for Spekios projects, durable QA jobs and evidence",
   "type": "module",

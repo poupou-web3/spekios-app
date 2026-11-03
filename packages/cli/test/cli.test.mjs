@@ -202,3 +202,15 @@ test('loss of the one-use token response gives a fresh-approval recovery command
   assert.equal((await f.run(['auth','complete'])).code,5);
   const retry=await f.run(['auth','complete']);assert.equal(retry.code,3);assert.equal(retry.data.error.code,'connection_already_consumed');assert.match(retry.data.error.next_command,/auth login/);assert.match(retry.data.error.next_command,/--scopes runs:read$/);
 });
+
+test('issue handoff and verification commands preserve IDs and frozen candidate arguments',async t=>{
+  const f=await fixture(t);await f.connect();const issue=randomUUID(),verification=randomUUID();
+  const shown=await f.run(['issue','show',issue,'--offset','5','--limit','5','--revision','3']);assert.equal(shown.code,0,shown.stdout);
+  assert.deepEqual(f.state.posts.at(-1).body,{issue_id:issue,offset:5,limit:5,expected_revision:3});
+  const first=await f.run(['issue','verify',issue,'https://preview.example/editor','--verification-id',verification,'--deployment-ref','commit abc','--project',f.project]);assert.equal(first.code,0,first.stdout);assert.equal(first.data.verification_id,verification);
+  const input=f.state.posts.at(-1).body;assert.deepEqual(input,{issue_id:issue,verification_id:verification,candidate_url:'https://preview.example/editor',deployment_ref:'commit abc',project_id:f.project});
+  const retry=await f.run(['retry',verification]);assert.equal(retry.code,0);assert.deepEqual(f.state.posts.at(-1).body,input);
+  assert.equal((await f.run(['verification','show',verification])).code,0);assert.deepEqual(f.state.posts.at(-1).body,{verification_id:verification});
+  assert.equal((await f.run(['issue','show',issue,'--limit','11'])).data.error.code,'invalid_pagination');
+  assert.equal((await f.run(['issue','verify',issue,'https://user:password@preview.example'])).data.error.code,'invalid_url');
+});

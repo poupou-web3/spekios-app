@@ -11,7 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 
-export const VERSION='0.1.1';
+export const VERSION='0.2.0';
 const DEFAULT_SERVER='https://app.spekios.com', PROJECT_FILE='.spekios.json';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCOPES=['runs:read','runs:write','usage:read'];
@@ -143,6 +143,9 @@ const COMMANDS={
   'status':{args:1,options:[],description:'Read progress for a job UUID; respect poll_after_ms and continue other work.'},
   'report':{args:1,options:['run'],description:'Read a report by job UUID (or --run for a run UUID). Follow pagination.next using tools call.'},
   'history':{args:0,options:['project','domain','url','offset','limit'],description:'Find prior runs in the selected project. Follow pagination.next_offset.'},
+  'issue show':{args:1,options:['offset','limit','revision'],description:'Read one persistent finding, its agent description, evidence, occurrences and candidate history.'},
+  'issue verify':{args:2,options:['verification-id','deployment-ref','project'],description:'Verify a candidate URL against this finding; a durable receipt preserves the verification ID.'},
+  'verification show':{args:1,options:[],description:'Read the outcome and evidence of a candidate fix verification.'},
   'usage':{args:0,options:[],description:'Read the account’s agent-attributed usage.'},
   'tools list':{args:0,options:[],description:'Discover the live tool catalog and JSON input schemas.'},
   'tools call':{args:1,options:['input'],description:'Call a live agent tool with exact JSON arguments. --input accepts JSON, @file, or - for stdin.'},
@@ -159,6 +162,9 @@ const OPTION_SCHEMA={
   project:{type:'string',format:'uuid',description:'Override project context for this command.'},
   'job-id':{type:'string',format:'uuid',description:'Stable job ID; retry with identical inputs.'},
   'task-id':{type:'string',format:'uuid'},
+  'verification-id':{type:'string',format:'uuid',description:'Stable verification/job UUID for safe retries.'},
+  'deployment-ref':{type:'string',maxLength:200,description:'Candidate release or commit label.'},
+  revision:{type:'integer',minimum:1,description:'Expected issue revision when paging history.'},
   viewport:{type:'string',enum:['desktop','tablet','mobile']},
   'auth-mode':{type:'string',enum:['auto','public','sign_in']},
   provider:{type:'string',enum:['openai','anthropic','openrouter','meta']},
@@ -170,13 +176,13 @@ const OPTION_SCHEMA={
   offset:{type:'integer',minimum:0,maximum:100000},limit:{type:'integer',minimum:1,maximum:50},
   input:{type:'string',description:'JSON object, @path/to/file.json, or - for stdin. Exact live tool schema applies.'},
 };
-const POSITIONALS={'project use':['project_id'],run:['url'],status:['job_id'],report:['job_id_or_run_id'],'tools call':['tool_name'],retry:['request_id']};
-function help(command){return {name:'spekios',version:VERSION,output:'One JSON object per command on stdout; approval notices on stderr only when --wait is used.',commands:Object.fromEntries(Object.entries(command&&COMMANDS[command]?{[command]:COMMANDS[command]}:COMMANDS).map(([name,spec])=>[name,{...spec,positionals:POSITIONALS[name]||[],options:Object.fromEntries(spec.options.map(key=>[key,OPTION_SCHEMA[key]]))}])) ,global_options:{server:'HTTPS API origin; default https://app.spekios.com',profile:'Named private credential profile; default default',timeout:'HTTP timeout in seconds, 1–120; default 15',pretty:'Indent JSON output'},exit_codes:{0:'success',2:'invalid input or API validation error',3:'approval, authentication or sign-in required',4:'access denied',5:'network, server or rate limit error',6:'conflict; reconcile before retry'},workflow:['auth login --name "Coding agent"','auth complete','project list','project use <project-uuid>','run https://your-app.example','status <job-uuid>','report <job-uuid>'],security:{credential_scope:'workspace permissions, enforced by server',project_selection:'working context, not a project-only authorization grant',approval:'a signed-in human approves the agent in the browser',credential_lifetime_days:30,provider_keys:'managed by the account in the web app; never included in CLI credentials'}};}
+const POSITIONALS={'issue show':['issue_id'],'issue verify':['issue_id','candidate_url'],'verification show':['verification_id'],'project use':['project_id'],run:['url'],status:['job_id'],report:['job_id_or_run_id'],'tools call':['tool_name'],retry:['request_id']};
+function help(command){return {name:'spekios',version:VERSION,output:'One JSON object per command on stdout; approval notices on stderr only when --wait is used.',commands:Object.fromEntries(Object.entries(command&&COMMANDS[command]?{[command]:COMMANDS[command]}:COMMANDS).map(([name,spec])=>[name,{...spec,positionals:POSITIONALS[name]||[],options:Object.fromEntries(spec.options.map(key=>[key,name==='issue show'&&key==='limit'?{...OPTION_SCHEMA[key],maximum:10}:OPTION_SCHEMA[key]]))}])) ,global_options:{server:'HTTPS API origin; default https://app.spekios.com',profile:'Named private credential profile; default default',timeout:'HTTP timeout in seconds, 1–120; default 15',pretty:'Indent JSON output'},exit_codes:{0:'success',2:'invalid input or API validation error',3:'approval, authentication or sign-in required',4:'access denied',5:'network, server or rate limit error',6:'conflict; reconcile before retry'},workflow:['auth login --name "Coding agent"','auth complete','project list','project use <project-uuid>','run https://your-app.example','status <job-uuid>','report <job-uuid>'],security:{credential_scope:'workspace permissions, enforced by server',project_selection:'working context, not a project-only authorization grant',approval:'a signed-in human approves the agent in the browser',credential_lifetime_days:30,provider_keys:'managed by the account in the web app; never included in CLI credentials'}};}
 function parse(argv){
   const boolean=['help','version','pretty','open','wait','local','run'];
   const string=[...new Set([...GLOBAL,...Object.values(COMMANDS).flatMap(c=>c.options)])].filter(k=>!boolean.includes(k));
   let args;try{args=parseArgs({args:argv,allowPositionals:true,options:Object.fromEntries([...boolean.map(k=>[k,{type:'boolean'}]),...string.map(k=>[k,{type:'string'}])])});}catch{fail('invalid_arguments','Unknown or incomplete option. Run spekios --help for the command schema.');}
-  const positions=args.positionals,group=['auth','project','tools'].includes(positions[0]);
+  const positions=args.positionals,group=['auth','project','tools','issue','verification'].includes(positions[0]);
   const command=positions.slice(0,group?2:1).join(' '),rest=positions.slice(group?2:1);
   if(args.values.version)return {command:'version',options:args.values};
   if(args.values.help||!command)return {command:'help',options:args.values,target:command};
@@ -342,6 +348,26 @@ class Client {
       const path=join(this.cwd,PROJECT_FILE);await writeJson(path,context);
       return this.result({...auth,project:context},project,{context_file:path,contains_credentials:false,...(command==='project init'?{registration:'on_first_job'}:{})});
     }
+    if(command==='issue show'){
+      const input={issue_id:uuid(args[0],'Issue ID')};
+      for(const key of ['offset','limit','revision'])if(this.options[key]!==undefined){
+        const n=Number(this.options[key]),min=key==='offset'?0:1,max=key==='limit'?10:Number.MAX_SAFE_INTEGER;
+        if(!Number.isSafeInteger(n)||n<min||n>max||(key==='offset'&&n>100000))fail('invalid_pagination','Issue history requires offset 0–100000, limit 1–10, and a positive revision.');
+        input[key==='revision'?'expected_revision':key]=n;
+      }
+      return this.result(auth,valueOf(await this.tool(auth,'scout_get_issue',input)));
+    }
+    if(command==='issue verify'){
+      let candidate;try{candidate=new URL(args[1]);}catch{fail('invalid_url','Candidate requires an HTTP(S) URL.');}
+      if(!['http:','https:'].includes(candidate.protocol)||candidate.username||candidate.password)fail('invalid_url','Candidate must be an HTTP(S) URL without embedded credentials.');
+      const id=this.options['verification-id']===undefined?randomUUID():uuid(this.options['verification-id'],'Verification ID');
+      const input={issue_id:uuid(args[0],'Issue ID'),verification_id:id,candidate_url:args[1]};
+      if(this.options['deployment-ref']!==undefined){const label=this.options['deployment-ref'].trim();if(!label||label.length>200)fail('invalid_deployment_ref','Deployment label must contain 1–200 characters.');input.deployment_ref=label;}
+      if(this.options.project!==undefined)input.project_id=uuid(this.options.project,'Project ID');
+      const response=await this.submit(auth,await this.receipt(auth,'scout_verify_fix',input,id));
+      return {...response,verification_id:id,next_command:`spekios --profile ${this.profile} verification show ${id}`};
+    }
+    if(command==='verification show')return this.result(auth,valueOf(await this.tool(auth,'scout_get_verification',{verification_id:uuid(args[0],'Verification ID')})));
     if(command==='tools list'){const {data}=await request(auth.server,'/v1/agent/tools',{token:auth.token,timeout:this.timeout});return this.result(auth,data);}
     if(command==='tools call'){
       const name=args[0],input=await inputJson(this.options.input);

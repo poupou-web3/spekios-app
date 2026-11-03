@@ -141,9 +141,9 @@ pub async fn detail(
     let offset = page.offset.unwrap_or(0);
     let limit = page.limit.unwrap_or(5);
     let sql="SELECT jsonb_build_object('issue',scout_issue_summary(i),'original',i.snapshot,'usage',jsonb_build_object('source_run',scout_run_usage(i.source_run_id)),
-      'occurrences',jsonb_build_object('items',COALESCE((SELECT jsonb_agg(to_jsonb(o) ORDER BY created_at,action_id) FROM (SELECT * FROM issue_occurrences WHERE issue_id=i.issue_id ORDER BY created_at,action_id OFFSET $3 LIMIT $4) o),'[]'::jsonb),'total',(SELECT count(*) FROM issue_occurrences WHERE issue_id=i.issue_id)),
+      'occurrences',jsonb_build_object('items',COALESCE((SELECT jsonb_agg(to_jsonb(o)||jsonb_build_object('target_url',r.target_url,'expected_result',a.spec->'prediction'->>'expected_result','observed_result',COALESCE(a.assessment->>'observed_result',a.assessment->>'actual'),'before_capture_id',a.before_capture_id,'after_capture_id',a.after_capture_id,'ordinal',a.ordinal) ORDER BY o.created_at DESC,o.action_id DESC) FROM (SELECT * FROM issue_occurrences WHERE issue_id=i.issue_id ORDER BY created_at DESC,action_id DESC OFFSET $3 LIMIT $4) o JOIN runtime_runs r ON r.run_id=o.run_id JOIN runtime_actions a ON a.run_id=o.run_id AND a.action_id=o.action_id),'[]'::jsonb),'total',(SELECT count(*) FROM issue_occurrences WHERE issue_id=i.issue_id)),
       'verifications',jsonb_build_object('items',COALESCE((SELECT jsonb_agg(scout_verification_summary(v) ORDER BY created_at DESC,verification_id DESC) FROM (SELECT * FROM issue_verifications WHERE issue_id=i.issue_id ORDER BY created_at DESC,verification_id DESC OFFSET $3 LIMIT $4) v),'[]'::jsonb),'total',(SELECT count(*) FROM issue_verifications WHERE issue_id=i.issue_id)),
-      'history',jsonb_build_object('items',COALESCE((SELECT jsonb_agg(to_jsonb(e)-'exported_at' ORDER BY seq) FROM (SELECT * FROM issue_events WHERE issue_id=i.issue_id ORDER BY seq OFFSET $3 LIMIT $4) e),'[]'::jsonb),'total',(SELECT count(*) FROM issue_events WHERE issue_id=i.issue_id))) FROM issues i WHERE issue_id=$1 AND workspace_id=$2 AND user_id=$5";
+      'history',jsonb_build_object('items',COALESCE((SELECT jsonb_agg(to_jsonb(e)-'exported_at' ORDER BY seq DESC) FROM (SELECT * FROM issue_events WHERE issue_id=i.issue_id ORDER BY seq DESC OFFSET $3 LIMIT $4) e),'[]'::jsonb),'total',(SELECT count(*) FROM issue_events WHERE issue_id=i.issue_id))) FROM issues i WHERE issue_id=$1 AND workspace_id=$2 AND user_id=$5";
     let mut value = match query(
         &state,
         sql,
@@ -190,6 +190,22 @@ pub async fn detail(
     value["handoff"] = agent::report::issue_packet(&report, action);
     value["execution_mode"] = report["run"]["config"]["execution_mode"].clone();
     value["handoff"]["issue_id"] = json!(id);
+    value["handoff"]["persistent_issue_id"] = json!(id);
+    value["handoff"]["tracking"] = value["issue"]["tracking"].clone();
+    let related_sql = "WITH current AS (SELECT b.behavior_key,r.config FROM issues i JOIN issue_behaviors b USING(issue_id,workspace_id) JOIN runtime_runs r ON r.run_id=i.source_run_id WHERE i.issue_id=$1 AND i.workspace_id=$2 AND i.user_id=$3) SELECT jsonb_build_object('items',COALESCE(jsonb_agg(item),'[]'::jsonb)) FROM (SELECT scout_issue_summary(i)||jsonb_build_object('relation',CASE WHEN scout_canonical_issue(i.issue_id)=scout_canonical_issue($1) THEN 'linked_duplicate' ELSE 'same_interface' END) AS item FROM issues i JOIN issue_behaviors b USING(issue_id,workspace_id) JOIN runtime_runs r ON r.run_id=i.source_run_id CROSS JOIN current c WHERE i.workspace_id=$2 AND i.user_id=$3 AND i.issue_id<>$1 AND (scout_canonical_issue(i.issue_id)=scout_canonical_issue($1) OR (b.behavior_key=c.behavior_key AND r.config->'project_id' IS NOT DISTINCT FROM c.config->'project_id' AND r.config->'execution_mode' IS NOT DISTINCT FROM c.config->'execution_mode' AND r.config->'viewport' IS NOT DISTINCT FROM c.config->'viewport')) ORDER BY i.last_seen_at DESC,i.issue_id LIMIT 5) related";
+    value["related_findings"] = match query(
+        &state,
+        related_sql,
+        &[&id, &state.principal.workspace_id, &state.principal.user_id],
+    )
+    .await
+    {
+        Ok(Some(v)) => v,
+        Ok(None) => json!({"items":[]}),
+        Err(r) => return r,
+    };
+    value["handoff"]["related_findings"] = value["related_findings"].clone();
+    value["handoff"] = agent::report::agent_handoff(value["handoff"].take());
     match query(
         &state,
         "SELECT to_jsonb(revision) FROM issues WHERE issue_id=$1 AND workspace_id=$2",
