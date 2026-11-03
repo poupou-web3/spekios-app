@@ -18,7 +18,7 @@ A justified **repair_objective.target_behavior** describes behavior to investiga
 
 ## Share the exact handoff
 
-Read **scout_get_issue {issue_id}** or **spekios issue show <issue-id>** for a persistent finding. **handoff.agent_description.text** is the same deterministic Markdown previewed by **Copy for my agent** in the UI. It identifies the failing interface, expected/observed behavior, steps, evidence references, uncertainty, human decisions, tracking and the candidate-check workflow. The structured fields remain available alongside it.
+Read **scout_get_issue {issue_id}** or **spekios issue show <issue-id>** for a persistent finding. **handoff.agent_description.text** is the same deterministic Markdown previewed by **Copy for a coding agent** in the UI. It identifies the failing interface, expected/observed behavior, steps, evidence references, uncertainty, human decisions, tracking and the candidate-check workflow. The structured fields remain available alongside it.
 
 Use the agent's own checkout to investigate and establish a source location or cause. After deploying a fix, run **spekios issue verify <issue-id> <candidate-url>**, then **spekios verification show <verification-id>**. Reads and copying use no inference; verification can use model credits.
 

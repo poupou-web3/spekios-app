@@ -1,4 +1,5 @@
-import {mountWebsitePage} from './website-page.js';
+import {mountWebsitePage,prepareWebsitePage} from './website-page.js';
+prepareWebsitePage('connect');
 import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
 const $=selector=>document.querySelector(selector);
@@ -86,7 +87,7 @@ function showApproval(connection,kind){
   message('Review the app, workspace and permissions. Access is granted only when you allow this connection.');
 }
 async function ready(){
-  try{identity=await api('/v1/identity');if(!connectionWebsitePage)connectionWebsitePage=await mountWebsitePage({page:'connect',request:api});if(identity.principal_kind!=='workspace_manager')throw new Error('Open this page with your workspace access to approve an agent.');
+  try{identity=await api('/v1/identity');if(!connectionWebsitePage)connectionWebsitePage=await mountWebsitePage({page:'connect',request:api,identity,mode:{development,spekios}});if(identity.principal_kind!=='workspace_manager')throw new Error('Open this page with your workspace access to approve an agent.');
     $('#workspace-label').textContent=`${identity.workspace_name||'Your workspace'} · Runs and evidence stay private to this workspace.`;
     $('#manager-login').hidden=true;$('#connections').hidden=false;await list();
     if(authorizationId||initial){await reviewPending();}else{message('Choose your agent to get started.');}

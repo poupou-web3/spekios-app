@@ -80,14 +80,14 @@ try{
   const context=await browser.newContext();await context.addCookies([{name:'spekios_session',value:actors[0].cookie,domain:'localhost',path:'/',httpOnly:true,sameSite:'Lax'}]);
   await context.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.handoffClipboard=text;}}});});
   const page=await context.newPage(),errors=[];page.setDefaultTimeout(15000);page.on('pageerror',e=>{errors.push(e.message);console.error('Browser error: '+e.message);});await page.goto(origin+'/issues#'+first.issue);
-  await page.getByRole('button',{name:'Copy for my agent',exact:true}).waitFor().catch(async e=>{console.error('Page state: '+(await page.locator('body').innerText()).slice(0,3000));throw e;});
-  await page.getByRole('button',{name:'Copy for my agent',exact:true}).click();
+  await page.getByRole('button',{name:'Copy for a coding agent',exact:true}).waitFor().catch(async e=>{console.error('Page state: '+(await page.locator('body').innerText()).slice(0,3000));throw e;});
+  await page.getByRole('button',{name:'Copy for a coding agent',exact:true}).click();
   const preview=page.locator('#agent-handoff-preview');await preview.waitFor();const copied=await preview.inputValue();assert.equal(copied,detail.data.handoff.agent_description.text);assert.match(copied,/Save draft/);assert.match(copied,/Saved is visible/);assert.match(copied,/Ready remains/);
   await seed({goal:'A later identical failure'});await delay(5200);assert.equal(await preview.inputValue(),copied);
   await page.getByRole('button',{name:'Copy description',exact:true}).click();assert.equal(await page.evaluate(()=>window.handoffClipboard),copied);
   const output=join(root,'artifacts/finding-handoff');await mkdir(output,{recursive:true});await page.screenshot({path:join(output,'handoff-preview.png')});
   await page.getByRole('button',{name:'Close',exact:true}).click();await page.locator('#issue-occurrences').getByRole('link',{name:'Open this occurrence'}).first().waitFor();
-  await page.goto(origin+`/#/workspace/${second.run}/${second.action}`);await page.getByRole('button',{name:'Copy for my agent',exact:true}).click();
+  await page.goto(origin+`/#/workspace/${second.run}/${second.action}`);await page.getByRole('button',{name:'Copy for a coding agent',exact:true}).click();
   const byAction=await get(`/v1/runs/${second.run}/issues/${second.action}`);assert.equal(byAction.status,200);assert.equal(await page.locator('#agent-handoff-preview').inputValue(),byAction.data.agent_description.text);
   // Install and use the same normal command an external coding agent receives.
   async function command(program,args,env={}){

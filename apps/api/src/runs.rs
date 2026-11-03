@@ -94,8 +94,20 @@ pub async fn list(ScopedState(state): ScopedState, Query(filters): Query<RunFilt
       'next_offset',CASE WHEN (SELECT count(*) FROM matching)>$4+50 THEN $4+50 ELSE NULL END,
       'websites',COALESCE((SELECT jsonb_agg(to_jsonb(w) ORDER BY w.last_test_at DESC,w.origin) FROM (
         SELECT website_origin AS origin,count(*) AS run_count,max(created_at) AS last_test_at,
-          (array_agg(target_url ORDER BY created_at DESC,run_id DESC))[1] AS target_url
-        FROM catalog WHERE website_origin IS NOT NULL GROUP BY website_origin
+          (array_agg(target_url ORDER BY created_at DESC,run_id DESC))[1] AS target_url,
+          count(*) FILTER (WHERE lifecycle='active') AS active_runs,
+          COALESCE(sum(f.pending),0)::bigint AS pending_findings,
+          COALESCE(sum(f.confirmed),0)::bigint AS confirmed_findings
+        FROM catalog c LEFT JOIN LATERAL (
+          -- The same counts as each run's summary, across every run of the website.
+          SELECT count(*) FILTER (WHERE c.config->>'runtime_version'='explorer-v1' AND COALESCE(v.disposition,'needs_review')='needs_review') AS pending,
+            count(*) FILTER (WHERE v.disposition='confirmed') AS confirmed
+          FROM runtime_actions a LEFT JOIN LATERAL (
+            SELECT disposition FROM finding_reviews r WHERE r.action_id=a.action_id AND r.workspace_id=$1 AND r.user_id=$2 ORDER BY revision DESC LIMIT 1
+          ) v ON true
+          WHERE a.run_id=c.run_id AND a.assessment->>'verdict'='suspect' AND c.config->'replay_of'='null'::jsonb
+        ) f ON true
+        WHERE website_origin IS NOT NULL GROUP BY website_origin
       ) w),'[]'::jsonb))".replace("WEBSITE_ORIGIN", &website_origin_sql("target_url"));
     match query(
         &state,

@@ -98,6 +98,7 @@
 .detail-heading h2 { margin: 4px 0; font-size: 19px; line-height: 1.35; }
 .detail-heading .small { overflow-wrap: anywhere; }
 .detail-heading > div:last-child:not(:first-child) { flex: none; text-align: right; }
+.detail-heading-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .expectations { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .expectation { min-width: 0; padding: 18px 22px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .expectation + .expectation { border-left: 1px solid var(--border); }
@@ -234,15 +235,17 @@
 .configuration-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .strategy-total-off { margin-top: 10px; color: var(--red); font-weight: 550; }
 .model-list, .provider-status { margin: 0; padding: 0; list-style: none; }
-.model-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 330px) 92px; align-items: start; gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
+/* The settings card can be narrow in a wide window, so the row wraps on its own width, not the viewport's:
+   name and tags first, then the prices, then the action. A fixed grid squeezed the name under the prices. */
+.model-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 20px; padding: 14px 0; border-top: 1px solid var(--border); }
 .model-row:first-child { border-top: 0; padding-top: 0; }
-.model-row-main { display: grid; gap: 2px; min-width: 0; }
+.model-row-main { flex: 1 1 220px; display: grid; gap: 2px; min-width: 0; }
 .model-row-name { font-size: 13.5px; font-weight: 550; overflow-wrap: anywhere; }
 .model-row-id { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .model-row-id code { font-family: var(--mono); font-size: 11.5px; }
 .model-row-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .model-row-tags:empty { display: none; }
-.model-row-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.model-row-prices { flex: 1 1 260px; max-width: 360px; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
 .model-computer-use { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 8px; }
 .configuration-form .model-computer-use label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .configuration-form .model-computer-use input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; margin: 0; }
@@ -253,7 +256,7 @@
 .model-row-prices label small, .model-add-fields label small { color: var(--muted); font-size: 11px; font-weight: 400; }
 .model-price-note { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 .model-price-note.missing { color: var(--amber); }
-.model-row-actions { display: flex; justify-content: flex-end; padding-top: 18px; }
+.model-row-actions { flex: 0 0 auto; display: flex; justify-content: flex-end; padding-top: 18px; }
 .model-row-actions .button.quiet { margin-right: -8px; }
 .model-add { margin-top: 14px; padding: 16px; border: 1px dashed var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
 .model-add h4 { margin-bottom: 12px; font-size: 13px; font-weight: 600; }
@@ -417,6 +420,7 @@ a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-sof
   .action-row + .action-row { margin-top: 0; }
   .detail-heading { flex-wrap: wrap; padding: 18px; }
   .detail-heading > div:last-child:not(:first-child) { text-align: left; }
+  .detail-heading-actions { align-items: flex-start; }
   .expectation { padding: 16px 18px; }
   .evidence-top { padding: 14px 18px 12px; }
   .evidence-top .segmented { flex-wrap: wrap; }
@@ -429,7 +433,8 @@ a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-sof
   .review-body { padding: 18px; }
   .review-form .button { width: 100%; }
   .configuration-grid, .configuration-grid.three { grid-template-columns: 1fr; }
-  .model-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .model-row { gap: 10px; }
+  .model-row-prices { max-width: none; }
   .model-row-actions { justify-content: flex-start; padding-top: 0; }
   .model-row-actions .button.quiet { margin: 0 0 0 -8px; }
   .settings-card-head, .settings-card-body { padding-inline: 16px; }
