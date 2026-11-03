@@ -109,3 +109,9 @@ variable "manage_ssl_rule" {
   type        = bool
   default     = true
 }
+
+variable "demo_sites_enabled" {
+  description = "Publish fixed and faulty Larchwood shops behind the production HTTPS proxy."
+  type        = bool
+  default     = false
+}

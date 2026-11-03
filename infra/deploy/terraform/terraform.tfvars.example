@@ -18,3 +18,4 @@ backoffice_allowed_emails = ["you@example.com"]
 # app_subdomain       = "app"
 # ssh_subdomain       = "ssh"     # SSH for GitHub deploys, through a Cloudflare Tunnel
 # manage_ssl_rule     = true      # false if the zone already has a Configuration Rules ruleset
+# demo_sites_enabled  = true      # larchwood.<zone> (fixed) and larchwood-faulty.<zone>
