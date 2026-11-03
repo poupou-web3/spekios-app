@@ -670,6 +670,13 @@ impl Gateway {
         for id in &spec.capture_ids {
             if tx.query_opt("SELECT 1 FROM runtime_captures WHERE capture_id=$1 AND run_id=$2 AND status='available' AND byte_length <= $3",&[id,&spec.run_id,&(MAX_IMAGE as i64)]).await.map_err(|_| "database_unavailable")?.is_none() { return Err("capture_unavailable_or_too_large"); }
         }
+        // Derivatives must be recorded on this exact action and original pair.
+        // A caller cannot substitute an arbitrary artifact, even from its run.
+        for (index, id) in spec.assessment_image_ids.iter().enumerate() {
+            if tx.query_opt("SELECT 1 FROM runtime_artifacts a JOIN runtime_actions x ON x.run_id=a.run_id WHERE a.artifact_id=$1 AND a.run_id=$2 AND a.kind='assessment_image' AND a.status='available' AND a.byte_length <= $3 AND x.action_id=$4 AND x.before_capture_id=$5 AND x.after_capture_id=$6 AND x.comparison->'assessment_images'->'artifacts'->($7::int)->>'artifact_id'=$8", &[id,&spec.run_id,&(MAX_IMAGE as i64),&spec.action_id,&spec.capture_ids[0],&spec.capture_ids[1],&(index as i32),&id.to_string()]).await.map_err(|_| "database_unavailable")?.is_none() {
+                return Err("assessment_image_unavailable_or_unlinked");
+            }
+        }
         tx.execute("INSERT INTO model_requests(request_id,workspace_id,user_id,run_id,action_id,provider,model,spec,spec_sha256,state,execution_mode,agent_id,funding_source,provider_key_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11,$12,$13)",&[&spec.request_id,&workspace_id,&user_id,&spec.run_id,&spec.action_id,&spec.provider.name(),&spec.model,&value,&sha,&self.execution_mode(),&agent_id,&funding.source,&funding.key_id]).await.map_err(|_| "database_unavailable")?;
         event(&tx,spec.request_id,None,"request_accepted",&json!({"spec":value,"training_status":if self.fixture_url.is_some(){"excluded_fixture"}else{"pending_review"}})).await?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
@@ -708,8 +715,16 @@ impl Gateway {
             return Ok(true);
         }
         let mut images = Vec::new();
-        for id in &spec.capture_ids {
-            match self.image(*id, spec.run_id).await {
+        let selected_images = if spec.assessment_image_ids.is_empty() {
+            &spec.capture_ids
+        } else {
+            &spec.assessment_image_ids
+        };
+        for id in selected_images {
+            match self
+                .image(*id, spec.run_id, !spec.assessment_image_ids.is_empty())
+                .await
+            {
                 Ok(image) => images.push(image),
                 Err(code) => {
                     self.fail_before_dispatch(spec.request_id, code).await?;
@@ -788,7 +803,7 @@ impl Gateway {
                     self.fail_before_dispatch(spec.request_id,"provider_key_unavailable").await?;return Ok(true);
             }
             let reference = payload(&tx, call_id, "request", &bytes).await?;
-            event(&tx,spec.request_id,Some(call_id),"call_dispatched",&json!({"attempt":attempt,"request":reference,"prompt":spec.prompt,"system":spec.system,"capture_ids":spec.capture_ids})).await?;
+            event(&tx,spec.request_id,Some(call_id),"call_dispatched",&json!({"attempt":attempt,"request":reference,"prompt":spec.prompt,"system":spec.system,"capture_ids":spec.capture_ids,"assessment_image_ids":spec.assessment_image_ids})).await?;
             tx.commit().await.map_err(|_| "database_unavailable")?;
         }
         let result = self.invoke(&spec, call_id, &key, bytes).await;
@@ -804,8 +819,19 @@ impl Gateway {
         Ok(true)
     }
 
-    async fn image(&self, id: Uuid, run_id: Option<Uuid>) -> GResult<Vec<u8>> {
-        let row = self.conn().await?.query_opt("SELECT c.object_key,c.sha256,c.byte_length FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE capture_id=$1 AND c.run_id=$2 AND c.status='available'",&[&id,&run_id]).await.map_err(|_| "database_unavailable")?.ok_or("capture_unavailable")?;
+    async fn image(&self, id: Uuid, run_id: Option<Uuid>, derivative: bool) -> GResult<Vec<u8>> {
+        let sql = if derivative {
+            "SELECT a.object_key,a.sha256,a.byte_length FROM runtime_artifacts a WHERE artifact_id=$1 AND a.run_id=$2 AND a.status='available' AND a.kind='assessment_image'"
+        } else {
+            "SELECT c.object_key,c.sha256,c.byte_length FROM runtime_captures c JOIN runtime_runs r USING(run_id) WHERE capture_id=$1 AND c.run_id=$2 AND c.status='available'"
+        };
+        let row = self
+            .conn()
+            .await?
+            .query_opt(sql, &[&id, &run_id])
+            .await
+            .map_err(|_| "database_unavailable")?
+            .ok_or("capture_unavailable")?;
         let key: String = row.get(0);
         let sha: String = row.get(1);
         let length: i64 = row.get(2);

@@ -22,10 +22,10 @@ test('model requests preserve the selected key reference and keep authentication
     for(const key of keys){
       const client=new ModelClient({provider:'meta',model:'muse-spark-1.3-contributor',freeOnly:false,providerKeyId:key},`http://127.0.0.1:${address.port}`,token);
       assert.equal(await client.ready(),'live');
-      assert.deepEqual((await client.complete(randomUUID(),randomUUID(),null,[],'System',{task:'Test'})).value,{ok:true});
+      assert.deepEqual((await client.complete(randomUUID(),randomUUID(),null,[],'System',{task:'Test'},undefined,false,keys)).value,{ok:true});
     }
     assert.deepEqual(requests.map(r=>r.body.provider_key_id),keys);
-    for(const r of requests){assert.equal(r.headers.authorization,`Bearer ${token}`);assert(!('api_key' in r.body));assert(!JSON.stringify(r.body).includes(token));}
+    for(const r of requests){assert.deepEqual(r.body.assessment_image_ids,keys);assert.equal(r.headers.authorization,`Bearer ${token}`);assert(!('api_key' in r.body));assert(!JSON.stringify(r.body).includes(token));}
   }finally{await new Promise<void>(r=>server.close(()=>r()));}
 });
 

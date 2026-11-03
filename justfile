@@ -375,3 +375,7 @@ cli-integration-test:
 # Persistent finding history, exact copy preview and installed CLI; no model calls.
 finding-handoff-test:
     bash scripts/test-finding-handoff.sh
+
+# Capped regions, actual cropped gateway image inputs and full-screen fallback; scripted providers.
+focus-regions-test:
+    bash scripts/test-focus-regions.sh

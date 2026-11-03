@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { open, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { PNG } from 'pngjs';
+import {changeRegions,assessmentSheets} from './attention.mjs';
 
 export const DIFFERENCE_VERSION = 'raw-rgba-v1';
 export const LIMITS = Object.freeze({
@@ -182,9 +183,16 @@ export function comparePng(beforeBytes, afterBytes, { beforeCaptureId, afterCapt
     raw_mask: { file: 'raw-mask.png', sha256: sha256(rawMaskPng), black: 'unchanged or outside both images', white: 'any RGBA change or added/removed geometry', threshold: 0 },
     absolute_delta: { file: 'absolute-delta.png', sha256: sha256(absoluteDeltaPng), channels: 'RGBA contains the unsigned absolute difference of each source channel, including alpha; not a display overlay', missing_pixels: 'zero-filled outside overlap; consult geometry mask and source dimensions; these deltas are undefined' },
     geometry_mask: geometryMaskPng ? { file: 'geometry-mask.png', sha256: sha256(geometryMaskPng), green: 'added', magenta: 'removed', black: 'overlap or outside both images' } : null,
+    focus_regions: changeRegions(raw,Math.floor(Math.min(before.width*before.height,after.width*after.height)/4)),
     bug_verdict: null,
   };
   return { metadata, rawMaskPng, absoluteDeltaPng, geometryMaskPng };
+}
+
+/** Build auditable model derivatives from validated originals, never replacements for evidence. */
+export function assessmentImageSheets(beforeBytes,afterBytes,comparison,controlRect){
+  inspectHeader(beforeBytes,'Before screenshot');inspectHeader(afterBytes,'After screenshot');
+  return assessmentSheets(decode(beforeBytes,'Before screenshot'),decode(afterBytes,'After screenshot'),comparison,controlRect);
 }
 
 async function readBounded(file) {

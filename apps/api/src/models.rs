@@ -69,6 +69,10 @@ pub struct ModelRequest {
     pub action_id: Option<Uuid>,
     #[serde(default)]
     pub capture_ids: Vec<Uuid>,
+    /// Worker-recorded overview/crop derivatives, in before/after order. The
+    /// original capture IDs remain the authoritative provenance and fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assessment_image_ids: Vec<Uuid>,
     #[serde(default = "max_tokens")]
     pub max_output_tokens: u32,
     #[serde(default = "attempts")]
@@ -120,6 +124,15 @@ impl ModelRequest {
         }
         if !(1..=4096).contains(&self.max_output_tokens) || !(1..=3).contains(&self.max_attempts) {
             return Err("invalid_call_limits");
+        }
+        if !self.assessment_image_ids.is_empty()
+            && (self.assessment_image_ids.len() != 2
+                || self.capture_ids.len() != 2
+                || self.action_id.is_none()
+                || self.computer_use
+                || self.assessment_image_ids.iter().any(Uuid::is_nil))
+        {
+            return Err("invalid_assessment_images");
         }
         if self.capture_ids.len() > 2
             || (self.action_id.is_some() || !self.capture_ids.is_empty()) && self.run_id.is_none()
@@ -473,12 +486,39 @@ mod tests {
             run_id: None,
             action_id: None,
             capture_ids: vec![],
+            assessment_image_ids: vec![],
             max_output_tokens: 100,
             max_attempts: 2,
             free_only: true,
             computer_use: false,
             computer_use_probe: false,
         }
+    }
+    #[test]
+    fn crop_derivatives_require_both_originals_and_an_action_and_cannot_drive_computer_tools() {
+        let mut r = spec(Provider::Meta);
+        r.run_id = Some(Uuid::new_v4());
+        r.action_id = Some(Uuid::new_v4());
+        r.capture_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let identical = Uuid::new_v4();
+        r.assessment_image_ids = vec![identical, identical];
+        assert!(
+            r.validate().is_ok(),
+            "Identical image bytes can share an artifact while capture occurrences stay distinct"
+        );
+        r.assessment_image_ids.pop();
+        assert!(r.validate().is_err());
+        r.assessment_image_ids.push(Uuid::nil());
+        assert!(r.validate().is_err());
+        r.assessment_image_ids[1] = Uuid::new_v4();
+        r.action_id = None;
+        assert!(r.validate().is_err());
+        r.action_id = Some(Uuid::new_v4());
+        r.computer_use = true;
+        assert!(r.validate().is_err());
+        r.computer_use = false;
+        r.capture_ids.pop();
+        assert!(r.validate().is_err());
     }
     #[test]
     fn free_routing_cannot_fall_back_to_paid_models_or_plugins() {
