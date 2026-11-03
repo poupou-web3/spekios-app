@@ -41,3 +41,7 @@ If behavior is ambiguous or the expectation is unsupported, report inconclusive 
 Never claim a confirmed bug. Credentials, payments and destructive actions require a handoff; choose another allowed flow.`;
 export const ASSESSMENT_INSTRUCTION='Compare both screenshots and observations with the prediction. Check unchanged behavior as well as changed regions. Use action_outcome for timing, failed requests and browser errors. These are supporting evidence, not automatic bug verdicts. If completion timed out, assess inconclusive. Native validation may be the correct outcome of invalid input. Suspicion requires a supported expectation. Do not infer a defect from the fact that this action was selected for testing or replay. If text or regions occupy the same space, say that they overlap.';
 export const FULL_ASSESSMENT_INSTRUCTION='Both original full screenshots are attached. Assess independently using the expected result, whole-page evidence and diagnostics.';
+
+export function fullAssessmentInput<T extends {response_schema:Record<string,unknown>}>(input:T){
+ return {...input,visual_input:{mode:'full',reason:'focused_assessment_requires_full_context'},instruction:FULL_ASSESSMENT_INSTRUCTION,response_schema:{...input.response_schema,needs_full_context:'boolean; false when this full pair is sufficient'}};
+}

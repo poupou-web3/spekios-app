@@ -26,7 +26,7 @@ import { carryFocus, planningFocus, type PlanningFocus } from './steering.js';
 import { automaticReproductionPolicy } from './automatic-reproduction.js';
 import { discoveryReward, STRATEGY_MODES, STRATEGY_VERSION, StrategyScheduler, strategySettings, type StrategyMode, type StrategySettings } from './exploration-strategy.js';
 import { ExplorationRecovery, MAX_CONSECUTIVE_REPLANS_PER_PAGE } from './exploration-recovery.js';
-import {ASSESSMENT_SYSTEM as SYSTEM,ASSESSMENT_INSTRUCTION,FULL_ASSESSMENT_INSTRUCTION,assessmentVision,FOCUS_INSTRUCTION,parseFocusedAssessment,needsFullAssessment} from './assessment-vision.js';
+import {ASSESSMENT_SYSTEM as SYSTEM,ASSESSMENT_INSTRUCTION,fullAssessmentInput,assessmentVision,FOCUS_INSTRUCTION,parseFocusedAssessment,needsFullAssessment} from './assessment-vision.js';
 import {COMPUTER_SYSTEM,ComputerRecoveryBudget,computerCommand} from './computer-use.js';
 import { CONTINUED_GRAPH_VERSION, inheritGraph, type InheritedGraph } from './continued-graph.js';
 
@@ -824,9 +824,7 @@ async function execute(store: Store, inputUrl: string, options: ExplorationOptio
             instruction: (focusedVision?FOCUS_INSTRUCTION+' ':'')+ASSESSMENT_INSTRUCTION,
             response_schema: { verdict: 'no_issue_observed | suspect | inconclusive', reason: 'string', observed_result: 'string', evidence_capture_ids: captureIds, expectation_uncertain: 'boolean',...(focusedVision?{needs_full_context:'boolean'}:{}),...(fixTarget?{expectation_met:'boolean | null',preconditions_met:'boolean',same_failure_observed:'boolean | null'}:{}) } })).input;
           const assess = (tier: 'main' | 'navigation',full=false) => {
-            const input=full?{...assessmentInput,visual_input:{mode:'full',reason:'focused_assessment_requires_full_context'},
-              instruction:FULL_ASSESSMENT_INSTRUCTION,
-              response_schema:{...assessmentInput.response_schema,needs_full_context:'boolean; false when this full pair is sufficient'}}:assessmentInput;
+            const input=full?fullAssessmentInput(assessmentInput):assessmentInput;
             return decide('assessment',actionId,captureIds,input,value=>fixTarget?parseFixAssessment(value,captureIds):parseFocusedAssessment(value,captureIds,focusedVision),tier,false,full?[]:vision.artifactIds);
           };
           const checkError = toolError ?? after.capture.observation.observation_error ?? completionError;

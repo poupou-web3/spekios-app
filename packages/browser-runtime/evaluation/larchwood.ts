@@ -7,7 +7,7 @@ import {workspaceId,userId} from '../src/contracts.js';
 import {ModelClient,MAX_OUTPUT_TOKENS} from '../src/model-client.js';
 import {commandContext} from '../src/model-context.js';
 import {outcomeContext} from '../src/action-outcome.js';
-import {ASSESSMENT_SYSTEM,ASSESSMENT_INSTRUCTION,FULL_ASSESSMENT_INSTRUCTION,FOCUS_INSTRUCTION,assessmentVision,parseFocusedAssessment,needsFullAssessment} from '../src/assessment-vision.js';
+import {ASSESSMENT_SYSTEM,ASSESSMENT_INSTRUCTION,FULL_ASSESSMENT_INSTRUCTION,FOCUS_INSTRUCTION,fullAssessmentInput,assessmentVision,parseFocusedAssessment,needsFullAssessment} from '../src/assessment-vision.js';
 import {comparePng} from '../../image-diff/index.mjs';
 import {assessmentInput} from './inputs.js';
 import {EVAL_VERSION,digest,stableId,labelActions,selectCases,judgeInput,parseJudgment,summarize,markdownReport} from './core.mjs';
@@ -32,7 +32,7 @@ if(command==='preview'){
   const directory=join(out,source.id.slice(0,12));await mkdir(directory,{recursive:true,mode:0o700});const images:any={};let phase=0;
   for(const name of ['before','after']){const image=source.images[name],bytes=await readFile(await file(root,image.path));if(hash(bytes)!==image.sha256||bytes.length!==image.byte_length)throw Error('Dataset image checksum mismatch');const capture:any={capture_id:stableId(id,source.id,name),sha256:image.sha256,observation:image.observation};images[name]={capture,bytes};await writeFile(join(directory,name+'.png'),bytes,{mode:0o600});}
   const comparison=comparePng(images.before.bytes,images.after.bytes,{beforeCaptureId:images.before.capture.capture_id,afterCaptureId:images.after.capture.capture_id}).metadata;
-  const visual=await assessmentVision({artifact:async(_run,kind,bytes)=>{const name=phase++===0?'before':'after',path=name+'-model.png';await writeFile(join(directory,path),bytes,{mode:0o600});return {artifact_id:stableId(id,source.id,name,'preview'),object_key:path,sha256:hash(bytes),byte_length:bytes.length,kind};}},id,images.before,images.after,comparison,source.command,!source.outcome||source.outcome.status==='settled');
+  const visual=await assessmentVision({artifact:async(_run,kind,bytes)=>{const name=phase++===0?'before':'after',path=name+'-model.png';await writeFile(join(directory,path),bytes,{mode:0o600});return {artifact_id:stableId(id,source.id,name,'preview'),object_key:path,sha256:hash(bytes),byte_length:bytes.length,kind};}},id,images.before,images.after,comparison,source.command,source.outcome?.status==='settled'&&!source.source.replay);
   const context:any={...visual.metadata};delete context.artifacts;
   await save(join(directory,'full-prompt.json'),{system:ASSESSMENT_SYSTEM,input:assessmentInput(source,images.before.capture,images.after.capture,comparison,context,false)});
   await save(join(directory,'optimized-prompt.json'),{system:ASSESSMENT_SYSTEM,input:assessmentInput(source,images.before.capture,images.after.capture,comparison,context,visual.artifactIds.length===2)});
@@ -69,7 +69,7 @@ try{
      for(const [phase,c]of [['before',before],['after',after]] as const){const bytes=await store.captureBytes(c.capture_id);if(bytes.length!==Number(c.byte_length)||hash(bytes)!==c.sha256)throw Error('Source evidence checksum mismatch');const p=join('images',c.sha256+'.png');await mkdir(join(out,'images'),{recursive:true,mode:0o700});await writeFile(join(out,p),bytes,{mode:0o600});paths[phase]={path:p,sha256:c.sha256,byte_length:bytes.length,observation:c.observation};}
      const prior=report.actions.filter(a=>a.ordinal<action.ordinal&&a.state==='completed').slice(-4).map(a=>({command:commandContext(a.spec.command),expected_result:a.spec.prediction.expected_result,observed_result:a.assessment?.observed_result??null}));
      const issue=(await store.query('SELECT issue_id FROM issue_occurrences WHERE action_id=$1',[action.action_id])).rows[0]?.issue_id??null;
-     cases.push({id,source:{run_id:runId,action_id:action.action_id,issue_id:issue,original_verdict:action.assessment?.verdict,variant:v.variant,viewport_profile:report.run.config.viewport_profile,viewport:report.run.config.viewport,execution_mode:report.run.config.execution_mode},label,command:action.spec.command,prediction:{source:action.spec.prediction.source,goal:action.spec.prediction.goal,expected_result:action.spec.prediction.expected_result},outcome:action.outcome?outcomeContext(action.outcome):null,recent_history:prior,entry_url:report.run.target_url,images:paths});
+     cases.push({id,source:{run_id:runId,action_id:action.action_id,issue_id:issue,original_verdict:action.assessment?.verdict,variant:v.variant,viewport_profile:report.run.config.viewport_profile,viewport:report.run.config.viewport,execution_mode:report.run.config.execution_mode,replay:!!report.run.config.replay_of},label,command:action.spec.command,prediction:{source:action.spec.prediction.source,goal:action.spec.prediction.goal,expected_result:action.spec.prediction.expected_result},outcome:action.outcome?outcomeContext(action.outcome):null,recent_history:prior,entry_url:report.run.target_url,images:paths});
     }
    });
   }
@@ -83,7 +83,7 @@ try{
   const selected=selectCases(dataset.cases,limit),settings={provider:'meta' as const,model:'muse-spark-1.3-contributor',freeOnly:false,providerKeyId:'demo'},client=new ModelClient(settings);
   const ready=await client.ready(),mode=ready==='live'?'live':'scripted_fixture';if(mode!=='live'&&!v['allow-fixture'])throw Error('Gateway is scripted; real-model evaluation was requested');
   const id=v.experiment??randomUUID();if(!uuid.test(id))throw Error('Invalid experiment ID');const directory=join(out,id);await mkdir(directory,{recursive:true,mode:0o700});
-  const config={dataset_sha256:sha256,selected:selected.map(c=>c.id),repeats,maxCalls,maxCost,settings,version:EVAL_VERSION,mode,policy_sha256:digest([ASSESSMENT_SYSTEM,ASSESSMENT_INSTRUCTION,FULL_ASSESSMENT_INSTRUCTION,FOCUS_INSTRUCTION,await readFile(new URL('./core.mjs',import.meta.url),'utf8'),await readFile(new URL('./larchwood.ts',import.meta.url),'utf8'),await readFile(new URL('./inputs.ts',import.meta.url),'utf8'),await readFile(new URL('../../image-diff/attention.mjs',import.meta.url),'utf8')])};
+  const config={dataset_sha256:sha256,selected:selected.map(c=>c.id),repeats,maxCalls,maxCost,settings,version:EVAL_VERSION,mode,policy_sha256:digest([ASSESSMENT_SYSTEM,ASSESSMENT_INSTRUCTION,FULL_ASSESSMENT_INSTRUCTION,FOCUS_INSTRUCTION,await readFile(new URL('./core.mjs',import.meta.url),'utf8'),await readFile(new URL('./larchwood.ts',import.meta.url),'utf8'),await readFile(new URL('./inputs.ts',import.meta.url),'utf8'),await readFile(new URL('../src/assessment-vision.ts',import.meta.url),'utf8'),await readFile(new URL('../../image-diff/attention.mjs',import.meta.url),'utf8')])};
   let e:any;try{e=await load(join(directory,'experiment.json'));if(e.config_sha256!==digest(config))throw Error('Existing experiment has different immutable inputs');}catch(error:any){if(error.code!=='ENOENT')throw error;e={id,mode,config,config_sha256:digest(config),planned_pairs:selected.length*repeats,pairs:[],calls:[],complete:false};}
   const persist=async()=>{await save(join(directory,'experiment.json'),e);await save(join(directory,'summary.json'),summarize(e));await save(join(directory,'report.md'),markdownReport(e));};await persist();
   await store.withScope({workspaceId,userId},()=>store.locked('run:'+id,async()=>{
@@ -111,7 +111,7 @@ try{
     }
     e.preparations??={};const comparison=e.preparations[source.id]?.comparison??comparePng(images.before.bytes,images.after.bytes,{beforeCaptureId:captureIds[0],afterCaptureId:captureIds[1]}).metadata;
     if(!e.preparations[source.id]){e.preparations[source.id]={comparison};await persist();}
-    const visual=await assessmentVision(store,id,images.before,images.after,comparison,source.command,!source.outcome||source.outcome.status==='settled');
+    const visual=await assessmentVision(store,id,images.before,images.after,comparison,source.command,source.outcome?.status==='settled'&&!source.source.replay);
     await store.query('UPDATE runtime_actions SET before_capture_id=$2,after_capture_id=$3,comparison=$4 WHERE action_id=$1',[actionId,captureIds[0],captureIds[1],{...comparison,assessment_images:visual.metadata}]);
     const visualContext:any={...visual.metadata};delete visualContext.artifacts;
     const inputFor=(cropped:boolean)=>assessmentInput(source,images.before.capture,images.after.capture,comparison,visualContext,cropped);
@@ -120,7 +120,7 @@ try{
      const order=(index+repeat)%2?['full','optimized']:['optimized','full'];
      for(const arm of order){if(pair[arm])continue;const crop=arm==='optimized'&&visual.artifactIds.length===2;let input:any=inputFor(crop);
       const raw=await complete(stableId(id,source.id,repeat,arm,'initial'),arm,actionId,captureIds,input,ASSESSMENT_SYSTEM,crop?visual.artifactIds:[]);let result=parseFocusedAssessment(raw,captureIds,crop),fallback=false;const initialResult=result;
-      if(crop&&needsFullAssessment(result)){fallback=true;input={...inputFor(false),instruction:FULL_ASSESSMENT_INSTRUCTION};const full=await complete(stableId(id,source.id,repeat,arm,'fallback'),arm,actionId,captureIds,input,ASSESSMENT_SYSTEM);result=parseFocusedAssessment(full,captureIds,false);}
+      if(crop&&needsFullAssessment(result)){fallback=true;input=fullAssessmentInput(inputFor(false));const full=await complete(stableId(id,source.id,repeat,arm,'fallback'),arm,actionId,captureIds,input,ASSESSMENT_SYSTEM);result=parseFocusedAssessment(full,captureIds,true);if(result.needs_full_context)result={...result,verdict:'inconclusive',expectation_uncertain:true};}
       pair[arm]={result,initial_result:initialResult,used_crops:crop,fallback,visual:crop?visualContext:{mode:'full',reason:(visual.metadata as any).reason}};await persist();
      }
      if(source.label.expected==='bug'&&!pair.judgment){
