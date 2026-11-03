@@ -119,8 +119,13 @@
 .issue-check .row { margin-top: 12px; }
 .issue-check .row > .button.quiet:first-child { margin-left: -8px; }
 .issue-event { padding: 10px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
-.issue-verification-form form { display: grid; gap: 8px; margin-top: 8px; }
-.issue-verification-form label { margin-top: 10px; font-size: 13px; font-weight: 600; }
+.issue-verification-form form, .issue-triage form { display: grid; gap: 8px; margin-top: 8px; }
+.issue-verification-form label, .issue-triage label { margin-top: 10px; font-size: 13px; font-weight: 600; }
+/* Each field sits under its label at full width; the decision is saved with a normal-width button. */
+.issue-triage form > .button { justify-self: start; margin-top: 4px; }
+.issue-triage form > .small { margin: 0; }
+#triage-error { color: var(--red); line-height: 1.6; }
+#triage-error:empty { display: none; }
 .issue-verification-form #refresh-sessions { justify-self: start; margin-left: -8px; }
 #verify-error { color: var(--red); line-height: 1.6; }
 #verify-error:empty, #verify-receipt:empty, #issue-status:empty { display: none; }

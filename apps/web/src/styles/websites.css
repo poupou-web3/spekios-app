@@ -64,11 +64,68 @@
 .website-test-actions .button { background: var(--surface); }
 .website-test-card:has(> .website-test-actions:not(:empty)) footer { padding-right: 80px; }
 .website-pagination { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
-.website-app .issue-page, .website-app .connection-page { max-width: 1400px; }
-.website-app .connection-top { justify-content: flex-end; margin-bottom: 24px; }
+/* Fill the column from the first paint. Auto margins in a grid cell shrink the page to its content and
+   centre it, so it widened and slid left as panels loaded. */
+.website-app .issue-page, .website-app .connection-page { box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto 0 0; }
+.website-app .connection-top { justify-content: flex-end; align-items: center; min-height: 36px; margin-bottom: 24px; }
 .website-app .connection-top > .brand { display: none; }
 .website-app .issue-heading { margin-block: 18px 28px; }
 .website-scope { margin-top: 12px; color: var(--brand-text); font-size: 12px; overflow-wrap: anywhere; }
+/* Project pages lead back to the project list; the workspace sidebar lists recent projects. */
+.all-projects { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; padding: 6px 10px; border-radius: var(--r-md); color: var(--muted); font-size: 12px; }
+.all-projects:hover { background: var(--surface-3); color: var(--text); }
+.all-projects svg { width: 14px; height: 14px; }
+.workspace-sidebar .website-shortcuts .website-favicon { width: 22px; height: 22px; border-radius: 6px; }
+.workspace-sidebar .website-shortcuts .website-favicon svg { width: 13px; height: 13px; }
+.workspace-sidebar .website-shortcuts .website-favicon img { width: 15px; height: 15px; }
+
+/* Workspace landing (#/workspace): needs-you cards, the project grid and the latest tests. */
+.workspace-landing { display: grid; gap: 34px; padding-top: 36px; }
+.workspace-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.workspace-heading .eyebrow { margin-bottom: 10px; color: var(--muted); }
+.workspace-heading h1 { font-family: var(--display); font-size: clamp(36px, 4vw, 52px); font-weight: 400; line-height: 1.05; letter-spacing: -.015em; }
+.workspace-heading h1 + p { margin-top: 8px; font-size: 13px; }
+.workspace-launch { flex: 0 1 380px; min-width: 0; }
+.workspace-launch > label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 500; }
+.workspace-launch > div { display: flex; gap: 8px; }
+.workspace-launch input { flex: 1; min-width: 0; padding: 10px 12px; font-size: 13px; }
+.workspace-launch .button { flex: none; }
+.workspace-launch > p { margin-top: 7px; font-size: 11px; }
+.workspace-launch .error { color: var(--red); }
+.workspace-landing > .workspace-onboarding { margin: 0; }
+.workspace-section > h2 { margin-bottom: 14px; font-size: 15px; font-weight: 500; }
+.attention-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.attention-card { display: grid; gap: 5px; padding: 16px 18px; border: 1px solid var(--brand-line); border-radius: var(--r-xl); background: var(--brand-soft); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.attention-card:hover { border-color: var(--brand-text); }
+.attention-card strong { font-size: 14px; font-weight: 500; }
+.attention-link { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-text); font-size: 12px; font-weight: 500; }
+.attention-link svg { width: 13px; height: 13px; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.project-card { display: grid; gap: 18px; min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); }
+.project-card > header { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.project-card > header > div { min-width: 0; }
+.project-card .website-favicon { width: 38px; height: 38px; border-radius: 10px; }
+.project-card h3 { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.project-card h3 a:hover { color: var(--brand-text); }
+.project-card header p.project-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.project-card header p { margin-top: 3px; font-size: 11px; overflow-wrap: anywhere; }
+.project-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.project-stats dt { color: var(--muted); font-size: 11px; }
+.project-stats dd { margin: 2px 0 0; font-family: var(--display); font-size: 28px; line-height: 1.1; }
+.project-stats dd.attention { color: var(--brand-text); }
+.project-card > footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.project-status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.project-status.running { color: var(--green); }
+.project-card > footer .button { gap: 6px; font-size: 12px; }
+.project-card > footer .button svg { width: 13px; height: 13px; }
+.workspace-latest { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); }
+.workspace-latest li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 13px 18px; font-size: 13px; }
+.workspace-latest li + li { border-top: 1px solid var(--border); }
+.workspace-latest li > .small { flex: 0 0 120px; }
+.workspace-latest-text { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; }
+.workspace-latest-text strong { font-weight: 500; }
+.workspace-latest a { color: var(--brand-text); font-size: 12px; font-weight: 500; }
+
 @media (min-width: 701px) and (max-width: 960px) {
   .website-app { display: grid; grid-template-columns: 216px minmax(0, 1fr); }
   .website-app .project-sidebar { position: sticky; top: 0; height: 100dvh; flex-direction: column; align-items: stretch; gap: 0; padding: 24px 12px 16px; border-right: 1px solid var(--border); border-bottom: 0; }
@@ -104,9 +161,14 @@
   .website-new input { font-size: 16px; }
 }
 
+/* Separately served pages keep the sidebar column from the first paint: the empty slot holds it until
+   the sidebar is drawn, so the page never jumps. Only a visible sign-in panel uses the full width. */
 .website-sidebar-slot { display: contents; }
-.website-app:has(.website-sidebar-slot:empty) { display: block; }
-.website-app:has(.website-sidebar-slot:empty) .connection-top > .brand { display: flex; }
+.website-sidebar-slot:empty { display: block; min-height: 100dvh; border-right: 1px solid var(--border); background: var(--sidebar); }
+.website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) { display: block; }
+.website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) .website-sidebar-slot { display: none; }
+.website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) .connection-top > .brand { display: flex; }
+@media (max-width: 700px) { .website-sidebar-slot:empty { min-height: 132px; border-right: 0; border-bottom: 1px solid var(--border); } }
 
 /* Global activity is opened deliberately, away from the selected report. */
 .activity-trigger { width: 100%; text-align: left; }
@@ -135,3 +197,48 @@
   .drawer-backdrop:has(.activity-drawer) { align-items: flex-end; }
   .drawer.activity-drawer { width: 100%; height: 85dvh; border: 1px solid var(--border); border-radius: 16px 16px 0 0; }
 }
+
+/* Account menu (top right): workspace, sign-in method, status, theme, notifications and sign-out. */
+.account-menu { position: relative; }
+.account-menu > summary { list-style: none; cursor: pointer; }
+.account-menu > summary::-webkit-details-marker { display: none; }
+.account-menu > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.account-menu[open] > summary { box-shadow: 0 0 0 3px var(--focus-ring); }
+.account-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 300px; max-width: calc(100vw - 32px); padding: 8px; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); box-shadow: var(--shadow-lg); color: var(--text); font-size: 13px; }
+.account-head { display: flex; align-items: center; gap: 12px; padding: 10px; }
+.account-head .avatar { flex: none; width: 36px; height: 36px; font-size: 14px; }
+.account-head > div { display: grid; gap: 2px; min-width: 0; }
+.account-head strong { font-weight: 600; overflow-wrap: anywhere; }
+.account-status { display: grid; gap: 6px; margin: 4px 0; padding: 10px; border-block: 1px solid var(--border); list-style: none; }
+.account-status li { display: flex; align-items: center; gap: 8px; }
+.account-status li > span:last-child { margin-left: auto; }
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; }
+.account-toggle { cursor: pointer; }
+.account-toggle > span { display: grid; gap: 2px; }
+.account-toggle input { flex: none; width: 18px; height: 18px; }
+.account-links { display: grid; gap: 2px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border); }
+.account-links a, .account-signout { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.account-links a:hover, .account-signout:hover { background: var(--surface-3); color: var(--text); }
+.account-links svg, .account-signout svg { width: 16px; height: 16px; color: var(--muted); }
+.account-signout { width: 100%; margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-md) var(--r-md); }
+/* On narrow screens the top bar floats over the sidebar's brand row; keep it, and the account menu, on top. */
+@media (max-width: 960px) { .website-app .topbar { z-index: 7; } }
+@media (max-width: 700px) { .website-app .account-menu .avatar { display: grid; } }
+
+/* Pop-up notifications, bottom left, above the sidebar's foot. Off from the account menu. */
+.notifications { position: fixed; left: 16px; bottom: 16px; z-index: 25; display: grid; gap: 10px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.notification { display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px 14px 16px; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); box-shadow: var(--shadow-lg); color: var(--text); font-size: 13px; pointer-events: auto; }
+.notification.attention { border-color: var(--brand-line); }
+.notification.error { border-color: var(--red-line); }
+.notification-body { flex: 1; min-width: 0; }
+.notification-body strong { display: block; font-weight: 600; }
+.notification.attention .notification-body strong { color: var(--brand-text); }
+.notification.error .notification-body strong { color: var(--red); }
+.notification-body p { margin-top: 3px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.notification-actions { display: flex; align-items: center; gap: 4px; }
+.notification-actions .button { min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.notification-close { width: 32px; height: 32px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.notification-close:hover { background: var(--surface-3); color: var(--text); }
+@media (prefers-reduced-motion: no-preference) { .notification { animation: notification-in .18s ease-out; } }
+@keyframes notification-in { from { opacity: 0; transform: translateY(8px); } }
+@media (max-width: 700px) { .notifications { bottom: 72px; } }

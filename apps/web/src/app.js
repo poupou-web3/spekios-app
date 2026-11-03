@@ -7,6 +7,8 @@ import {login,shell} from './shell.js';
 import {root,state} from './state.js';
 import {closeReportExport} from './views/export.js';
 import {home} from './views/home.js';
+import {landingView} from './views/landing.js';
+import {observeWorkspace} from './notifications.js';
 import {runView} from './views/run.js';
 import {SETTINGS_SECTIONS,applyConfiguration,focusPriceTarget,settingsView} from './views/settings.js';
 import {mergeSteering} from './views/steering.js';
@@ -32,7 +34,7 @@ export function render(){
   const hadDrawer=!!root.querySelector?.('.drawer');
   if(state.drawer&&!hadDrawer)drawerOpener={id:focusId,key:focusKey};
   rendering=true;
-  try{root.innerHTML=shell(state.view==='settings'?settingsView():state.runId?runView():home());}finally{rendering=false;}
+  try{root.innerHTML=shell(state.view==='settings'?settingsView():state.runId?runView():state.websitePage==='landing'?landingView():home());}finally{rendering=false;}
   renderIdentity=identity;
   for(const node of root.querySelectorAll('details[data-disclosure]')){const saved=details.find(([key])=>key===node.dataset.disclosure);if(saved)node.open=saved[1];}
   Array.from(root.querySelectorAll('.action-list,.event-list,.table-wrap,.drawer,.discovery-tree')).forEach((node,i)=>{if(scroll[i]){node.scrollTop=scroll[i][0];node.scrollLeft=scroll[i][1];}});
@@ -63,11 +65,13 @@ export async function refresh(){
     // Memory is shown only in Settings → Memory & sessions; other views do not poll it.
     if(state.view==='settings'&&state.settingsSection==='data'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
     state.runs=runs.runs;state.websites=runs.websites||[];state.runTotal=runs.total??runs.runs.length;state.runNextOffset=runs.next_offset??null;state.runListOrigin=origin;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
-    if(!state.websiteOrigin&&!state.runId){const first=state.websites[0];if(first){selectWebsite(first.origin,{prefill:!state.url});}}
     await syncPrivateAccess(access.requests);
+    // Shown in the account menu. It never changes within a session, so it is requested once.
+    if(!state.identity){let identity={};try{identity=await get('/v1/identity')||{};}catch{}if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.identity=identity;}
     if(state.runId){const id=state.runId;const headers=state.reportEtag&&state.report?.run?.run_id===id?{'If-None-Match':state.reportEtag}:{};const report=await get('/v1/runs/'+id, headers);if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))return;if(report&&id===state.runId){if(typeof report._etag==='string'){state.reportEtag=report._etag;delete report._etag;}report.steering=mergeSteering(report.steering,state.report?.steering);state.report=report;if(!report.actions.some(a=>a.action_id===state.actionId))state.actionId=(report.actions.find(a=>a.assessment?.verdict==='suspect')||report.actions.at(-1))?.action_id;}}
     if(state.report?.run&&state.report.run.run_id===state.runId)selectWebsite(state.report.run.target_url);
     state.error='';state.connected=true;state.lastUpdatedAt=new Date().toISOString();rememberWorkspacePage();render();
+    observeWorkspace({jobs:state.jobs,websites:state.websites,requests:access.requests,runs:state.runs});
     // A price link may arrive during polling. Focus only after the saved models have loaded.
     if(state.view==='settings'&&state.settingsSection==='models')focusPriceTarget();
     followSubmittedJob();
@@ -77,10 +81,15 @@ export async function route(){
   const parts=location.hash.replace(/^#\/?/,'').split('/');
   state.priceTarget=null;
   state.view=parts[0]==='settings'?'settings':'workspace';
-  state.websitePage=parts[0]==='website'&&parts[2]==='tests'?'tests':'overview';
+  let origin='';if(parts[0]==='website'){try{origin=websiteOrigin(decodeURIComponent(parts[1]||''));}catch{}}
+  const run=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'');
+  // #/workspace (and an unknown address) is the project list. It and settings belong to no project.
+  state.websitePage=origin?parts[2]==='tests'?'tests':'overview':run?'overview':'landing';
   if(state.websitePage!=='tests')state.runOffset=0;
-  if(parts[0]==='website'){let origin='';try{origin=websiteOrigin(decodeURIComponent(parts[1]||''));}catch{}if(origin)selectWebsite(origin,{prefill:origin!==state.websiteOrigin});}
-  else if(!state.websiteOrigin){const saved=savedWebsite();if(saved)selectWebsite(saved,{prefill:!state.url});}
+  if(origin)selectWebsite(origin,{prefill:origin!==state.websiteOrigin});
+  // A run keeps its project's sidebar while its report loads; the report then names the project.
+  else if(run){if(!state.websiteOrigin){const saved=savedWebsite();if(saved)selectWebsite(saved,{prefill:!state.url});}}
+  else state.websiteOrigin='';
   // Each settings section is its own page, opened at the top. Unknown sections show the first.
   if(state.view==='settings'){const section=SETTINGS_SECTIONS.some(([key])=>key===parts[1])?parts[1]:SETTINGS_SECTIONS[0][0];if(section!==state.settingsSection){state.settingsSection=section;window.scrollTo?.(0,0);}
     // #/settings/models/price/<provider|model> opens at that model's prices; the address then drops the target.

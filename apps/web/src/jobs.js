@@ -6,6 +6,7 @@ import {refresh,render} from './app.js';
 import {state} from './state.js';
 import {canStart} from './views/home.js';
 import {selectWebsite} from './website-state.js';
+import {websiteHref} from './websites.js';
 // Runs that ended before finishing. Each can start again as a new job.
 export const STOPPED=['failed','interrupted','blocked','cancelled'];
 // A model failure, interruption or cancellation can carry on from the pages already recorded.
@@ -111,7 +112,8 @@ export async function submitJob(request,{fromSwitcher=false}={}){
         if(request.kind==='explore'){selectWebsite(request.target_url);state.websiteUrl='';state.websiteLaunchError='';}
         state.view='workspace';state.websitePage='overview';
         state.trackedJobId=response.job.job_id;sessionStorage.setItem('scout.tracked-job',state.trackedJobId);
-        state.runId=null;state.report=null;state.actionId=null;location.hash='#/workspace';
+        // The project's overview follows the job until its run opens. #/workspace is the project list.
+        state.runId=null;state.report=null;state.actionId=null;location.hash=websiteHref(state.websiteOrigin);
       }
     }
     await refresh();

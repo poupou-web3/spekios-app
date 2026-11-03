@@ -10,7 +10,7 @@ src/
   state.js         shared state; values several modules change live on `state`
   api.js, images.js, jobs.js, shell.js, private-login.js
   websites.js, website-state.js, website-page.js  grouping, switcher and shared page navigation
-  views/           home, run, action, review, steering, automatic, flow, settings, activity, drawer, export
+  views/           landing, home, run, action, review, steering, automatic, flow, settings, activity, drawer, export
   report/          Markdown / evidence ZIP / JSON report builders (pure modules)
   connect.js       agent connection page
   issues.js        issue history and fix verification page
@@ -22,7 +22,15 @@ test/              node --test suites; support.mjs links src/ for the vm sandbox
 
 Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`.
 
+`#/workspace` is the project list: one project per website origin, with counts of findings to review, confirmed findings and tests across every run of that origin (from the `/v1/runs` website catalog), what needs attention across projects and the latest tests. It opens no project by itself; with no project yet it is the first-test page. The project list and settings use a workspace sidebar; every project page links back with **All projects**. A newly submitted test opens its project's overview, which follows the job to its run.
+
 The website switcher groups entry URLs by origin, keeping staging subdomains and local ports separate. Its catalog covers the complete owned run history; selected-website test history pages through 50 runs at a time. The overview shows the latest tests, while Tests retains search, filters and usage. Stopped explorations offer Continue exploration and Run again from their cards, history and report. Issues use the same exact origin filter. Recent shortcuts are limited to three per website in this tab, with icons for reports, findings, flow maps and pages. Settings and agent connection remain workspace actions at the bottom.
+
+The account menu (top right, `src/account-menu.js`, also on Connect your agent and Issues & fixes) shows the workspace name and how you signed in, browser worker and model gateway status, the theme, a switch for pop-up notifications, links to settings and agent connection, and **Sign out**. The workspace never receives the person's email: `/v1/identity` deliberately omits it.
+
+Connect your agent and Issues & fixes are separately served pages. They draw their sidebar as soon as their script runs and keep the sidebar column from the first paint, so nothing moves when the website list arrives; only a visible sign-in panel uses the full width. Connect your agent uses the workspace sidebar.
+
+Pop-up notifications (bottom left, `src/notifications.js`) compare each refresh with the previous one and report only new findings on a project, a finished or stopped test, a fix-check result and a sign-in request. Queued and started tests, progress and cancellations are not notified, and nothing is reported for what was already there when the page opened. Failures and sign-in requests stay until dismissed; the rest close after 10 seconds. The switch is stored per browser.
 
 Activity opens from the bottom of the workspace sidebar, or the sticky mobile footer. Its side panel (bottom sheet on mobile) shows running jobs across websites, private sign-in requests with per-run skip and account-creation choices, workspace refresh errors and the ten most recent job results. It never opens automatically or inserts background work into a report, overview or settings page. The job API includes all active jobs and the fifty latest finished jobs so older running work stays visible. The panel keeps polling while open; evidence and export drawers retain their existing polling behavior. A newly submitted test still follows its own run until the user navigates elsewhere.
 
