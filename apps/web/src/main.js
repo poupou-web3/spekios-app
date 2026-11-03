@@ -18,6 +18,7 @@ import {submitReview,updateReviewDraft} from './views/review.js';
 import {addCatalogModel,addSavedModel,editOverrides,editProjectModels,numericFieldValue,rebaseConfiguration,removeSavedModel,saveConfiguration,updateConfiguration,updateNewModel,useDemoModel} from './views/settings.js';
 import {steeringDraft,submitSteering,updateSteeringFocus} from './views/steering.js';
 import {rememberWorkspacePage} from './website-state.js';
+import {resetNotifications,setNotificationsEnabled} from './notifications.js';
 import {bindWebsiteFavicons,clearWebsiteNavigation,launchUrlError,updateWebsiteLaunchHint,websiteHref} from './websites.js';
 import {changeProviderKey,openProviderKeyDialog} from './provider-keys.js';
 bindWebsiteFavicons(root);
@@ -54,6 +55,7 @@ function captureInput(target){
 root.addEventListener('input',e=>{if(captureInput(e.target))render();});
 root.addEventListener('change',e=>{if(e.target.id==='auto-reproduce'){state.autoReproduce=e.target.checked;sessionStorage.setItem('scout.auto-reproduce',String(state.autoReproduce));render();}if(e.target.dataset.reviewField){updateReviewDraft(e.target.dataset.reviewAction,e.target.dataset.reviewField,e.target.value);if(e.target.dataset.reviewField==='disposition')render();}if(e.target.id==='auth-mode'){state.authMode=e.target.value;if(state.authMode==='public')state.sessionId='';render();}if(e.target.id==='app-session')state.sessionId=e.target.value;if(e.target.id==='viewport-profile'){state.viewportProfile=e.target.value;render();}if(e.target.id==='launch-project'){state.launchProject=e.target.value;state.launchKey='';render();}if(e.target.id==='launch-model'){state.launchModel=e.target.value;state.launchKey='';render();}});
 root.addEventListener('change',e=>{
+  if(e.target.id==='notifications-toggle'){setNotificationsEnabled(e.target.checked);toast(e.target.checked?'Pop-up notifications are on.':'Pop-up notifications are off. Activity still lists every result.');return;}
   if(e.target.id==='launch-key'){state.launchKey=e.target.value;render();return;}
   if(e.target.dataset.configurationField||e.target.dataset.newModelField){if(captureInput(e.target))render();return;}
   const field={'run-mode':'runMode'}[e.target.id];
@@ -89,8 +91,8 @@ root.addEventListener('click',async e=>{
   if(action==='revoke-session'){try{await api('/v1/browser-sessions/'+el.dataset.id+'/revoke',{});if(state.sessionId===el.dataset.id)state.sessionId='';await refresh();toast('Saved session removed. A running browser remains signed in until it closes.');}catch(error){toast(error.message);}}
   if(action==='forget-memory'){try{await api('/v1/app-memory/'+el.dataset.id+'/forget',{});await refresh();toast('App memory forgotten. Recorded runs and evidence are unchanged.');}catch(error){toast(error.message);}}
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Workspace refreshed.');}
-  if(action==='logout'&&state.browserAuth){closeAgentHandoff();clearWebsiteNavigation();location.assign('/logout');return;}
-  if(action==='logout'){closeAgentHandoff();closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
+  if(action==='logout'&&state.browserAuth){closeAgentHandoff();resetNotifications();clearWebsiteNavigation();location.assign('/logout');return;}
+  if(action==='logout'){closeAgentHandoff();resetNotifications();state.identity=null;closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
   if(action==='add-project-model'||action==='remove-project-model'){editProjectModels(action==='add-project-model',Number(el.dataset.index));render();}
@@ -116,12 +118,12 @@ root.addEventListener('click',async e=>{
   if(action==='download-report')await downloadReport(el.dataset.format);
   if(action==='cancel-report-export'){closeReportExport();if(state.drawer?.export){state.drawer.export.error='Download cancelled. The recorded evidence is unchanged.';render();}}
 });
-document.addEventListener('click',e=>{if(e.target.closest?.('.skip-link')){e.preventDefault();const main=document.getElementById('main-content');main?.focus();main?.scrollIntoView({block:'start'});}if(!e.target.closest?.('.website-switcher')){const switcher=root.querySelector?.('.website-switcher[open]');if(switcher)switcher.open=false;}});
+document.addEventListener('click',e=>{if(e.target.closest?.('.skip-link')){e.preventDefault();const main=document.getElementById('main-content');main?.focus();main?.scrollIntoView({block:'start'});}for(const selector of ['.website-switcher','.account-menu'])if(!e.target.closest?.(selector)){const menu=root.querySelector?.(selector+'[open]');if(menu)menu.open=false;}});
 document.addEventListener('keydown',e=>{
   // Enter in the add-a-model fields adds the model; it never saves the whole form.
   if(e.key==='Enter'&&!e.isComposing&&e.target.dataset?.newModelField){e.preventDefault();addModelAndRefocus();return;}
   if(e.key==='Escape'&&state.drawer){e.preventDefault();closeReportExport();state.drawer=null;render();return;}
-  if(e.key==='Escape'){const switcher=root.querySelector?.('.website-switcher[open]');if(switcher){e.preventDefault();switcher.open=false;switcher.querySelector('summary')?.focus();return;}}
+  if(e.key==='Escape'){const switcher=root.querySelector?.('.website-switcher[open],.account-menu[open]');if(switcher){e.preventDefault();switcher.open=false;switcher.querySelector('summary')?.focus();return;}}
   if(e.key==='Tab'&&state.drawer){
     const elements=Array.from(root.querySelectorAll('.drawer button:not(:disabled),.drawer a[href],.drawer input:not(:disabled),.drawer select:not(:disabled),.drawer [tabindex="0"]'));
     const first=elements[0],last=elements.at(-1);
@@ -136,6 +138,8 @@ document.addEventListener('keydown',e=>{
 // Blurring first sends the field's pending change before the fields clear; otherwise Chrome fires it
 // during the redraw and puts the old text back. The model ID field is then ready for the next model.
 function addModelAndRefocus(){document.activeElement?.blur?.();addSavedModel();render();document.getElementById('new-model-model')?.focus();}
+// Notifications live outside the re-rendered workspace so they survive each refresh.
+document.getElementById?.('notifications')?.addEventListener?.('click',e=>{if(e.target.closest?.('[data-notification-action="open-activity"]')){closeReportExport();state.drawer={title:'Activity',activity:true};render();}});
 window.addEventListener('hashchange',route);
 setInterval(()=>{if(state.connected&&!document.hidden&&(!state.drawer||state.drawer.activity)&&!state.submitting)void refresh();},5000);
 bindThemeSwitch(root);

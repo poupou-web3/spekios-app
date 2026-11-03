@@ -1,7 +1,8 @@
 import {showAgentHandoff,closeAgentHandoff} from './agent-handoff.js';
 import {signIn,workspaceRequest,requireOk} from '/assets/ui/http.js';
 import {mountThemeSwitch} from '/assets/ui/theme.js';
-import {mountWebsitePage} from './website-page.js';
+import {mountWebsitePage,prepareWebsitePage} from './website-page.js';
+prepareWebsitePage('issues');
 const $=selector=>document.querySelector(selector);
 // The header theme control is the only shared widget on this page.
 const themeSlot=$('[data-theme-slot]');if(themeSlot)mountThemeSwitch(themeSlot);
@@ -223,7 +224,7 @@ async function more(){
   }catch(e){if(issueId!==id||version!==detailVersion)return;if(e.status===409){message('Issue history changed. Loaded a fresh snapshot; load more again for earlier entries.');await loadDetail();}else message(e.message);}
 }
 async function refresh(){if(busy||document.hidden)return;busy=true;try{await loadDetail(false);await list();await refreshRecheck();}catch(e){message('Refresh interrupted: '+e.message+'. The last available view is retained.');}finally{busy=false;}}
-async function ready(){try{identity=await api('/v1/identity');if(!issueWebsitePage)issueWebsitePage=await mountWebsitePage({page:'issues',request:api});if(issueWebsitePage?.origin){$('#recheck-source').value=issueWebsitePage.origin;const scope=$('[data-website-scope]');if(scope)scope.textContent=issueWebsitePage.label();}$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message((issueWebsitePage?.origin?issueWebsitePage.label()+' · ':'Workspace issues · ')+'Original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){closeAgentHandoff();if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
+async function ready(){try{identity=await api('/v1/identity');if(!issueWebsitePage)issueWebsitePage=await mountWebsitePage({page:'issues',request:api,identity,mode:{development,spekios}});if(issueWebsitePage?.origin){$('#recheck-source').value=issueWebsitePage.origin;const scope=$('[data-website-scope]');if(scope)scope.textContent=issueWebsitePage.label();}$('#issue-login').hidden=true;$('#issue-workspace').hidden=false;await loadDetail();await list();message((issueWebsitePage?.origin?issueWebsitePage.label()+' · ':'Workspace issues · ')+'Original evidence and candidate checks stay private to your team.');clearInterval(timer);timer=setInterval(refresh,5000);}catch(e){message(e.message);if(e.status===401){closeAgentHandoff();if(spekios){location.assign('/login?next=%2Fissues');throw e;}$('#issue-login').hidden=false;$('#issue-workspace').hidden=true;}}}
 $('#issue-login-form').addEventListener('submit',async e=>{e.preventDefault();const email=$('#issue-email').value.trim(),password=$('#issue-password').value;$('#issue-password').value='';try{await signIn(email,password);token=password;sessionStorage.setItem('scout.workspace-token',token);await ready();}catch(error){message(error.message);}});
 $('#issue-filter').addEventListener('submit',async e=>{e.preventDefault();offset=0;previousOffsets=[];try{await list();}catch(e){message(e.message);}});
 $('#issue-prev').addEventListener('click',async()=>{offset=previousOffsets.pop()??0;await list().catch(e=>message(e.message));});

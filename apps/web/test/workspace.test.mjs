@@ -353,10 +353,11 @@ test('Activity stays live while open and evidence drawers keep their polling pau
   let poll,requests=0;const data=payloads([{job_id:'job',status:'running',request:{kind:'explore',target_url:'https://other.test'}}]);
   const ui=workspace({setInterval(fn,ms){if(ms===5000)poll=fn;},fetch:async path=>{requests++;return response(data[path]);}});connect(ui);ui.selectWebsite('https://selected.test');
   await click(ui,'open-activity');poll();await new Promise(setImmediate);
-  assert.equal(requests,4);assert.equal(ui.state.drawer.activity,true);assert.match(ui.drawer(),/other.test/);
+  // Four polled endpoints, plus the workspace identity requested once for the account menu.
+  assert.equal(requests,5);assert.equal(ui.state.drawer.activity,true);assert.match(ui.drawer(),/other.test/);
   data['/v1/browser-jobs'].jobs[0].status='completed';poll();await new Promise(setImmediate);
-  assert.equal(requests,8);assert.match(ui.activityButton(),/0 running/);assert.match(ui.drawer(),/Completed/);assert.equal(ui.state.websiteOrigin,'https://selected.test');
-  ui.state.drawer={title:'Evidence',raw:{}};poll();await new Promise(setImmediate);assert.equal(requests,8);
+  assert.equal(requests,9);assert.match(ui.activityButton(),/0 running/);assert.match(ui.drawer(),/Completed/);assert.equal(ui.state.websiteOrigin,'https://selected.test');
+  ui.state.drawer={title:'Evidence',raw:{}};poll();await new Promise(setImmediate);assert.equal(requests,9);
 });
 test('Activity shows recent results once and keeps an older failed admission available',()=>{
   const ui=workspace();ui.state.trackedJobId='failed';ui.state.jobs=[{job_id:'failed',status:'failed',error:'worker unavailable',request:{kind:'explore',target_url:'https://old.test'}}];
@@ -454,4 +455,17 @@ test('an empty workspace landing is the first-test page and settings use the wor
   assert.match(ui.node.innerHTML,/What should we explore\?/);assert.match(ui.node.innerHTML,/id="run-form"/);assert.doesNotMatch(ui.node.innerHTML,/Your projects/);
   ui.location.hash='#/settings/models';await ui.route();
   assert.match(ui.node.innerHTML,/workspace-sidebar/);assert.match(ui.node.innerHTML,/<a class="nav-item active" href="#\/settings" aria-current="page">/);assert.doesNotMatch(ui.node.innerHTML,/website-switcher/);
+});
+
+test('the account menu holds the workspace, its status, theme, notifications and sign-out',async()=>{
+  const data=payloads();data['/v1/identity']={workspace_name:'Larchwood team',principal_kind:'workspace_manager'};
+  const ui=workspace({fetch:async path=>response(data[path])});connect(ui);
+  ui.location.hash='#/workspace';await ui.route();
+  const html=ui.node.innerHTML,menu=html.slice(html.indexOf('<details class="account-menu"'),html.indexOf('</details>',html.indexOf('<details class="account-menu"')));
+  assert.match(menu,/<summary class="avatar" aria-label="Account and workspace: Larchwood team">L<\/summary>/);
+  assert.match(menu,/Signed in with the workspace token/);assert.match(menu,/Browser worker<\/span><span class="small muted">Offline/);
+  assert.match(menu,/id="notifications-toggle" type="checkbox" checked/);assert.match(menu,/data-action="logout">/);assert.match(menu,/theme/i);
+  assert.equal((html.match(/data-action="logout"/g)||[]).length,1,'Sign out lives only in the account menu.');
+  assert.match(html,/<aside[\s\S]*Browser worker offline[\s\S]*<\/aside>/,'The sidebar still warns when tests cannot run.');
+  ui.state.developmentAccess=true;ui.render();assert.doesNotMatch(ui.node.innerHTML,/data-action="logout"/);assert.match(ui.node.innerHTML,/Local development · sign-in disabled/);
 });

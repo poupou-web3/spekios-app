@@ -70,11 +70,24 @@ test('the shared switcher preserves main’s local and Docker URL handling witho
 test('the switcher on standalone customer pages shows Docker guidance and submits a local hostname using http',async()=>{
   const handlers={},saved=new Map(),writes=[],destinations=[],input={removeAttribute(){},focus(){}},hint={removeAttribute(){}},disclosure={open:false};let draws=0;
   const slot={dataset:{workspaceSidebar:''},set innerHTML(html){draws++;this.html=html;},querySelector:selector=>selector==='details'?disclosure:selector==='#website-launch-error'?hint:input,addEventListener:(type,fn)=>handlers[type]=fn};
-  const sandbox={URL,URLSearchParams,Date,document:{querySelector:()=>slot,addEventListener(){}},location:{search:'',assign:url=>destinations.push(url)},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},crypto:{randomUUID:()=>runId}};
+  const sandbox={URL,URLSearchParams,Date,document:{querySelector:selector=>selector==='[data-workspace-sidebar]'?slot:null,addEventListener(){}},location:{search:'',assign:url=>destinations.push(url)},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},crypto:{randomUUID:()=>runId}};
   vm.createContext(sandbox);vm.runInContext(appSource('website-page.js')+'\nglobalThis.mount=mountWebsitePage;',sandbox);
   await sandbox.mount({page:'issues',request:async(path,body)=>{if(body){writes.push(body);return {job:{job_id:runId}};}return {runs:[],websites:[]};}});
-  handlers.input({target:{id:'website-url',value:'localhost:4100'}});assert.match(hint.textContent,/host.docker.internal:4100/);assert.equal(draws,1,'Typing must preserve the input and its focus.');
+  const drawn=draws;handlers.input({target:{id:'website-url',value:'localhost:4100'}});assert.match(hint.textContent,/host.docker.internal:4100/);assert.equal(draws,drawn,'Typing must preserve the input and its focus.');
   handlers.input({target:{id:'website-url',value:'larchwood:8084/shop'}});assert.doesNotMatch(hint.textContent,/where localhost/);
   await handlers.submit({target:{id:'website-launch-form'},preventDefault(){}});
   assert.equal(writes[0].target_url,'http://larchwood:8084/shop');assert.equal(writes[0].auth_mode,'auto');assert.deepEqual(destinations,['/#/website/http%3A%2F%2Flarchwood%3A8084'],'A new test opens its project, which follows the job.');
+});
+
+test('standalone pages draw their sidebar and account menu before the website list arrives',async()=>{
+  let release;const slot={dataset:{workspaceSidebar:''},html:'',set innerHTML(html){this.html=html;},get innerHTML(){return this.html;},querySelector:()=>null,addEventListener(){}};
+  const header={html:'',set innerHTML(html){this.html=html;},querySelector:()=>null,addEventListener(){}};
+  const sandbox={URL,URLSearchParams,Date,document:{querySelector:selector=>selector==='[data-workspace-sidebar]'?slot:selector==='.connection-top .row'?header:null,addEventListener(){}},location:{search:''},localStorage:{getItem:()=>null,setItem(){}},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},crypto:{randomUUID:()=>runId}};
+  vm.createContext(sandbox);vm.runInContext(appSource('website-page.js')+'\nglobalThis.mount=mountWebsitePage;',sandbox);
+  const mounted=sandbox.mount({page:'connect',identity:{workspace_name:'Larchwood team'},mode:{development:false,spekios:false},request:path=>path==='/v1/runs'?new Promise(resolve=>release=()=>resolve({runs:[],websites:[{origin:'https://a.example',run_count:3}]})):Promise.resolve(path==='/v1/browser-jobs'?{workers:[{available:true}]}:{gateway_ready:true})});
+  await new Promise(setImmediate);
+  assert.match(slot.html,/workspace-sidebar/,'Connect your agent uses the workspace sidebar, drawn at once.');assert.doesNotMatch(slot.html,/website-switcher/);
+  assert.match(header.html,/Account and workspace: Larchwood team/);assert.match(header.html,/data-action="logout"/);assert.doesNotMatch(header.html,/Browser worker/,'Status not loaded yet is left out.');
+  release();await mounted;
+  assert.match(slot.html,/a\.example/);assert.match(header.html,/Browser worker<\/span><span class="small muted">Online/);
 });

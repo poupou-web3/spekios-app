@@ -1,10 +1,10 @@
 // Workspace frame (sidebar, top bar) and the sign-in screen. It links only to customer pages.
 import {icon} from '/assets/ui/components.js';
 import {date,esc,name,number} from '/assets/ui/format.js';
-import {themeSwitch} from '/assets/ui/theme.js';
 import {root,state} from './state.js';
 import {activityButton} from './views/activity.js';
 import {drawer} from './views/drawer.js';
+import {accountMenuMarkup} from './account-menu.js';
 import {settingsSectionTitle} from './views/settings.js';
 import {selectedWebsite,websiteRuns,workspaceWebsites} from './website-state.js';
 import {websiteHref,websiteLabel,websiteSidebar,workspaceHref,workspaceSidebar} from './websites.js';
@@ -15,7 +15,8 @@ export function login(){
 export function shell(content){
   const current=state.report?.run,settings=state.view==='settings',home=!settings&&!state.runId,worker=state.workers.some(w=>w.available);
   const page=settings?'settings':state.runId?'tests':state.websitePage||'overview';
-  const bottom=`<div class="environment"><i class="dot ${worker?'green':'amber'}"></i><div>Workspace<div class="small muted">${worker?'Browser worker online':'Browser worker offline'}</div></div></div>${state.developmentAccess?'<p class="small muted dev-access-note">Local development · sign-in disabled</p>':`<button data-action="logout">${icon('logout')}Sign out</button>`}`;
+  // Account, status and sign-out live in the account menu. The sidebar only warns when tests cannot run.
+  const bottom=worker?'':`<div class="environment"><i class="dot amber"></i><div>Workspace<div class="small muted">Browser worker offline</div></div></div>`;
   // The project list and settings cover the whole workspace; every other page belongs to one project.
   const workspacePage=settings||page==='landing';
   const sidebar=workspacePage?workspaceSidebar({websites:workspaceWebsites(),page:settings?'settings':'projects',activity:activityButton(),bottom})
@@ -24,5 +25,9 @@ export function shell(content){
   const breadcrumb=settings?`<a href="#/settings">Settings</a>${icon('chevron')}<span>${esc(settingsSectionTitle())}</span>`
     :page==='landing'?'<span>All projects</span>'
     :`<a href="${workspaceHref()}">Projects</a>${icon('chevron')}<a href="${websiteHref(state.websiteOrigin)}">${esc(site?websiteLabel(site.origin):'Project')}</a>${icon('chevron')}<span>${current?esc(name(current)):heading}</span>`;
-  return `<div class="app website-app">${sidebar}<main class="main" id="main-content" tabindex="-1"><header class="topbar"><div class="breadcrumb">${icon('grid')}${breadcrumb}</div><div class="topbar-right"><span>${state.error?'Refresh interrupted':state.lastUpdatedAt?'Updated '+esc(date(state.lastUpdatedAt)):'Recorded evidence'}</span><button class="button icon" data-action="refresh" aria-label="Refresh workspace">${icon('refresh')}</button>${themeSwitch()}${state.developmentAccess?'<span class="pill dev-access-badge">DEV</span>':`<button class="button icon mobile-logout" data-action="logout" aria-label="Sign out">${icon('logout')}</button>`}<div class="avatar" aria-label="Your account">S</div></div></header><div class="content${home&&page==='overview'?' content-landing website-overview':home&&page==='landing'?' content-landing website-overview workspace-landing-page':''}">${content}</div></main><footer class="website-mobile-nav"><a href="${workspaceHref()}">${icon('grid')}Projects</a>${activityButton(true)}<a href="/connect">${icon('code')}Connect your agent</a><a href="#/settings">${icon('settings')}Settings</a></footer>${drawer()}</div>`;
+  return `<div class="app website-app">${sidebar}<main class="main" id="main-content" tabindex="-1"><header class="topbar"><div class="breadcrumb">${icon('grid')}${breadcrumb}</div><div class="topbar-right"><span>${state.error?'Refresh interrupted':state.lastUpdatedAt?'Updated '+esc(date(state.lastUpdatedAt)):'Recorded evidence'}</span><button class="button icon" data-action="refresh" aria-label="Refresh workspace">${icon('refresh')}</button>${state.developmentAccess?'<span class="pill dev-access-badge">DEV</span>':''}${accountMenu(worker)}</div></header><div class="content${home&&page==='overview'?' content-landing website-overview':home&&page==='landing'?' content-landing website-overview workspace-landing-page':''}">${content}</div></main><footer class="website-mobile-nav"><a href="${workspaceHref()}">${icon('grid')}Projects</a>${activityButton(true)}<a href="/connect">${icon('code')}Connect your agent</a><a href="#/settings">${icon('settings')}Settings</a></footer>${drawer()}</div>`;
+}
+// The account menu, with this workspace's live status.
+export function accountMenu(worker=state.workers.some(w=>w.available)){
+  return accountMenuMarkup({name:state.identity?.workspace_name,development:state.developmentAccess,browserAuth:state.browserAuth,worker,gateway:state.providers.gateway_ready===true});
 }
