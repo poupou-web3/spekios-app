@@ -61,7 +61,7 @@ while (!recheck.complete) {
   const c = recheck.counts, line = `${c.pending} pending · ${c.resolved} resolved · ${c.still_reproducible} still reproducible · ${c.blocked} blocked · ${c.inconclusive} inconclusive`;
   if (line !== last) console.log(line), last = line;
 }
-for (const item of recheck.items) console.log(`${(item.outcome ?? 'not checkable: ' + item.skipped_reason).padEnd(20)} ${item.title ?? ''} ${api}/issues#${item.issue_id}`);
+for (const item of recheck.items) console.log(`${(item.outcome ?? 'not checkable: ' + item.skipped_reason).padEnd(20)} ${item.title ?? ''} ${api}/issues/${item.issue_id}`);
 const c = recheck.counts;
 console.log(JSON.stringify({ recheck_id: recheckId, candidate_origin: recheck.candidate_origin, deployment_ref: recheck.deployment_ref, counts: c, omitted_issues: recheck.omitted_issues }));
 if (c.still_reproducible) fail(1, `${c.still_reproducible} issue(s) still reproduce on this deployment.`);

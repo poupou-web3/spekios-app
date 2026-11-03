@@ -22,11 +22,11 @@ export function automaticTaskPill(task){
   return pill(job?.cancel_id&&job.status==='running'?'cancelling':job?.status||task.reproduction?.status||'queued');
 }
 export function automaticSourceLink(task,label='View source action'){
-  return `<a class="button quiet" href="#/workspace/${esc(task.source_run_id)}/${esc(task.source_action_id)}" ${task.source_run_id===state.report?.run.run_id?`data-action="select-action" data-source-action="true" data-id="${esc(task.source_action_id)}"`:''}>${esc(label)} ${icon('arrow')}</a>`;
+  return `<a class="button quiet" href="/workspace/${esc(task.source_run_id)}/${esc(task.source_action_id)}" ${task.source_run_id===state.report?.run.run_id?`data-action="select-action" data-source-action="true" data-id="${esc(task.source_action_id)}"`:''}>${esc(label)} ${icon('arrow')}</a>`;
 }
 export function automaticTaskView(task){
   const job=task.child_job,reproduction=task.reproduction,replayId=job?.run_id||reproduction?.replay_run_id;
-  return `<article class="automatic-check"><div class="row">${automaticTaskPill(task)}<strong>Check source action ${esc(short(task.source_action_id))}</strong><span class="small muted">${number(task.planned_actions)} planned browser actions</span></div>${task.reason?`<p class="small muted">${esc(automaticReason(task.reason))}</p>`:''}${job?.error?`<p class="small review-error">${esc(job.error)}</p>`:''}<div class="row">${automaticSourceLink(task)}${replayId?`<a class="button" href="#/workspace/${esc(replayId)}">View reproduction ${icon('arrow')}</a>`:job?`<span class="small muted">Job ${esc(short(job.job_id))} · ${job.status==='cancelled'?'Cancelled before launch':'Awaiting worker'}</span>`:''}</div>${reproduction?.result?`<div class="automatic-result">${pill(reproduction.result.outcome)}<p class="small">${esc(reproduction.result.reason||'Recorded reproduction outcome')}</p></div>`:''}</article>`;
+  return `<article class="automatic-check"><div class="row">${automaticTaskPill(task)}<strong>Check source action ${esc(short(task.source_action_id))}</strong><span class="small muted">${number(task.planned_actions)} planned browser actions</span></div>${task.reason?`<p class="small muted">${esc(automaticReason(task.reason))}</p>`:''}${job?.error?`<p class="small review-error">${esc(job.error)}</p>`:''}<div class="row">${automaticSourceLink(task)}${replayId?`<a class="button" href="/workspace/${esc(replayId)}">View reproduction ${icon('arrow')}</a>`:job?`<span class="small muted">Job ${esc(short(job.job_id))} · ${job.status==='cancelled'?'Cancelled before launch':'Awaiting worker'}</span>`:''}</div>${reproduction?.result?`<div class="automatic-result">${pill(reproduction.result.outcome)}<p class="small">${esc(reproduction.result.reason||'Recorded reproduction outcome')}</p></div>`:''}</article>`;
 }
 export function automaticPanel(){
   const run=state.report?.run;if(!run)return '';
@@ -34,7 +34,7 @@ export function automaticPanel(){
   if(replay){
     const task=tasks.find(t=>t.child_job?.run_id===run.run_id||t.reproduction?.replay_run_id===run.run_id);
     if(!task)return '';
-    return `<section class="notice automatic-lineage">${icon('refresh')}<div><strong>Automatic fresh-browser check</strong><p class="small">This run rechecks a suspected bug from exploration ${esc(short(task.source_run_id))}. The outcome awaits human review.</p>${automaticSourceLink(task)}<a class="button quiet" href="#/workspace/${esc(task.source_run_id)}">View parent exploration ${icon('arrow')}</a></div></section>`;
+    return `<section class="notice automatic-lineage">${icon('refresh')}<div><strong>Automatic fresh-browser check</strong><p class="small">This run rechecks a suspected bug from exploration ${esc(short(task.source_run_id))}. The outcome awaits human review.</p>${automaticSourceLink(task)}<a class="button quiet" href="/workspace/${esc(task.source_run_id)}">View parent exploration ${icon('arrow')}</a></div></section>`;
   }
   const policy=run.config?.automatic_reproduction_policy;
   if(!policy?.enabled&&!tasks.length)return '';
@@ -44,8 +44,8 @@ export function automaticPanel(){
 }
 export function replayControl(action,reproduction,eligible){
   const task=automaticTasks().find(t=>t.source_action_id===action.action_id&&automaticTaskActive(t));
-  if(task)return `<div class="automatic-action-status">${automaticTaskPill(task)}<span class="small">Automatic fresh-browser check ${task.status==='pending'?'is waiting to queue':'is already scheduled'}.</span>${task.reason?`<span class="small muted">${esc(automaticReason(task.reason))}</span>`:''}${task.child_job?.run_id?`<a class="button" href="#/workspace/${esc(task.child_job.run_id)}">View reproduction ${icon('arrow')}</a>`:''}</div>`;
-  if(reproduction)return `<a class="button" href="#/workspace/${esc(reproduction.replay_run_id)}">${icon('refresh')}View reproduction</a>`;
+  if(task)return `<div class="automatic-action-status">${automaticTaskPill(task)}<span class="small">Automatic fresh-browser check ${task.status==='pending'?'is waiting to queue':'is already scheduled'}.</span>${task.reason?`<span class="small muted">${esc(automaticReason(task.reason))}</span>`:''}${task.child_job?.run_id?`<a class="button" href="/workspace/${esc(task.child_job.run_id)}">View reproduction ${icon('arrow')}</a>`:''}</div>`;
+  if(reproduction)return `<a class="button" href="/workspace/${esc(reproduction.replay_run_id)}">${icon('refresh')}View reproduction</a>`;
   if(eligible)return `<button class="button accent" data-action="reproduce" data-id="${esc(action.action_id)}" ${!canStart()||state.submitting?'disabled':''}>${icon('refresh')}Replay in fresh browser</button>`;
   return button('action-json','Inspect action','code');
 }

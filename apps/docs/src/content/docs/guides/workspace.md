@@ -28,7 +28,7 @@ Use [finding review](../findings/) to record a human conclusion and rationale. E
 
 ## Settings and appearance
 
-Settings has one page per section, listed beside the content (or as tabs on a narrow screen). Each has its own address, such as `#/settings/limits`. Edits in any section stay until you save or discard them; the save bar names the sections with unsaved changes and links to any that need a fix.
+Settings has one page per section, listed beside the content (or as tabs on a narrow screen). Each has its own address, such as `/settings/limits`. Edits in any section stay until you save or discard them; the save bar names the sections with unsaved changes and links to any that need a fix.
 
 - **Models:** your list of model IDs (several per provider if you like) with their input and output prices, the exploration and navigation models chosen from it, a model for each project, free-only and ranking reuse, and which providers the server can use. Credentials are never shown. A single test can also pick a project and its own model under the launch options; see [choose a model per project or per run](../../getting-started/models/#choose-a-model-per-project-or-per-run).
 - **Exploration:** default viewport, exploration strategy and automatic rechecks.

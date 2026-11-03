@@ -79,7 +79,7 @@ try{
   assert.equal((await get(`/v1/issues/${first.issue}?offset=1&expected_revision=1`)).status,409);
   const context=await browser.newContext();await context.addCookies([{name:'spekios_session',value:actors[0].cookie,domain:'localhost',path:'/',httpOnly:true,sameSite:'Lax'}]);
   await context.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.handoffClipboard=text;}}});});
-  const page=await context.newPage(),errors=[];page.setDefaultTimeout(15000);page.on('pageerror',e=>{errors.push(e.message);console.error('Browser error: '+e.message);});await page.goto(origin+'/issues#'+first.issue);
+  const page=await context.newPage(),errors=[];page.setDefaultTimeout(15000);page.on('pageerror',e=>{errors.push(e.message);console.error('Browser error: '+e.message);});await page.goto(origin+'/issues/'+first.issue);
   await page.getByRole('button',{name:'Copy for a coding agent',exact:true}).waitFor().catch(async e=>{console.error('Page state: '+(await page.locator('body').innerText()).slice(0,3000));throw e;});
   await page.getByRole('button',{name:'Copy for a coding agent',exact:true}).click();
   const preview=page.locator('#agent-handoff-preview');await preview.waitFor();const copied=await preview.inputValue();assert.equal(copied,detail.data.handoff.agent_description.text);assert.match(copied,/Save draft/);assert.match(copied,/Saved is visible/);assert.match(copied,/Ready remains/);

@@ -389,10 +389,6 @@ a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-sof
 }
 @media (max-width: 960px) {
   .nav-new { flex: none; min-height: 34px; margin: 0; padding: 6px 12px; }
-  /* The brand row has room for the top bar controls; a second bar would only repeat the page title. */
-  .app { position: relative; }
-  .topbar { position: absolute; top: 12px; right: 20px; height: 36px; padding: 0; border: 0; background: none; backdrop-filter: none; }
-  .breadcrumb { display: none; }
   .run-layout { grid-template-columns: 240px minmax(0, 1fr); }
   .action-list { top: 64px; max-height: calc(100dvh - 80px); }
 }
@@ -460,7 +456,6 @@ a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-sof
   .settings-nav { margin-inline: -16px; padding-inline: 16px; }
   .model-add-fields { grid-template-columns: 1fr; }
   .landing h1 { font-size: 36px; }
-  .topbar { right: 16px; }
 }
 
 /* Provider connections: credentials stay in a native modal outside refreshes. */

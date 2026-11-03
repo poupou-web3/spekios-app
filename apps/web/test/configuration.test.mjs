@@ -7,7 +7,7 @@ const defaults={provider:'openrouter',model:'openrouter/free',maxActions:6,viewp
 const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
 function workspace(fetch=async()=>response({})){const handlers={},node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   let uuid=0;
-  const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
+  const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{pathname:'/settings',search:'',hash:''},sessionStorage:{getItem(){return null;},setItem(){},removeItem(){}},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++uuid).padStart(12,'0')}`}};
   vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,configurationValues,configurationDraft,configurationError,configurationIssue,updateConfiguration,updateNewModel,addSavedModel,addCatalogModel,removeSavedModel,priceLink,focusPriceTarget,changedSections,rebaseConfiguration,applyConfiguration,configurationView,settingsView,saveConfiguration,navigateAction,memoryPanel,editProjectModels,connectionReady,keyOptions,demoPanel,keysPanel,needsPersonalKey,useDemoModel};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
@@ -100,15 +100,15 @@ test('settings open one section at a time, mark unsaved sections and link errors
   const ui=workspace();
   for(const [section,text] of [['models',/Your models/],['exploration',/Exploration strategy/],['limits',/Run limits/],['data',/App memory/],['appearance',/Theme/]]){
     ui.state.settingsSection=section;const html=ui.settingsView();
-    assert.match(html,new RegExp(`href="#/settings/${section}" aria-current="page"`));assert.match(html,text);
+    assert.match(html,new RegExp(`href="/settings/${section}" aria-current="page"`));assert.match(html,text);
   }
-  ui.state.settingsSection='nowhere';assert.match(ui.settingsView(),/href="#\/settings\/models" aria-current="page"/,'Unknown sections show the first.');
+  ui.state.settingsSection='nowhere';assert.match(ui.settingsView(),/href="\/settings\/models" aria-current="page"/,'Unknown sections show the first.');
   ui.state.settingsSection='appearance';assert.doesNotMatch(ui.settingsView(),/Save defaults/,'Appearance has nothing to save until another section has edits.');
   ui.updateConfiguration('override.0.max_minutes',5);ui.updateConfiguration('max_tokens',5);
   assert.deepEqual(plain(ui.configurationIssue(ui.configurationDraft().values)),['limits','Maximum reported tokens must be empty (no limit) or a whole number from 1000 to 1000000000.']);
   ui.state.settingsSection='models';const html=ui.settingsView();
-  assert.match(html,/Limits<span class="settings-nav-mark error"/);assert.match(html,/Unsaved changes in <a href="#\/settings\/limits">Limits<\/a>/);
-  assert.match(html,/<a href="#\/settings\/limits">Limits<\/a>: Maximum reported tokens/);assert.match(html,/type="submit" class="button primary" disabled/);
+  assert.match(html,/Limits<span class="settings-nav-mark error"/);assert.match(html,/Unsaved changes in <a href="\/settings\/limits">Limits<\/a>/);
+  assert.match(html,/<a href="\/settings\/limits">Limits<\/a>: Maximum reported tokens/);assert.match(html,/type="submit" class="button primary" disabled/);
   ui.state.settingsSection='appearance';assert.match(ui.settingsView(),/Save defaults/,'Unsaved edits stay visible from every section.');
 });
 test('typing a decimal keeps the unfinished text and saves a number',async()=>{
@@ -255,7 +255,7 @@ test('each saved model can carry its own input and output price, shown over the 
 test('a price link opens a listed model’s input price, or fills the add form with an unlisted model',()=>{
   const ui=workspace();
   ui.applyConfiguration({revision:4,settings:{...defaults,savedModels:[{provider:'meta',model:'muse-spark-1.3'},{provider:'openrouter',model:'vendor/x:free'}]}});
-  assert.equal(ui.priceLink('openrouter','vendor/x:free'),'#/settings/models/price/openrouter%7Cvendor%2Fx%3Afree');
+  assert.equal(ui.priceLink('openrouter','vendor/x:free'),'/settings/models/price/openrouter%7Cvendor%2Fx%3Afree');
   ui.state.priceTarget='openrouter|vendor/x:free';assert.equal(ui.focusPriceTarget(),'saved-1-input_usd_per_million');assert.equal(ui.state.priceTarget,null,'The target is used once.');
   assert.equal(ui.focusPriceTarget(),'');
   ui.state.priceTarget='meta|muse-wonder-1.0';assert.equal(ui.focusPriceTarget(),'new-model-input_usd_per_million');

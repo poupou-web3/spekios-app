@@ -21,7 +21,7 @@ test('a finished test reports its new findings once, and links to them',()=>{
   const ui=notificationsUI();ui.observeWorkspace({jobs:[job('a','running')],websites:[site(1)]});
   const events=ui.observeWorkspace({jobs:[job('a','completed')],websites:[site(3)]});
   assert.equal(events.length,1,'The findings belong to the finished test, not a second notification.');
-  assert.equal(events[0].title,'2 new findings');assert.equal(events[0].href,'#/workspace/run-a/findings');assert.equal(events[0].tone,'attention');
+  assert.equal(events[0].title,'2 new findings');assert.equal(events[0].href,'/workspace/run-a/findings');assert.equal(events[0].tone,'attention');
   const quiet=ui.observeWorkspace({jobs:[job('b','running')],websites:[site(3)]});ui.observeWorkspace({jobs:[job('b','running')],websites:[site(3)]});
   const finished=ui.observeWorkspace({jobs:[job('b','completed')],websites:[site(3)]});
   assert.equal(quiet.length,0);assert.equal(finished[0].title,'Test finished');assert.match(finished[0].detail,/nothing new to review/);
@@ -44,6 +44,6 @@ test('a fix check links to its issue and notifications can be turned off',()=>{
   const ui=notificationsUI(),fix=status=>job('v',status,{request:{kind:'verify_fix',candidate_url:'https://staging.shop.test/',issue_id:'issue-1'}});
   ui.observeWorkspace({jobs:[fix('running')]});
   const [event]=ui.observeWorkspace({jobs:[fix('completed')]});
-  assert.equal(event.title,'Fix check finished');assert.equal(event.href,'/issues#issue-1');assert.equal(event.detail,'staging.shop.test');
+  assert.equal(event.title,'Fix check finished');assert.equal(event.href,'/issues/issue-1');assert.equal(event.detail,'staging.shop.test');
   assert.equal(ui.notificationsEnabled(),true);ui.setNotificationsEnabled(false);assert.equal(ui.notificationsEnabled(),false);assert.equal(ui.storage.get('scout.notifications'),'off');
 });

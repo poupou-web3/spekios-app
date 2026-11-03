@@ -67,8 +67,8 @@
 /* Fill the column from the first paint. Auto margins in a grid cell shrink the page to its content and
    centre it, so it widened and slid left as panels loaded. */
 .website-app .issue-page, .website-app .connection-page { box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto 0 0; }
-.website-app .connection-top { justify-content: flex-end; align-items: center; min-height: 36px; margin-bottom: 24px; }
-.website-app .connection-top > .brand { display: none; }
+/* Signed in, Connect and Issues use the workspace's top bar; their own header is only the signed-out brand. */
+.website-app .connection-top { display: none; }
 .website-app .issue-heading { margin-block: 18px 28px; }
 .website-scope { margin-top: 12px; color: var(--brand-text); font-size: 12px; overflow-wrap: anywhere; }
 /* Project pages lead back to the project list; the workspace sidebar lists recent projects. */
@@ -79,7 +79,7 @@
 .workspace-sidebar .website-shortcuts .website-favicon svg { width: 13px; height: 13px; }
 .workspace-sidebar .website-shortcuts .website-favicon img { width: 15px; height: 15px; }
 
-/* Workspace landing (#/workspace): needs-you cards, the project grid and the latest tests. */
+/* Workspace landing (/workspace): needs-you cards, the project grid and the latest tests. */
 .workspace-landing { display: grid; gap: 34px; padding-top: 36px; }
 .workspace-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .workspace-heading .eyebrow { margin-bottom: 10px; color: var(--muted); }
@@ -167,7 +167,8 @@
 .website-sidebar-slot:empty { display: block; min-height: 100dvh; border-right: 1px solid var(--border); background: var(--sidebar); }
 .website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) { display: block; }
 .website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) .website-sidebar-slot { display: none; }
-.website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) .connection-top > .brand { display: flex; }
+.website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) .connection-top { display: flex; }
+.website-app:has(#manager-login:not([hidden]), #issue-login:not([hidden])) .page-topbar { display: none; }
 @media (max-width: 700px) { .website-sidebar-slot:empty { min-height: 132px; border-right: 0; border-bottom: 1px solid var(--border); } }
 
 /* Global activity is opened deliberately, away from the selected report. */
@@ -222,7 +223,14 @@
 .account-links svg, .account-signout svg { width: 16px; height: 16px; color: var(--muted); }
 .account-signout { width: 100%; margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-md) var(--r-md); }
 /* On narrow screens the top bar floats over the sidebar's brand row; keep it, and the account menu, on top. */
-@media (max-width: 960px) { .website-app .topbar { z-index: 7; } }
+/* Narrow screens: the brand row has room for the top bar controls; a second bar would only repeat the
+   page title. Shared by the workspace and the Connect and Issues pages. */
+@media (max-width: 960px) {
+  .website-app { position: relative; }
+  .website-app .topbar { position: absolute; z-index: 7; top: 12px; right: 20px; height: 36px; padding: 0; border: 0; background: none; backdrop-filter: none; }
+  .website-app .breadcrumb { display: none; }
+}
+@media (max-width: 520px) { .website-app .topbar { right: 16px; } }
 @media (max-width: 700px) { .website-app .account-menu .avatar { display: grid; } }
 
 /* Pop-up notifications, bottom left, above the sidebar's foot. Off from the account menu. */

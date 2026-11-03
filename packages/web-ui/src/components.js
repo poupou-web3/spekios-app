@@ -22,7 +22,11 @@ export function pill(value) {
   const map={cancelling:['Stopping…','amber'],completed:['Completed','green'],active:['Running','blue'],running:['Running','blue'],queued:['Queued',''],failed:['Failed','red'],interrupted:['Interrupted','amber'],blocked:['Needs access','amber'],cancelled:['Cancelled',''],waiting:['Needs sign-in','amber'],no_issue_observed:['No issue observed','green'],suspect:['Needs review','amber'],inconclusive:['Inconclusive',''],reproduced:['Reproduced','amber'],not_reproduced:['Not reproduced','green'],prepared:['Preparing',''],dispatched:['Executing','blue'],skipped:['Replanned before acting','amber'],evidence_failed:['Evidence gap','red'],available:['Available','green'],online:['Online','green']};
   const [label,color]=map[value]||[value||'Not assessed',''];return `<span class="pill ${color}">${esc(label)}</span>`;
 }
-export const stat = (label,value,note,key,options={}) => `<div class="stat"><div class="stat-label">${esc(label)}${icon(key)}</div><div class="stat-value">${esc(value)}</div><div class="stat-note">${options.html?note:esc(note)}</div></div>`;
+// With options.action the card is a button: data-action and data-value carry where it leads.
+export const stat = (label,value,note,key,options={}) => {
+  const tag=options.action?'span':'div',body=`<${tag} class="stat-label">${esc(label)}${icon(key)}</${tag}><${tag} class="stat-value">${esc(value)}</${tag}><${tag} class="stat-note">${options.html?note:esc(note)}</${tag}>`;
+  return options.action?`<button type="button" class="stat stat-button" data-action="${esc(options.action)}" data-value="${esc(options.value||'')}"${options.title?` title="${esc(options.title)}"`:''}>${body}</button>`:`<div class="stat">${body}</div>`;
+};
 export const empty = (title,description,key='layers') => `<div class="empty">${icon(key)}<h3>${esc(title)}</h3><p>${esc(description)}</p></div>`;
 export const json = value => `<pre class="json">${esc(JSON.stringify(value,null,2))}</pre>`;
 export const button = (action,label,key='',extra='') => `<button class="button" data-action="${action}" ${extra}>${key?icon(key):''}${esc(label)}</button>`;

@@ -273,8 +273,15 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(ui::index))
         .route("/favicon.svg", get(ui::favicon))
+        // The workspace routes by path (no `#`); every page of it is the same document.
+        .route("/workspace", get(ui::index))
+        .route("/workspace/{*rest}", get(ui::index))
+        .route("/website/{*rest}", get(ui::index))
+        .route("/settings", get(ui::index))
+        .route("/settings/{*rest}", get(ui::index))
         .route("/connect", get(ui::connect))
         .route("/issues", get(ui::issues))
+        .route("/issues/{issue}", get(ui::issues))
         .route("/login", get(web_auth::login))
         .route("/auth/callback", get(web_auth::callback))
         .route("/logout", get(web_auth::logout_page).post(web_auth::logout))
@@ -450,9 +457,11 @@ async fn authorize_request(
 
 async fn no_store(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
+    // Versioned assets set their own long-lived caching; everything else is never stored.
     response
         .headers_mut()
-        .insert("cache-control", "no-store".parse().unwrap());
+        .entry("cache-control")
+        .or_insert_with(|| "no-store".parse().unwrap());
     response
         .headers_mut()
         .insert("x-content-type-options", "nosniff".parse().unwrap());
