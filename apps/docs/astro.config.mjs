@@ -36,6 +36,7 @@ export default defineConfig({
         { label: 'Agents & LLMs', items: [
           { label: 'Install the agent skill', slug: 'agents/skill' },
           { label: 'Connect with MCP', slug: 'agents/connect' },
+          { label: 'Use the CLI', slug: 'agents/cli' },
           { label: 'Identity & private history', slug: 'agents/identity' },
           { label: 'Submit, poll, report, fix', slug: 'agents/workflow' },
           { label: 'Read a finding', slug: 'agents/findings' },

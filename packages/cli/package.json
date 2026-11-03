@@ -1,0 +1,11 @@
+{
+  "name": "spekios-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent CLI for Spekios projects, durable QA jobs and evidence",
+  "type": "module",
+  "bin": {"spekios": "spekios.mjs"},
+  "files": ["spekios.mjs", "README.md"],
+  "engines": {"node": ">=22"},
+  "scripts": {"test": "node --test test/*.test.mjs"}
+}
