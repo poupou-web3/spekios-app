@@ -379,3 +379,8 @@ finding-handoff-test:
 # Capped regions, actual cropped gateway image inputs and full-screen fallback; scripted providers.
 focus-regions-test:
     bash scripts/test-focus-regions.sh
+
+# Pair recorded Larchwood findings without requiring identical model wording.
+larchwood-eval *args:
+    mkdir -p "$PWD/artifacts/evaluations"
+    docker compose run --rm --build --no-deps --user "$(id -u):$(id -g)" -e RECORDER_SPOOL=/evaluations/spool -v "$PWD/artifacts/evaluations:/evaluations" --entrypoint ./node_modules/.bin/tsx recorder evaluation/larchwood.ts "$@"
