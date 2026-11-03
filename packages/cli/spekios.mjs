@@ -11,7 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 
-export const VERSION='0.1.0';
+export const VERSION='0.1.1';
 const DEFAULT_SERVER='https://app.spekios.com', PROJECT_FILE='.spekios.json';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCOPES=['runs:read','runs:write','usage:read'];

@@ -8,15 +8,15 @@
 ---
 The Spekios CLI gives terminal agents JSON commands for account connection,
 project selection, QA jobs, progress, history, reports and every live agent tool.
-It is a standalone Node.js 22+ file, with no runtime dependencies.
+Install it with Node.js 22+ and npm. The `spekios` command then runs directly, with no additional runtime packages.
 
 ## Connect an agent
 
-Download the CLI from your own Spekios server. For the hosted app:
+Install the CLI once from your own Spekios server. For the hosted app:
 
 ~~~sh
-curl --fail --show-error --location https://app.spekios.com/assets/cli/spekios.mjs -o spekios.mjs
-node spekios.mjs auth login --name "Coding agent"
+npm install --global https://app.spekios.com/assets/cli/spekios-cli.tgz
+spekios auth login --name "Coding agent"
 ~~~
 
 The command returns `verification_url`, `user_code`, and `next_command`. Give the
@@ -24,9 +24,9 @@ link to the account owner. They sign in to Spekios, review the name and requeste
 permissions, and choose **Allow connection**. The agent then runs:
 
 ~~~sh
-node spekios.mjs auth complete
-node spekios.mjs project list
-node spekios.mjs project use <project-uuid>
+spekios auth complete
+spekios project list
+spekios project use <project-uuid>
 ~~~
 
 Login returns immediately with exit code 3 while approval is needed. Complete
@@ -52,10 +52,10 @@ The API enforces ownership, and a mismatched workspace context is rejected.
 Use `--profile <name>` for a different account or agent.
 
 ~~~sh
-node spekios.mjs run https://your-app.example
-node spekios.mjs status <job-uuid>
-node spekios.mjs report <job-uuid>
-node spekios.mjs history --domain your-app.example
+spekios run https://your-app.example
+spekios status <job-uuid>
+spekios report <job-uuid>
+spekios history --domain your-app.example
 ~~~
 
 Run returns immediately, using the project's configured model, key and limits.
@@ -71,7 +71,7 @@ can mean the server accepted the job but the response was lost. The error contai
 a `request_id` and a `retry_command`:
 
 ~~~sh
-node spekios.mjs retry <request-uuid>
+spekios retry <request-uuid>
 ~~~
 
 Retry sends the original project, model/key reference and arguments, even if the
@@ -82,10 +82,10 @@ with a used ID are rejected.
 ## Discover and call the complete interface
 
 ~~~sh
-node spekios.mjs tools list
-node spekios.mjs tools call scout_get_project --input '{"project_id":"<uuid>"}'
-node spekios.mjs tools call scout_get_report --input @next-page.json
-node spekios.mjs tools call scout_cancel_work --input '{"kind":"job","id":"<uuid>"}'
+spekios tools list
+spekios tools call scout_get_project --input '{"project_id":"<uuid>"}'
+spekios tools call scout_get_report --input @next-page.json
+spekios tools call scout_cancel_work --input '{"kind":"job","id":"<uuid>"}'
 ~~~
 
 `--input` accepts a JSON object, `@file.json`, or `-` for stdin. Generic calls use

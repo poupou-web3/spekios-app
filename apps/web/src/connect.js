@@ -72,7 +72,7 @@ function prompt(){
 function renderPrompt(){const text=prompt();$('#starter-prompt').textContent=text||'Enter an HTTP or HTTPS app URL without credentials.';$('#copy-prompt').disabled=!text;}
 async function copy(value,label){try{await navigator.clipboard.writeText(value);message(label);}catch{message('Copy is unavailable in this browser. Select and copy the displayed text.');}}
 async function loadSetup(){
-  try{setupInfo=await api('/v1/agent-setup');const cli=$('#cli-login-command');if(cli)cli.textContent=`node spekios.mjs --server ${new URL(setupInfo.mcp_url).origin} auth login`;$('#mcp-url').value=setupInfo.mcp_url;$('#copy-url').disabled=false;selectClient(selectedClient);}catch(e){message('Connection setup is unavailable: '+e.message);}
+  try{setupInfo=await api('/v1/agent-setup');const origin=new URL(setupInfo.mcp_url).origin;const install=$('#cli-install-command');if(install)install.textContent=`npm install --global ${origin}/assets/cli/spekios-cli.tgz`;const cli=$('#cli-login-command');if(cli)cli.textContent=origin==='https://app.spekios.com'?'spekios auth login':`spekios --server ${origin} auth login`;$('#mcp-url').value=setupInfo.mcp_url;$('#copy-url').disabled=false;selectClient(selectedClient);}catch(e){message('Connection setup is unavailable: '+e.message);}
 }
 function showApproval(connection,kind){
   if(connection.status!=='pending')throw new Error('This connection has already been decided. Start a new connection in your agent if needed.');

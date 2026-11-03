@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
-import {serverOrigin} from '../spekios.mjs';
+import {serverOrigin,VERSION} from '../spekios.mjs';
 
 const cli=fileURLToPath(new URL('../spekios.mjs',import.meta.url));
 const catalog=JSON.parse(await readFile(new URL('../../../apps/docs/src/data/mcp-tools.json',import.meta.url),'utf8'));
@@ -83,7 +83,7 @@ test('origins are HTTPS or literal loopback; credentials and unsafe URLs are rej
 
 test('agent authenticates by approval, selects project, submits once and follows progress/report',async t=>{
   const f=await fixture(t);
-  assert.equal((await f.run(['--version'])).data.version,'0.1.0');
+  assert.equal((await f.run(['--version'])).data.version,VERSION);
   assert.equal((await f.run(['--help'])).data.exit_codes[3],'approval, authentication or sign-in required');
   assert.equal((await f.run(['id'])).code,0);
   assert.equal((await f.run(['auth','status'])).code,3);
@@ -177,7 +177,7 @@ test('denied approval issues no credential, pending proof never enters output',a
 
 test('installed/symlinked entrypoint works and new projects register on first job',async t=>{
   const f=await fixture(t);const link=join(f.dir,'spekios');await symlink(cli,link);
-  assert.equal((await f.run(['--version'],{entry:link})).data.version,'0.1.0');
+  assert.equal((await f.run(['--version'],{entry:link})).data.version,VERSION);
   await f.connect();const created=await f.run(['project','init']);assert.equal(created.data.registration,'on_first_job');assert.equal(created.code,0);
   assert.equal((await f.run(['project','init'])).data.error.code,'project_exists');
   assert.equal((await f.run(['run','https://shop.example'])).code,0);
