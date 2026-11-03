@@ -1,0 +1,26 @@
+# Optional public demo sites, behind the same HTTPS/AOP edge as the workspace.
+# The demo container has no credentials, data mounts or storage-network access.
+services:
+  larchwood:
+    profiles: !reset []
+    image: scout-qa-larchwood:local
+    build:
+      context: .
+      dockerfile: infra/bug-lab/Dockerfile
+    ports: !reset []
+    networks: !override
+      demos: {}
+    restart: unless-stopped
+  edge:
+    environment:
+      SCOUT_DEMO_FIXED_HOST: ${SCOUT_DEMO_FIXED_HOST:?Set the fixed demo hostname}
+      SCOUT_DEMO_FAULTY_HOST: ${SCOUT_DEMO_FAULTY_HOST:?Set the faulty demo hostname}
+    volumes:
+      - ./infra/edge/Caddyfile.demos:/etc/caddy/demos/larchwood.caddy:ro
+    networks:
+      default: {}
+      demos: {}
+    depends_on:
+      larchwood: {condition: service_healthy}
+networks:
+  demos: {}

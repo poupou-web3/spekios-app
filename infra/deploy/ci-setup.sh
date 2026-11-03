@@ -99,6 +99,16 @@ fi
 variable DEPLOY_SSH_HOST "$ssh_host"
 variable SCOUT_PUBLIC_HOST "$public_host"
 variable SCOUT_BACKOFFICE_HOST "$bo_host"
+fixed_demo=$(out demo_fixed_url || true); fixed_demo=${fixed_demo#https://}
+faulty_demo=$(out demo_faulty_url || true); faulty_demo=${faulty_demo#https://}
+if [[ -n "$fixed_demo" && -n "$faulty_demo" ]]; then
+  secret DEMO_ORIGIN_PEM <"$deploy/.secrets/demo-origin.pem"
+  variable SCOUT_DEMO_FIXED_HOST "$fixed_demo"
+  variable SCOUT_DEMO_FAULTY_HOST "$faulty_demo"
+  variable SCOUT_DEMO_SITES true
+else
+  variable SCOUT_DEMO_SITES false
+fi
 
 echo
 echo "Done. Every push to prod now deploys: merge main into prod to release code already on main."

@@ -11,6 +11,17 @@ for v in DEPLOY_SSH_HOST SCOUT_PUBLIC_HOST SCOUT_BACKOFFICE_HOST DEPLOY_SSH_KEY 
   [[ -n "${!v:-}" ]] || { echo "::error::$v is not set. Run just cloud-ci-setup on your machine." >&2; exit 1; }
 done
 
+demo_sites=${SCOUT_DEMO_SITES:-false}
+[[ "$demo_sites" == true || "$demo_sites" == false ]] || { echo '::error::SCOUT_DEMO_SITES must be true or false.' >&2; exit 1; }
+if [[ "$demo_sites" == true ]]; then
+  for v in SCOUT_DEMO_FIXED_HOST SCOUT_DEMO_FAULTY_HOST DEMO_ORIGIN_PEM; do
+    [[ -n "${!v:-}" ]] || { echo "::error::$v is required for demo sites." >&2; exit 1; }
+  done
+fi
+for demo_host in "${SCOUT_DEMO_FIXED_HOST:-}" "${SCOUT_DEMO_FAULTY_HOST:-}"; do
+  [[ -z "$demo_host" || "$demo_host" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo '::error::Invalid demo hostname.' >&2; exit 1; }
+done
+
 deploy=$(cd "$(dirname "$0")" && pwd)
 umask 077
 mkdir -p "$HOME/.ssh" "$deploy/.secrets"
@@ -40,11 +51,17 @@ scout:
       ansible_ssh_private_key_file: "$HOME/.ssh/scout_deploy"
       scout_public_host: "$SCOUT_PUBLIC_HOST"
       scout_backoffice_host: "$SCOUT_BACKOFFICE_HOST"
+      scout_demo_sites: $demo_sites
+      scout_demo_fixed_host: "${SCOUT_DEMO_FIXED_HOST:-}"
+      scout_demo_faulty_host: "${SCOUT_DEMO_FAULTY_HOST:-}"
 EOF
 
 printf '%s\n' "$ORIGIN_PEM" >"$deploy/.secrets/origin.pem"
 printf '%s\n' "$ORIGIN_KEY" >"$deploy/.secrets/origin.key"
 printf '%s\n' "$AOP_CA_PEM" >"$deploy/.secrets/aop-ca.pem"
+if [[ "$demo_sites" == true ]]; then
+  printf '%s\n' "$DEMO_ORIGIN_PEM" >"$deploy/.secrets/demo-origin.pem"
+fi
 if [[ -n "${ANSIBLE_SECRETS_YML:-}" ]]; then
   printf '%s\n' "$ANSIBLE_SECRETS_YML" >"$deploy/ansible/secrets.yml"
 fi

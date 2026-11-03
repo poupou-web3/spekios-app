@@ -64,6 +64,10 @@ jobs:
           DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
           SCOUT_PUBLIC_HOST: ${{ vars.SCOUT_PUBLIC_HOST }}
           SCOUT_BACKOFFICE_HOST: ${{ vars.SCOUT_BACKOFFICE_HOST }}
+          SCOUT_DEMO_SITES: ${{ vars.SCOUT_DEMO_SITES }}
+          SCOUT_DEMO_FIXED_HOST: ${{ vars.SCOUT_DEMO_FIXED_HOST }}
+          SCOUT_DEMO_FAULTY_HOST: ${{ vars.SCOUT_DEMO_FAULTY_HOST }}
+          DEMO_ORIGIN_PEM: ${{ secrets.DEMO_ORIGIN_PEM }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           ORIGIN_PEM: ${{ secrets.ORIGIN_PEM }}

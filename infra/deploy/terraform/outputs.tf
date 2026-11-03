@@ -2,6 +2,14 @@ output "server_ipv4" {
   value = hcloud_server.scout.ipv4_address
 }
 
+output "demo_fixed_url" {
+  value = var.demo_sites_enabled ? "https://${local.demo_hosts.fixed}" : ""
+}
+
+output "demo_faulty_url" {
+  value = var.demo_sites_enabled ? "https://${local.demo_hosts.faulty}" : ""
+}
+
 output "server_ipv6" {
   value = hcloud_server.scout.ipv6_address
 }

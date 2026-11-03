@@ -33,3 +33,7 @@
 	import cloudflare_origin
 	reverse_proxy backoffice:8080
 }
+
+# Optional Compose overlay mounts additional demo routes here. An empty glob
+# leaves ordinary deployments unchanged.
+import /etc/caddy/demos/*.caddy

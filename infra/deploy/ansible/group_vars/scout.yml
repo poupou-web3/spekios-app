@@ -7,6 +7,9 @@
 scout_remote: origin
 scout_branch: main
 scout_ref: ""
+scout_demo_sites: false
+scout_demo_fixed_host: ""
+scout_demo_faulty_host: ""
 
 scout_root: /opt/scout
 scout_releases_kept: 3
@@ -33,6 +36,9 @@ scout_managed_env:
   SCOUT_DEV_AUTH_BYPASS: "false"
   SCOUT_EDGE_TLS: origin
   SCOUT_EDGE_CERT_DIR: "{{ scout_cert_dir }}"
+  SCOUT_DEMO_SITES: "{{ scout_demo_sites | bool | ternary('true', 'false') }}"
+  SCOUT_DEMO_FIXED_HOST: "{{ scout_demo_fixed_host }}"
+  SCOUT_DEMO_FAULTY_HOST: "{{ scout_demo_faulty_host }}"
 
 # Patch, reboot and refuse unfixed kernels (tasks/kernel.yml). Only for test
 # hosts that do not own their kernel, such as containers.

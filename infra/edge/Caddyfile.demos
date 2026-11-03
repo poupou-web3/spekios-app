@@ -1,0 +1,20 @@
+# Separate hostnames give the fixed and faulty shops independent browser state.
+(cloudflare_demo_origin) {
+	tls /certs/demo-origin.pem /certs/origin.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /certs/aop-ca.pem
+		}
+	}
+	encode gzip
+}
+{$SCOUT_DEMO_FIXED_HOST} {
+	import cloudflare_demo_origin
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy larchwood:8085
+}
+{$SCOUT_DEMO_FAULTY_HOST} {
+	import cloudflare_demo_origin
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy larchwood:8084
+}

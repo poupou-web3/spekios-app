@@ -14,3 +14,9 @@ just bug-lab-score RUN_ID               # score a run against bugs.json
 - `score.mjs`: scoring, used by `scripts/score-bug-lab.mjs`
 
 Guide: [docs/exploration/bug-lab.md](../../docs/exploration/bug-lab.md).
+
+The production deployment can publish both variants as separate HTTPS sites:
+`https://larchwood.spekios.com` (fixed) and
+`https://larchwood-faulty.spekios.com` (14 intentional bugs). Their hostnames
+keep browser cookies, carts and Scout histories separate. See
+[hosted demos](../../infra/deploy/README.md#public-demonstration-shops).
