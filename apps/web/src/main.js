@@ -1,3 +1,4 @@
+import {showAgentHandoff,closeAgentHandoff} from './agent-handoff.js';
 // Workspace entry: delegated DOM events, polling and startup. Rendering lives in app.js.
 import {toast} from '/assets/ui/components.js';
 import {signIn} from '/assets/ui/http.js';
@@ -62,6 +63,10 @@ root.addEventListener('click',async e=>{
   if(e.target.closest('a[href^="#/"]')&&state.trackedJobId)clearTrackedJob();
   const el=e.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action;
+  if(action==='copy-agent-finding'){
+    const runId=state.runId,actionId=el.dataset.id;
+    el.disabled=true;try{const packet=await get(`/v1/runs/${runId}/issues/${actionId}`);if(state.connected&&state.runId===runId)showAgentHandoff(packet);}catch(error){toast(error.message);}finally{el.disabled=false;}return;
+  }
   if(action==='use-demo-model'){useDemoModel();render();return;}
   if(action==='add-provider-key'){openProviderKeyDialog(el.dataset.provider);return;}
   if(action==='default-provider-key'||action==='revoke-provider-key'){await changeProviderKey(el.dataset.id,action==='default-provider-key'?'default':'revoke');return;}
@@ -84,8 +89,8 @@ root.addEventListener('click',async e=>{
   if(action==='revoke-session'){try{await api('/v1/browser-sessions/'+el.dataset.id+'/revoke',{});if(state.sessionId===el.dataset.id)state.sessionId='';await refresh();toast('Saved session removed. A running browser remains signed in until it closes.');}catch(error){toast(error.message);}}
   if(action==='forget-memory'){try{await api('/v1/app-memory/'+el.dataset.id+'/forget',{});await refresh();toast('App memory forgotten. Recorded runs and evidence are unchanged.');}catch(error){toast(error.message);}}
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Workspace refreshed.');}
-  if(action==='logout'&&state.browserAuth){clearWebsiteNavigation();location.assign('/logout');return;}
-  if(action==='logout'){closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
+  if(action==='logout'&&state.browserAuth){closeAgentHandoff();clearWebsiteNavigation();location.assign('/logout');return;}
+  if(action==='logout'){closeAgentHandoff();closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
   if(action==='add-project-model'||action==='remove-project-model'){editProjectModels(action==='add-project-model',Number(el.dataset.index));render();}

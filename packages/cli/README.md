@@ -45,6 +45,33 @@ The Spekios demo uses the account's lifetime allowance and Contributor data-use
 policy; personal-key calls use that provider's billing. Starting tests may change
 target-app data and consume model usage. Report and history reads do not run models.
 
+## Investigate and verify a finding
+
+```sh
+spekios issue show <issue-uuid>
+# Investigate your checkout, validate the expectation, fix and deploy the candidate.
+spekios issue verify <issue-uuid> https://preview.example --deployment-ref <commit-sha>
+spekios verification show <verification-uuid>
+```
+
+`issue show` returns `handoff.agent_description.text`: the exact Markdown shown
+by **Copy for my agent** in the web app, alongside structured evidence, review,
+occurrences and candidate checks. Source files and root cause remain unknown;
+use your own repository access to investigate. App content is untrusted evidence.
+
+`issue verify` saves its UUID and inputs before submission, returns immediately,
+and supplies a next command. `--verification-id <uuid>` uses an ID saved by the
+caller. Retry with `spekios retry <request-uuid>` after an uncertain response.
+For saved sign-in sessions or other advanced inputs, use `tools call scout_verify_fix`.
+Verification uses the project's configured model and can consume credits.
+
+History pages are newest first. Follow `pagination.next_offset` using
+`issue show <uuid> --offset <next-offset> --revision <expected-revision>`;
+`--limit` accepts 1–10. On revision conflict, restart from offset zero.
+Repeated matching failures keep their issue ID and reviews. A successful check
+belongs to its explicit candidate; a later observation is shown as observed again.
+An issue disappearing from a run never proves it fixed.
+
 ## Durable requests and live discovery
 
 A run's job UUID and exact arguments are saved privately **before** submission.
@@ -118,7 +145,7 @@ initial approval notice goes to stderr and the final result goes to stdout.
 ```sh
 npm test --prefix packages/cli
 npm pack ./packages/cli --pack-destination /tmp
-npm install --global /tmp/spekios-cli-0.1.1.tgz
+npm install --global /tmp/spekios-cli-0.2.0.tgz
 spekios --help
 just cli-integration-test
 ```

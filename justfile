@@ -371,3 +371,7 @@ cli-test:
 
 cli-integration-test:
     bash scripts/test-agent-cli.sh
+
+# Persistent finding history, exact copy preview and installed CLI; no model calls.
+finding-handoff-test:
+    bash scripts/test-finding-handoff.sh
