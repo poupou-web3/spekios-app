@@ -364,3 +364,10 @@ oauth-test:
 steering-test:
     bash scripts/test-explorer.sh test/steering.test.ts test/frontier-planner.test.ts
     node scripts/verify-steering.mjs
+
+# Standalone agent CLI: isolated HTTP fixtures and disposable real API integration.
+cli-test:
+    npm test --prefix packages/cli
+
+cli-integration-test:
+    bash scripts/test-agent-cli.sh

@@ -7,6 +7,7 @@ COPY infra/postgres/024-web-auth.sql /infra/postgres/024-web-auth.sql
 COPY infra/postgres/025-provider-access.sql /infra/postgres/025-provider-access.sql
 COPY apps/web /web
 COPY packages/web-ui/src /packages/web-ui/src
+COPY packages/cli/spekios.mjs /packages/cli/spekios.mjs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo test --locked && cargo build --locked --release && cp target/release/scout-api /build/scout-api
