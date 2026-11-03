@@ -196,7 +196,9 @@ test('human review status uses the latest revision and dismissed candidates leav
   ui.state.findingFilter='dismissed';assert.deepEqual(Array.from(ui.filteredFindings(),a=>a.action_id),['dismissed']);
   ui.state.findingFilter='all';assert.equal(ui.filteredFindings().length,3);
   ui.state.tab='findings';ui.state.findingFilter='needs_review';const html=ui.runView();
-  assert.match(html,/Human confirmed/);assert.match(html,/1 human dismissed candidates/);assert.doesNotMatch(html,/data-action="select-action" data-id="dismissed"/);
+  assert.match(html,/Human confirmed/);assert.match(html,/1 human dismissed candidates/);
+  assert.match(html,/<button type="button" class="stat stat-button" data-action="jump-tab" data-value="findings:needs_review"[^>]*><span class="stat-label">Findings to review/,'The summary cards jump to their tab.');
+  assert.match(html,/data-action="jump-tab" data-value="findings:confirmed"/);assert.match(html,/data-action="jump-tab" data-value="actions"/);assert.match(html,/id="run-tabs"/);assert.doesNotMatch(html,/data-action="select-action" data-id="dismissed"/);
   ui.state.tab='actions';assert.match(ui.runView(),/data-action="select-action" data-id="dismissed"/);
   assert.equal(report.actions[1].assessment.verdict,'suspect');
 });
@@ -296,7 +298,7 @@ test('automatic task reservations expose queue and budget reasons without offeri
   let html=ui.runView();assert.match(html,/Automatic checks/);assert.match(html,/Waiting for room in the browser queue/);assert.match(html,/Additional action budget exhausted/);assert.match(html,/3 planned browser actions/);assert.match(html,/Stop automatic checks/);
   assert.doesNotMatch(ui.actionDetail(),/data-action="reproduce"/);
   report.automatic_reproductions[0]=automaticTask({status:'queued',child_job_id:'child',child_job:{job_id:'child',status:'running',run_id:'replay'}});
-  html=ui.actionDetail();assert.match(html,/#\/workspace\/replay/);assert.match(html,/already scheduled/);assert.doesNotMatch(html,/data-action="reproduce"/);
+  html=ui.actionDetail();assert.match(html,/\/workspace\/replay/);assert.match(html,/already scheduled/);assert.doesNotMatch(html,/data-action="reproduce"/);
   report.automatic_reproductions[0].child_job.status='failed';
   assert.match(ui.actionDetail(),/data-action="reproduce"/);
   report.run.auto_reproduction_cancel_id='cancel';report.automatic_reproductions[0].child_job.status='running';
@@ -316,7 +318,7 @@ test('planning can be stopped before tasks exist and completed checks retain out
   report.automatic_reproductions=[automaticTask({status:'queued',reason:'ready',child_job:{status:'completed',run_id:'replay'},reproduction:{status:'completed',replay_run_id:'replay',result:{outcome:'reproduced',reason:'Same failure observed',confirmed_bug:false}}})];
   let html=ui.automaticPanel();assert.match(html,/Reproduced/);assert.match(html,/Same failure observed/);assert.match(html,/Human review is required/);assert.match(html,/data-action="select-action" data-source-action="true" data-id="candidate"/);assert.doesNotMatch(html,/data-action="cancel-automatic"/);
   report.run={...report.run,run_id:'replay',config:{runtime_version:'explorer-v1',replay_of:{source_run_id:'run',source_action_id:'candidate'}}};
-  html=ui.automaticPanel();assert.match(html,/Automatic fresh-browser check/);assert.match(html,/#\/workspace\/run\/candidate/);assert.match(html,/href="#\/workspace\/run"/);assert.doesNotMatch(html,/#\/operations|data-action="cancel-automatic"/);
+  html=ui.automaticPanel();assert.match(html,/Automatic fresh-browser check/);assert.match(html,/\/workspace\/run\/candidate/);assert.match(html,/href="\/workspace\/run"/);assert.doesNotMatch(html,/\/operations|data-action="cancel-automatic"/);
   assert.equal(report.automatic_reproductions[0].reproduction.result.confirmed_bug,false);
 });
 
@@ -417,13 +419,13 @@ test('runs show input, output and total tokens with a cost estimated from model 
     {provider:'openrouter',model:attack,attempts:1,known_input_tokens:300,known_output_tokens:40,known_total_tokens:340,incomplete_usage_attempts:0,provider_reported_cost_usd:null,unpriced_attempts:1}]};
   ui.state.settings={savedModels:[{provider:'meta',model:'muse-spark-1.3',label:'Muse Spark',inputUsdPerMillion:0.5,outputUsdPerMillion:2}]};
   let html=ui.costStat(usage);assert.match(html,/≥ \$1\.00/);assert.match(html,/No price for &lt;b&gt;x&lt;\/b&gt;\. <span class="stat-action">Add a price/);
-  assert.match(html,/^<a class="stat stat-link" href="#\/settings\/models\/price\/openrouter%7C%3Cb%3Ex%3C%2Fb%3E">/,'The card opens the first unpriced model’s price.');
-  html=ui.usagePanel(usage);assert.match(html,/from <a href="#\/settings\/models">Settings → Models<\/a>/);
+  assert.match(html,/^<a class="stat stat-link" href="\/settings\/models\/price\/openrouter%7C%3Cb%3Ex%3C%2Fb%3E">/,'The card opens the first unpriced model’s price.');
+  html=ui.usagePanel(usage);assert.match(html,/from <a href="\/settings\/models">Settings → Models<\/a>/);
   assert.match(html,/Muse Spark[\s\S]*Meta AI · muse-spark-1\.3[\s\S]*1,000,000[\s\S]*250,000[\s\S]*1,250,000[\s\S]*\$0\.50 in · \$2\.00 out per 1M tokens[\s\S]*Your price[\s\S]*\$1\.00/);
-  assert.doesNotMatch(html,/<b>x<\/b>/);assert.match(html,/<a class="usage-price-link" href="#\/settings\/models\/price\/openrouter%7C%3Cb%3Ex%3C%2Fb%3E">Add a price<\/a>/);
+  assert.doesNotMatch(html,/<b>x<\/b>/);assert.match(html,/<a class="usage-price-link" href="\/settings\/models\/price\/openrouter%7C%3Cb%3Ex%3C%2Fb%3E">Add a price<\/a>/);
   assert.match(html,/All models<\/th><td>3<\/td><td>1,000,300<\/td><td>250,040<\/td><td>1,250,340<\/td>/);
   ui.state.settings.savedModels.push({provider:'openrouter',model:attack,inputUsdPerMillion:0,outputUsdPerMillion:0});
-  assert.match(ui.costStat(usage),/^<a class="stat stat-link" href="#\/settings\/models">[\s\S]*\$1\.00<\/div>[\s\S]*From your model prices\.[\s\S]*Edit prices/);
+  assert.match(ui.costStat(usage),/^<a class="stat stat-link" href="\/settings\/models">[\s\S]*\$1\.00<\/div>[\s\S]*From your model prices\.[\s\S]*Edit prices/);
   assert.match(ui.costStat({attempts:0,by_model:[]}),/^<div class="stat">[\s\S]*No model calls yet/,'Nothing to price, nothing to open.');
   assert.equal(ui.usagePanel({attempts:0,by_model:[]}),'','No calls, no usage table.');
   const row=ui.runUsage(usage);assert.match(row,/1,250,340/);assert.match(row,/1,000,300 in · 250,040 out/);assert.match(row,/\$1\.00 estimated/);

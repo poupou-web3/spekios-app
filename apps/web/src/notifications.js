@@ -35,10 +35,10 @@ export function notificationChanges(before,{jobs=[],websites=[],requests=[],runs
     const origin=notificationJobOrigin(job,jobs,runs),site=origin?websiteLabel(origin):'Your test',fix=job.request?.kind==='verify_fix';
     // Cancelling is the person's own action, so it is not news.
     if(job.status==='cancelled')continue;
-    const runHref=job.run_id?'#/workspace/'+job.run_id:origin?websiteHref(origin):'#/workspace';
+    const runHref=job.run_id?'/workspace/'+job.run_id:origin?websiteHref(origin):'/workspace';
     if(job.status==='completed'){
       const count=found.get(origin)||0;found.delete(origin);
-      if(fix)events.push({tone:'info',title:'Fix check finished',detail:site,href:job.request?.issue_id?'/issues#'+job.request.issue_id:runHref,label:'See the result'});
+      if(fix)events.push({tone:'info',title:'Fix check finished',detail:site,href:job.request?.issue_id?'/issues/'+job.request.issue_id:runHref,label:'See the result'});
       else events.push({tone:count?'attention':'info',title:count?`${count} new ${count===1?'finding':'findings'}`:'Test finished',detail:count?`${site} · test finished`:`${site} · nothing new to review`,href:count&&job.run_id?runHref+'/findings':runHref,label:count?'Review':'Open'});
     }else if(NOTIFY_STOPPED[job.status])events.push({tone:'error',title:`${fix?'Fix check':'Test'} ${NOTIFY_STOPPED[job.status]}`,detail:job.error?`${site} · ${job.error}`:site,href:runHref,label:'Open',sticky:true});
   }

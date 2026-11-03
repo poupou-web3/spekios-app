@@ -70,6 +70,9 @@ a.pill:hover { text-decoration: underline; text-underline-offset: 3px; }
 .stat-label svg { width: 16px; height: 16px; color: var(--brand-text); opacity: .75; }
 .stat-value { margin: 8px 0 4px; overflow-wrap: anywhere; font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .stat-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.stat-button { display: flex; flex-direction: column; justify-content: flex-start; width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.stat-button:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.stat-button:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .review-stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .review-stats .stat { padding: 14px 16px; }
 .review-stats .stat-value { font-size: 22px; }
@@ -128,7 +131,7 @@ td .button.quiet { margin-left: -8px; }
 .callout strong { margin-left: 6px; color: var(--text); }
 .callout p { margin-top: 6px; }
 .callout .button.quiet { margin: 6px 0 0 -8px; }
-.tabs { display: flex; gap: 22px; margin: 28px 0 20px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
+.tabs { display: flex; gap: 22px; margin: 28px 0 20px; scroll-margin-top: 72px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
 .tab { display: flex; align-items: center; gap: 7px; min-height: 44px; margin-bottom: -1px; padding: 0 2px; border-bottom: 2px solid transparent; color: var(--muted); font-size: 13.5px; font-weight: 550; white-space: nowrap; }
 .tab svg { width: 16px; height: 16px; }
 .tab:hover { color: var(--text); }

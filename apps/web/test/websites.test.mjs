@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 function websiteUI(){
   const storage=new Map(),sandbox={URL,Date,sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)}};
-  vm.createContext(sandbox);vm.runInContext(appSource('websites.js')+'\nglobalThis.ui={websiteOrigin,websiteHref,normalizeTargetUrl,dockerAddress,websiteLaunchHint,updateWebsiteLaunchHint,groupWebsites,websiteSidebar,websiteFavicon,bindWebsiteFavicons,rememberWebsiteShortcut,websiteShortcuts,clearWebsiteNavigation};',sandbox);
+  vm.createContext(sandbox);vm.runInContext(appSource('websites.js')+'\nglobalThis.ui={workspaceSidebar,websiteOrigin,websiteHref,normalizeTargetUrl,dockerAddress,websiteLaunchHint,updateWebsiteLaunchHint,groupWebsites,websiteSidebar,websiteFavicon,bindWebsiteFavicons,rememberWebsiteShortcut,websiteShortcuts,clearWebsiteNavigation};',sandbox);
   return {...sandbox.ui,storage};
 }
 const runId='11111111-1111-4111-8111-111111111111';
@@ -21,9 +21,9 @@ test('the full catalog keeps older websites selectable independently of the late
   assert.equal(sites[0].run_count,80);assert.equal(sites[1].run_count,2);
   const html=ui.websiteSidebar({websites:sites,origin:'https://old.example',page:'tests'});
   assert.match(html,/old\.example/);assert.match(html,/80 tests/);assert.match(html,/origin=https%3A%2F%2Fold\.example/);
-  assert.equal((html.match(/href="#\/website\/https%3A%2F%2Fold\.example"/g)||[]).length,2);
-  assert.match(html,/<a class="brand" href="#\/workspace"/);assert.match(html,/<a class="all-projects" href="#\/workspace">/);
-  assert.match(ui.websiteSidebar({websites:sites,origin:'https://old.example',external:true}),/<a class="all-projects" href="\/#\/workspace">/);
+  assert.equal((html.match(/href="\/website\/https%3A%2F%2Fold\.example"/g)||[]).length,2);
+  assert.match(html,/<a class="brand" href="\/workspace"/);assert.match(html,/<a class="all-projects" href="\/workspace">/);
+  assert.match(ui.websiteSidebar({websites:sites,origin:'https://old.example',external:true}),/<a class="all-projects" href="\/workspace">/);
 });
 test('recent shortcuts use their destination and stay scoped to the selected website',()=>{
   const ui=websiteUI(),run={run_id:runId,target_url:'https://a.example/checkout',created_at:'2026-11-01T10:00:00Z'};
@@ -76,18 +76,51 @@ test('the switcher on standalone customer pages shows Docker guidance and submit
   const drawn=draws;handlers.input({target:{id:'website-url',value:'localhost:4100'}});assert.match(hint.textContent,/host.docker.internal:4100/);assert.equal(draws,drawn,'Typing must preserve the input and its focus.');
   handlers.input({target:{id:'website-url',value:'larchwood:8084/shop'}});assert.doesNotMatch(hint.textContent,/where localhost/);
   await handlers.submit({target:{id:'website-launch-form'},preventDefault(){}});
-  assert.equal(writes[0].target_url,'http://larchwood:8084/shop');assert.equal(writes[0].auth_mode,'auto');assert.deepEqual(destinations,['/#/website/http%3A%2F%2Flarchwood%3A8084'],'A new test opens its project, which follows the job.');
+  assert.equal(writes[0].target_url,'http://larchwood:8084/shop');assert.equal(writes[0].auth_mode,'auto');assert.deepEqual(destinations,['/website/http%3A%2F%2Flarchwood%3A8084'],'A new test opens its project, which follows the job.');
 });
 
 test('standalone pages draw their sidebar and account menu before the website list arrives',async()=>{
   let release;const slot={dataset:{workspaceSidebar:''},html:'',set innerHTML(html){this.html=html;},get innerHTML(){return this.html;},querySelector:()=>null,addEventListener(){}};
-  const header={html:'',set innerHTML(html){this.html=html;},querySelector:()=>null,addEventListener(){}};
-  const sandbox={URL,URLSearchParams,Date,document:{querySelector:selector=>selector==='[data-workspace-sidebar]'?slot:selector==='.connection-top .row'?header:null,addEventListener(){}},location:{search:''},localStorage:{getItem:()=>null,setItem(){}},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},crypto:{randomUUID:()=>runId}};
+  const header={html:'',set innerHTML(html){this.html=html;},querySelector:()=>null,addEventListener(){}},crumb={innerHTML:''};
+  const sandbox={URL,URLSearchParams,Date,document:{querySelector:selector=>selector==='[data-workspace-sidebar]'?slot:selector==='[data-page-topbar] .topbar-right'?header:selector==='[data-page-topbar] .breadcrumb'?crumb:null,addEventListener(){}},location:{search:''},localStorage:{getItem:()=>null,setItem(){}},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},crypto:{randomUUID:()=>runId}};
   vm.createContext(sandbox);vm.runInContext(appSource('website-page.js')+'\nglobalThis.mount=mountWebsitePage;',sandbox);
   const mounted=sandbox.mount({page:'connect',identity:{workspace_name:'Larchwood team'},mode:{development:false,spekios:false},request:path=>path==='/v1/runs'?new Promise(resolve=>release=()=>resolve({runs:[],websites:[{origin:'https://a.example',run_count:3}]})):Promise.resolve(path==='/v1/browser-jobs'?{workers:[{available:true}]}:{gateway_ready:true})});
   await new Promise(setImmediate);
-  assert.match(slot.html,/workspace-sidebar/,'Connect your agent uses the workspace sidebar, drawn at once.');assert.doesNotMatch(slot.html,/website-switcher/);
+  assert.match(slot.html,/workspace-sidebar/,'Connect your agent uses the workspace sidebar, drawn at once.');assert.match(crumb.innerHTML,/<span>Connect your agent<\/span>$/,'The top bar names the page like the workspace does.');assert.doesNotMatch(slot.html,/website-switcher/);
   assert.match(header.html,/Account and workspace: Larchwood team/);assert.match(header.html,/data-action="logout"/);assert.doesNotMatch(header.html,/Browser worker/,'Status not loaded yet is left out.');
   release();await mounted;
   assert.match(slot.html,/a\.example/);assert.match(header.html,/Browser worker<\/span><span class="small muted">Online/);
+});
+
+test('every sidebar ends with Activity, Connect your agent and Settings below the separator',()=>{
+  const ui=websiteUI(),websites=[{origin:'https://a.example',run_count:2,last_test_at:'2026-11-01T10:00:00Z'}];
+  const bottom=html=>html.slice(html.indexOf('<div class="side-bottom">'));
+  const pages=[ui.workspaceSidebar({websites,page:'projects'}),ui.workspaceSidebar({websites,page:'settings'}),ui.workspaceSidebar({websites,page:'connect'}),ui.websiteSidebar({websites,origin:'https://a.example',page:'overview'})];
+  for(const html of pages){
+    assert.match(bottom(html),/^<div class="side-bottom"><nav aria-label="Workspace navigation">.*Activity.*href="\/connect".*Connect your agent.*href="\/settings".*Settings<\/a><\/nav>/);
+    assert.equal(html.match(/Connect your agent/g).length,1,'Each link appears once, at the bottom.');
+  }
+  assert.match(pages[0],/<nav aria-label="Projects"><a class="nav-item active" href="\/workspace" aria-current="page">/);
+  assert.match(bottom(pages[1]),/<a class="nav-item active" href="\/settings" aria-current="page">/);
+  assert.match(bottom(pages[2]),/<a class="nav-item active" href="\/connect" aria-current="page">/);
+  assert.match(bottom(pages[2]),/<a class="nav-item activity-trigger" href="\/workspace\?activity">/,'Without the panel, Activity opens it in the workspace.');
+  assert.match(bottom(ui.workspaceSidebar({websites,activity:'<button id="activity-trigger">Activity</button>'})),/<nav aria-label="Workspace navigation"><button id="activity-trigger">/);
+});
+test('workspace addresses are paths; old #/ addresses read the same',()=>{
+  const location={pathname:'/website/https%3A%2F%2Fa.example/tests',search:'',hash:''},pushed=[],routed=[];
+  const sandbox={location,history:{pushState:(_,__,url)=>{pushed.push(url);location.pathname=url;},replaceState:(_,__,url)=>{location.pathname=url;location.hash='';}},scrollTo(){}};
+  vm.createContext(sandbox);vm.runInContext(appSource('navigation.js')+'\nglobalThis.nav={currentPath,normalizeAddress,isWorkspacePath,enableNavigation,go,followLink};',sandbox);
+  const nav=sandbox.nav;
+  assert.equal(nav.currentPath(),'/website/https%3A%2F%2Fa.example/tests');
+  location.hash='#/settings/models';assert.equal(nav.currentPath(),'/settings/models');nav.normalizeAddress();assert.equal(location.pathname,'/settings/models');assert.equal(location.hash,'');
+  for(const href of ['/','/workspace','/workspace/abc/findings','/website/x','/settings','/workspace?activity'])assert.equal(nav.isWorkspacePath(href),true,href);
+  for(const href of ['/connect','/issues/abc','/login','https://evil.test/workspace','//evil.test/workspace','/workspaces'])assert.equal(nav.isWorkspacePath(href),false,href);
+  nav.enableNavigation(()=>routed.push(location.pathname));
+  const link=(href,extra={})=>({getAttribute:()=>href,hasAttribute:()=>false,dataset:{},target:'',...extra});
+  const click=(a,extra={})=>{let prevented=false;nav.followLink({button:0,target:{closest:()=>a},preventDefault(){prevented=true;},...extra});return prevented;};
+  assert.equal(click(link('/workspace/run-1')),true);assert.deepEqual(pushed,['/workspace/run-1']);assert.deepEqual(routed,['/workspace/run-1']);
+  assert.equal(click(link('/workspace/run-1',{dataset:{action:'open-findings'}})),true,'Its action handles the link; the browser does not load it.');assert.equal(routed.length,1);
+  assert.equal(click(link('/workspace/run-2'),{metaKey:true}),false,'A new-tab click is left to the browser.');
+  assert.equal(click(link('/connect')),false,'Connect your agent is its own page.');
+  assert.deepEqual(pushed,['/workspace/run-1']);
 });

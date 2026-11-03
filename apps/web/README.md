@@ -6,7 +6,8 @@ The interface customers use: launch explorations, follow runs, review evidence a
 index.html, connect.html, issues.html   page shells (CSP-safe: external scripts and styles only)
 src/
   main.js          entry: delegated events, polling, startup
-  app.js           render, refresh, hash routing (#/website/<origin>[/tests], #/workspace[/<run>[/<action>]], #/settings[/<section>])
+  app.js           render, refresh, path routing (/website/<origin>[/tests], /workspace[/<run>[/<action>]], /settings[/<section>])
+  navigation.js    in-page navigation between workspace paths; old #/ addresses still open
   state.js         shared state; values several modules change live on `state`
   api.js, images.js, jobs.js, shell.js, private-login.js
   websites.js, website-state.js, website-page.js  grouping, switcher and shared page navigation
@@ -20,9 +21,15 @@ test/              node --test suites; support.mjs links src/ for the vm sandbox
 
 `apps/api/build.rs` lists every `.js` and `.css` file under `src/` at compile time. Adding a module needs no Rust change, but the API embeds these files, so serve a UI change with `just reload` (or `just reload-api`). `just dev` is only needed to bring the whole stack up.
 
+Addresses are plain paths. The API serves `index.html` for `/workspace…`, `/website/…` and `/settings…`, and inside the workspace a link to one of them changes the page without reloading (`src/navigation.js`); Back and Forward work as usual. Old `#/…` addresses (and `/issues#<id>`) still open their page and are rewritten to the path. The selected issue is `/issues/<id>`.
+
+Every sidebar ends with Activity, Connect your agent and Settings below a separator, and Connect your agent and Issues & fixes use the workspace's top bar, so moving between pages never shifts the layout. On those two pages Activity links to `/workspace?activity`, which opens the Activity panel.
+
+`build.rs` also gives every asset URL the build's version (`/assets/v<hash>/app/…`) and adds `<link rel="modulepreload">` for each page's whole module graph. Versioned files are served `Cache-Control: public, max-age=31536000, immutable`, so after the first visit pages load from the browser cache; a new build changes every URL. Unversioned asset paths still answer, uncached.
+
 Shared formatting, components, theme and styles come from [`packages/web-ui`](../../packages/web-ui/README.md). Run `just web-test`.
 
-`#/workspace` is the project list: one project per website origin, with counts of findings to review, confirmed findings and tests across every run of that origin (from the `/v1/runs` website catalog), what needs attention across projects and the latest tests. It opens no project by itself; with no project yet it is the first-test page. The project list and settings use a workspace sidebar; every project page links back with **All projects**. A newly submitted test opens its project's overview, which follows the job to its run.
+`/workspace` is the project list: one project per website origin, with counts of findings to review, confirmed findings and tests across every run of that origin (from the `/v1/runs` website catalog), what needs attention across projects and the latest tests. It opens no project by itself; with no project yet it is the first-test page. The project list and settings use a workspace sidebar; every project page links back with **All projects**. A newly submitted test opens its project's overview, which follows the job to its run.
 
 The website switcher groups entry URLs by origin, keeping staging subdomains and local ports separate. Its catalog covers the complete owned run history; selected-website test history pages through 50 runs at a time. The overview shows the latest tests, while Tests retains search, filters and usage. Stopped explorations offer Continue exploration and Run again from their cards, history and report. Issues use the same exact origin filter. Recent shortcuts are limited to three per website in this tab, with icons for reports, findings, flow maps and pages. Settings and agent connection remain workspace actions at the bottom.
 

@@ -8,6 +8,7 @@ import {bootstrapSession,refresh,render,route} from './app.js';
 import {clearImages} from './images.js';
 import {cancelWork,clearTrackedJob,continueWork,restartWork,submitJob} from './jobs.js';
 import {closePrivateLogin,openPrivateLogin} from './private-login.js';
+import {enableNavigation,followLink,go} from './navigation.js';
 import {login} from './shell.js';
 import {reviewDrafts,root,state,steeringDrafts} from './state.js';
 import {navigateAction,selectedAction} from './views/action.js';
@@ -62,7 +63,7 @@ root.addEventListener('change',e=>{
   if(field){state[field]=e.target.value;render();}
 });
 root.addEventListener('click',async e=>{
-  if(e.target.closest('a[href^="#/"]')&&state.trackedJobId)clearTrackedJob();
+  if(e.target.closest('a[href^="/workspace"],a[href^="/website/"],a[href^="/settings"]')&&state.trackedJobId)clearTrackedJob();
   const el=e.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action;
   if(action==='copy-agent-finding'){
@@ -74,11 +75,11 @@ root.addEventListener('click',async e=>{
   if(action==='default-provider-key'||action==='revoke-provider-key'){await changeProviderKey(el.dataset.id,action==='default-provider-key'?'default':'revoke');return;}
   if(action==='close-drawer'&&e.target.closest('.drawer')&&!e.target.closest('button[data-action="close-drawer"]'))return;
   if(el.tagName==='A')e.preventDefault();
-  if(action==='focus-launch'){state.focusLaunch=true;if(state.view==='workspace'&&!state.runId&&state.websitePage==='overview'){state.focusLaunch=false;document.getElementById('target-url')?.focus();}else location.hash=websiteHref(state.websiteOrigin);}
-  if(action==='open-findings'){state.openFindingsRun=el.dataset.id;if(state.runId===el.dataset.id){state.tab='findings';state.findingFilter='needs_review';state.openFindingsRun=null;rememberWorkspacePage();render();}else location.hash='#/workspace/'+el.dataset.id;}
+  if(action==='focus-launch'){state.focusLaunch=true;if(state.view==='workspace'&&!state.runId&&state.websitePage==='overview'){state.focusLaunch=false;document.getElementById('target-url')?.focus();}else void go(websiteHref(state.websiteOrigin));}
+  if(action==='open-findings'){state.openFindingsRun=el.dataset.id;if(state.runId===el.dataset.id){state.tab='findings';state.findingFilter='needs_review';state.openFindingsRun=null;rememberWorkspacePage();render();}else void go('/workspace/'+el.dataset.id);}
   if(action==='run-filter'){state.runFilter=el.dataset.value;render();}
   if(action==='runs-page'){state.runOffset=Math.max(0,Number(el.dataset.offset)||0);await refresh();}
-  if(action==='activity-view-run'){state.drawer=null;if(state.runId===el.dataset.id)render();else location.hash='#/workspace/'+el.dataset.id;}
+  if(action==='activity-view-run'){state.drawer=null;if(state.runId===el.dataset.id)render();else void go('/workspace/'+el.dataset.id);}
   if(action==='open-activity'){closeReportExport();state.drawer={title:'Activity',activity:true};render();}
   if(action==='dismiss-tracked-job'){clearTrackedJob();render();}
   if(action==='cancel-automatic'||action==='retry-automatic')await cancelAutomatic(el.dataset.id);
@@ -105,6 +106,9 @@ root.addEventListener('click',async e=>{
   if(action==='outcome-json'){state.drawer={title:'Action completion and diagnostics',raw:{outcome:selectedAction()?.outcome,frames:(state.report.events||[]).filter(e=>e.action_id===state.actionId&&e.event_type==='action.settling_frame').map(e=>e.payload)}};render();}
   if(action==='tab'){state.tab=el.dataset.value;rememberWorkspacePage();render();}
   if(action==='finding-filter'){state.findingFilter=el.dataset.value;render();}
+  // The summary cards open their tab (and findings filter) and scroll down to it.
+  if(action==='jump-tab'){const [tab,filter]=String(el.dataset.value).split(':');state.tab=tab;if(filter)state.findingFilter=filter;rememberWorkspacePage();render();
+    const reduce=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;document.getElementById('run-tabs')?.scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'});}
   if(action==='image'){state.image=el.dataset.value;render();}
   if(action==='zoom-image'&&/^\/v1\/(?:captures\/[\da-f-]{36}\/image|artifacts\/[\da-f-]{36}\/content)$/.test(el.dataset.path||'')){state.drawer={title:'Recorded screenshot',image:{path:el.dataset.path,alt:el.dataset.alt,fit:false}};render();}
   if(action==='image-scale'&&state.drawer?.image){state.drawer.image.fit=!state.drawer.image.fit;render();}
@@ -140,6 +144,10 @@ document.addEventListener('keydown',e=>{
 function addModelAndRefocus(){document.activeElement?.blur?.();addSavedModel();render();document.getElementById('new-model-model')?.focus();}
 // Notifications live outside the re-rendered workspace so they survive each refresh.
 document.getElementById?.('notifications')?.addEventListener?.('click',e=>{if(e.target.closest?.('[data-notification-action="open-activity"]')){closeReportExport();state.drawer={title:'Activity',activity:true};render();}});
+// Workspace links change the page in place; Back and Forward show the page they lead to.
+enableNavigation(route);
+document.addEventListener('click',followLink);
+window.addEventListener('popstate',route);
 window.addEventListener('hashchange',route);
 setInterval(()=>{if(state.connected&&!document.hidden&&(!state.drawer||state.drawer.activity)&&!state.submitting)void refresh();},5000);
 bindThemeSwitch(root);

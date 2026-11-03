@@ -3,6 +3,7 @@ import {button,icon,toast} from '/assets/ui/components.js';
 import {esc,name} from '/assets/ui/format.js';
 import {api} from './api.js';
 import {refresh,render} from './app.js';
+import {go} from './navigation.js';
 import {state} from './state.js';
 import {canStart} from './views/home.js';
 import {selectWebsite} from './website-state.js';
@@ -95,7 +96,7 @@ export function followSubmittedJob(){
   const job=state.jobs.find(j=>j.job_id===state.trackedJobId);
   if(!job?.run_id)return false;
   clearTrackedJob();
-  location.hash='#/workspace/'+job.run_id;return true;
+  void go('/workspace/'+job.run_id);return true;
 }
 export function clearTrackedJob(){state.trackedJobId=null;sessionStorage.removeItem('scout.tracked-job');}
 export async function submitJob(request,{fromSwitcher=false}={}){
@@ -112,8 +113,8 @@ export async function submitJob(request,{fromSwitcher=false}={}){
         if(request.kind==='explore'){selectWebsite(request.target_url);state.websiteUrl='';state.websiteLaunchError='';}
         state.view='workspace';state.websitePage='overview';
         state.trackedJobId=response.job.job_id;sessionStorage.setItem('scout.tracked-job',state.trackedJobId);
-        // The project's overview follows the job until its run opens. #/workspace is the project list.
-        state.runId=null;state.report=null;state.actionId=null;location.hash=websiteHref(state.websiteOrigin);
+        // The project's overview follows the job until its run opens. /workspace is the project list.
+        state.runId=null;state.report=null;state.actionId=null;void go(websiteHref(state.websiteOrigin));
       }
     }
     await refresh();

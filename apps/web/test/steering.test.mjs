@@ -8,7 +8,7 @@ const report=id=>({run:{run_id:id,lifecycle:'active',config:{runtime_version:'ex
 const item=(revision,status='pending',focus='Search')=>({steering_id:'id-'+revision,revision,status,focus});
 function workspace(fetch=async()=>response({}),storage=new Map()){
   const node={innerHTML:'',textContent:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(){}};
-  const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{hash:'#/settings'},
+  const sandbox={document:{querySelector(){return node;},getElementById(){return null;},addEventListener(){}},window:{addEventListener(){}},location:{pathname:'/settings',search:'',hash:''},
     sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},fetch,AbortSignal,URL,setInterval(){},setTimeout(){},clearTimeout(){},crypto:{randomUUID:()=>crypto.randomUUID()}};
   vm.createContext(sandbox);vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,steeringDrafts,steeringDraft,updateSteeringFocus,steeringPanel,submitSteering,mergeSteering};',sandbox);
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,runId:'one',report:report('one'),view:'settings'});return{...ui,storage,node};

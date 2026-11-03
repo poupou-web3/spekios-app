@@ -1,11 +1,9 @@
 import {state} from './state.js';
-import {groupWebsites,rememberWebsiteShortcut,saveWebsite,websiteOrigin} from './websites.js';
+import {groupWebsites,withQueuedWebsites,rememberWebsiteShortcut,saveWebsite,websiteOrigin} from './websites.js';
 
 export function workspaceWebsites(){
-  const sites=groupWebsites(state.websites,state.runs);
-  // Admission can be queued before its first run exists. Keep that website selectable too.
-  for(const job of state.jobs){const origin=websiteOrigin(job.request?.target_url);if(origin&&!sites.some(site=>site.origin===origin))sites.push({origin,target_url:job.request.target_url,run_count:0});}
-  return sites;
+  // The Connect and Issues pages count projects the same way.
+  return withQueuedWebsites(groupWebsites(state.websites,state.runs),state.jobs);
 }
 export function selectedWebsite(){return workspaceWebsites().find(site=>site.origin===state.websiteOrigin)||null;}
 export function websiteRuns(){return state.websiteOrigin?state.runs.filter(run=>websiteOrigin(run.target_url)===state.websiteOrigin):state.runs;}
