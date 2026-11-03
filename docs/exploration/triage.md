@@ -10,7 +10,7 @@ Triage closes Scout's loop: the agent decides what is wrong, Scout records it, p
 | --- | --- | --- |
 | `human` | Workspace UI or a human REST request | Any decision |
 | `agent` | `scout_triage_issue`, or any request with an agent credential | Agent and Scout decisions |
-| `system` | Scout, when a new issue matches known behavior | Nothing; it only triages new issues |
+| `system` | Historical automatic matches retained for audit | Nothing; it only triages new issues |
 
 `scout_triage_issue(...)` is the single write path. It locks the issue, resolves `duplicate_of` to its canonical issue (refusing cycles), returns an identical current decision as `reused`, checks `expected_revision`, and refuses `human_decision_present` when an agent would replace a person. Each revision bumps the issue revision and appends an `issue.triaged` event, exported to ClickHouse with the other issue events.
 
@@ -18,9 +18,13 @@ Finding reviews stay separate: they label one action's evidence (with reproducti
 
 ## Behavior identity and known behavior
 
-An issue's fingerprint keeps its whole recorded path, so different paths to the same bug were separate issues. `issue_behaviors` adds a looser behavior key: the page URL of the before capture without its fragment, the command identity, the viewport profile and whether the action ran signed in. Migration 021 also strips `in_viewport`, `page_y` and `ambiguous` from the command identity: they describe scroll position and layout, and made one behavior at two scroll positions two issues.
+Migration [029-issue-handoff-history.sql](../../infra/postgres/029-issue-handoff-history.sql) adds append-only `issue_signatures` aliases and replaces path-dependent matching. Its version-2 signature covers the page URL without its fragment, normalized command identity, viewport profile and dimensions, project, execution mode, saved auth session (or isolated auth context), and case/whitespace-normalized expected and observed results. Missing observations are isolated by action ID. A per-owner/signature advisory lock serializes concurrent observations.
 
-When `scout_record_issue` creates a new issue, it records the behavior key and looks for another issue of the same owner with that key whose current decision is `bug`, `intended_behavior` or `duplicate`, taking the newest decision. The new issue is then triaged by `system`: intended behavior stays intended behavior; a bug or duplicate makes it a duplicate of the canonical issue. The existing issues get behavior keys when the migration runs; no decisions are invented for them.
+Existing IDs, fingerprints and snapshots remain unchanged. Backfill assigns a signature to the earliest existing issue. Future strict matches append an occurrence and lifecycle event to that issue, retaining human decisions. Historical separate IDs remain accessible. A changed failure stays untriaged even on a previously intended control: the loose `issue_behaviors` key supplies bounded related-finding suggestions, not automatic triage inheritance. Manual duplicates retain canonical links.
+
+`scout_issue_tracking` combines latest observation and candidate check without claiming a global fix. A completed positive candidate check is `verified_on_candidate`; a later observation is `observed_again`. Absence in an exploration has no lifecycle effect. The API returns occurrences/activity newest first and exposes tracking in issue summaries and run handoffs.
+
+`GET /v1/issues/{id}` and `scout_get_issue` share `handoff.agent_description`: bounded deterministic Markdown generated from structured evidence, including uncertainty and review decisions. The UI previews and copies this exact string without inference; an open preview is outside the polling root and remains frozen. The CLI exposes `issue show`, durable `issue verify`, and `verification show`.
 
 `GET /v1/knowledge` and `scout_list_knowledge` list canonical decisions (bug or intended behavior, not Scout's own matches), with page, control, viewport, sign-in state, and duplicates, matches and occurrences rolled up.
 
@@ -38,4 +42,5 @@ Run reports carry each persistent issue's current triage. The coding-agent repor
 
 - `cargo test` covers triage input rules, candidate URL derivation and stable verification IDs; `apps/web/test/issues.test.mjs` covers the triage form, conflicts, the open filter and recheck retries.
 - An end-to-end check against an isolated API and database covered: human triage and identical retries; automatic recognition across a different path and scroll position; agent triage refused over a person's decision; automatic duplicates, cycle and stale-revision refusals; the open list and knowledge roll-ups; report labels and counts; recheck admission, reuse, conflict and origin refusal; and the CI script's exit code on a regression.
+- `just finding-handoff-test` uses disposable PostgreSQL, real Chromium captures and the installed CLI to check legacy identity migration, concurrent occurrences, scope separation, retained review/evidence, candidate tracking, exact API/preview/copy equality, polling, account isolation and durable candidate admission/cancellation. History outcomes are fixtures and no model calls run.
 - Not yet covered by the fixture suites: rechecks executed by a real worker, and triage written from an agent credential over REST.

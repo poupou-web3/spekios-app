@@ -62,7 +62,7 @@ export function memoryLabel(run){
 export function persistentIssueLink(action){
   const issue=state.report?.persistent_issues?.find(i=>i.action_id===action.action_id);
   const id=issue?.issue_id||state.report?.run?.config?.fix_verification?.issue_id;
-  return id?`<div class="notice"><span>Issue ${esc(id)}</span><a class="button" href="/issues#${esc(id)}">History & verify fix</a></div>`:'';
+  return id?`<div class="notice"><span>Issue ${esc(id)}${issue?.tracking?.occurrence_count>1?` · Seen ${number(issue.tracking.occurrence_count)} times`:''}${issue?.tracking?.status==='observed_again'?' · Observed again':''}</span><a class="button" href="/issues#${esc(id)}">History & verify fix</a></div>`:'';
 }
 export function fixVerificationPanel(){
   const check=state.report?.fix_verification;if(!check)return '';

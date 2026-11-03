@@ -64,6 +64,31 @@ demo has a lifetime account allowance and its Contributor data-use policy;
 personal-key calls use the provider's billing. Reading progress/reports/history
 makes no model calls. Follow `poll_after_ms` rather than keeping a tight poll loop.
 
+## Investigate and verify a finding
+
+~~~sh
+spekios issue show <issue-uuid>
+# Investigate your checkout, validate the expectation, fix and deploy the candidate.
+spekios issue verify <issue-uuid> https://preview.example --deployment-ref <commit-sha>
+spekios verification show <verification-uuid>
+~~~
+
+`issue show` includes the exact Markdown shown by **Copy for my agent** in
+**handoff.agent_description.text**, plus structured evidence, human decisions,
+occurrences and candidate history. Scout supplies interface context; the coding
+agent uses its own repository access to locate the code and establish the cause.
+
+Verification saves its ID and inputs before submitting, returns immediately and
+supplies a next command. Use **--verification-id** for an ID saved by your agent,
+or **spekios retry <request-uuid>** after an uncertain response. This starts a
+browser check using configured models and can use credits. For an explicit saved
+sign-in session, use **tools call scout_verify_fix** with the live tool schema.
+
+History is newest first. Follow **pagination.next_offset** with
+**issue show <uuid> --offset <next-offset> --revision <expected-revision>**.
+**--limit** accepts 1–10; a revision conflict requires restarting at offset zero.
+See [finding history and candidate outcomes](../../guides/fix-verification/).
+
 ## Retry without duplicate jobs
 
 The CLI saves the job UUID and exact inputs privately before submitting. A timeout
