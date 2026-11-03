@@ -76,9 +76,24 @@ pub struct ModelRequest {
     /// Applies to OpenRouter only. No paid plugins or model fallback list is accepted.
     #[serde(default = "yes")]
     pub free_only: bool,
+    /// Native Meta computer tool. Never inferred from ordinary text output.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub computer_use: bool,
+    /// A non-executing compatibility check, with no run or screenshot access.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub computer_use_probe: bool,
 }
 impl ModelRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if (self.computer_use && self.provider != Provider::Meta)
+            || (self.computer_use_probe
+                && (!self.computer_use || self.run_id.is_some() || !self.capture_ids.is_empty()))
+            || (self.computer_use
+                && !self.computer_use_probe
+                && (self.run_id.is_none() || self.capture_ids.len() != 1))
+        {
+            return Err("invalid_computer_use_request");
+        }
         if self
             .provider_key_id
             .as_deref()
@@ -142,6 +157,9 @@ pub fn wire_request(spec: &ModelRequest, images: &[Vec<u8>]) -> Value {
             // structured plan from being cut off mid-JSON. "none" is rejected.
             if spec.provider == Provider::Meta {
                 body["reasoning"] = json!({"effort": "low"});
+                if spec.computer_use {
+                    body["tools"] = json!([{"type":"computer"}]);
+                }
             }
             body
         }
@@ -348,9 +366,94 @@ pub fn interpret(provider: Provider, body: &[u8], result: &mut CallResult) {
     };
 }
 
+/// Explicit model IDs on the direct Meta endpoint, checked against Meta's
+/// computer-use guide. Contributor remains unverified until a real probe.
+pub fn documented_computer_use(provider: Provider, model: &str) -> bool {
+    provider == Provider::Meta && matches!(model, "muse-spark-1.3" | "muse-wonder-1.0")
+}
+
+/// Preserve the native envelope in the existing audited output column. The
+/// browser validates every gesture and safety check before any execution.
+pub fn interpret_computer(body: &[u8], result: &mut CallResult) {
+    if result.http_status != Some(200) || !result.response_complete {
+        return;
+    }
+    result.state = "failed".into();
+    result.error = Some("computer_tool_not_returned".into());
+    result.output_text = None;
+    let Ok(v) = serde_json::from_slice::<Value>(body) else {
+        return;
+    };
+    if v["status"] != "completed" || !v["error"].is_null() {
+        return;
+    }
+    let calls: Vec<_> = v["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "computer_call")
+        .cloned()
+        .collect();
+    if calls.len() != 1
+        || !calls[0]["actions"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty() && a.len() <= 16)
+        || !calls[0]["call_id"].is_string()
+    {
+        return;
+    }
+    result.output_text = Some(json!({"computer_call":calls[0]}).to_string());
+    result.state = "completed".into();
+    result.error = None;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_computer_calls_require_explicit_meta_requests_and_complete_protocol() {
+        let mut request = spec(Provider::Meta);
+        request.model = "muse-spark-1.3-contributor".into();
+        request.computer_use = true;
+        assert_eq!(request.validate(), Err("invalid_computer_use_request"));
+        request.computer_use_probe = true;
+        assert!(request.validate().is_ok());
+        assert!(!documented_computer_use(request.provider, &request.model));
+        assert!(documented_computer_use(Provider::Meta, "muse-spark-1.3"));
+        assert!(!documented_computer_use(
+            Provider::Openrouter,
+            "muse-spark-1.3"
+        ));
+        assert_eq!(
+            wire_request(&request, &[])["tools"],
+            json!([{"type":"computer"}])
+        );
+        request.provider = Provider::Openai;
+        assert_eq!(request.validate(), Err("invalid_computer_use_request"));
+        let mut result = CallResult::unknown(Uuid::new_v4(), "pending");
+        result.http_status = Some(200);
+        result.response_complete = true;
+        let body=br#"{"status":"completed","output":[{"type":"computer_call","call_id":"cc1","actions":[{"type":"screenshot"}],"pending_safety_checks":[]}],"usage":{"input_tokens":20,"output_tokens":8}}"#;
+        interpret(Provider::Meta, body, &mut result);
+        interpret_computer(body, &mut result);
+        assert_eq!(result.state, "completed");
+        assert!(
+            result
+                .output_text
+                .as_ref()
+                .unwrap()
+                .contains("computer_call")
+        );
+        assert_eq!(result.usage.input_tokens, Some(20));
+        interpret_computer(br#"{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Yes I support tools"}]}]}"#,&mut result);
+        assert_eq!(
+            result.state, "failed",
+            "A textual claim never establishes tool support"
+        );
+        assert!(result.output_text.is_none());
+        interpret_computer(br#"{"status":"incomplete","output":[{"type":"computer_call","call_id":"cc1","actions":[{"type":"click","x":1,"y":2}]}]}"#,&mut result);
+        assert_eq!(result.state, "failed");
+    }
     #[test]
     fn non_text_output_is_not_a_successful_text_round_trip() {
         let mut r = CallResult::unknown(Uuid::new_v4(), "pending");
@@ -373,6 +476,8 @@ mod tests {
             max_output_tokens: 100,
             max_attempts: 2,
             free_only: true,
+            computer_use: false,
+            computer_use_probe: false,
         }
     }
     #[test]

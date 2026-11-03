@@ -9,7 +9,7 @@ export async function api(path,body,extraHeaders={},timeoutMs=18000,signal=null)
   const token=state.token,developmentAccess=state.developmentAccess,browserAuth=state.browserAuth;
   const response=await workspaceRequest(path,{token:developmentAccess?'':token,body,headers:extraHeaders,timeoutMs,signal});
   if((token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth))throw new Error('Workspace disconnected.');
-  if(response.status===401){closeAgentHandoff();closeReportExport();state.connected=false;state.developmentAccess=false;state.browserAuth=false;state.token='';state.configurationDraft=null;steeringDrafts.clear();state.error='Workspace access is required.';sessionStorage.removeItem('scout.workspace-token');clearImages();login();throw new Error('Workspace access is required.');}
+  if(response.status===401){state.computerUseCheck=null;state.computerUseResult=null;closeAgentHandoff();closeReportExport();state.connected=false;state.developmentAccess=false;state.browserAuth=false;state.token='';state.configurationDraft=null;steeringDrafts.clear();state.error='Workspace access is required.';sessionStorage.removeItem('scout.workspace-token');clearImages();login();throw new Error('Workspace access is required.');}
   if(response.status===304)return response;
   return requireOk(response);
 }

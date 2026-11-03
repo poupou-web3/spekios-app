@@ -13,6 +13,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 pub mod access;
 pub mod agent;
+pub mod computer_use;
 pub mod db;
 pub mod gateway;
 pub mod history;
@@ -236,6 +237,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/model-providers", get(gateway::providers))
+        .route(
+            "/v1/computer-use/check",
+            axum::routing::post(computer_use::check),
+        )
         .route(
             "/v1/provider-keys",
             axum::routing::post(provider_access::create_key),

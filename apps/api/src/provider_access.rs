@@ -249,6 +249,13 @@ pub async fn bind_settings(
                 .flatten()
         });
         let funding = resolve(tx, p, provider, model, reference, true).await?;
+        if !navigation && settings["computerUse"] == true {
+            let verified = crate::models::documented_computer_use(provider, model)
+                || crate::computer_use::verified(tx, p, model, &funding, "live").await?;
+            settings["computerUse"] = json!(verified);
+            settings["computerUseAvailability"] =
+                json!(if verified { "available" } else { "unverified" });
+        }
         if funding.source == "demo" {
             choice["providerKeyId"] = json!("demo");
         } else if let Some(id) = funding.key_id {

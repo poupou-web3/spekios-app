@@ -2,7 +2,7 @@
 {
   "title": "Connect a model provider",
   "description": "Configure OpenAI, Anthropic, OpenRouter or Meta AI API access, understand free-only routing, saved defaults and nullable token/cost accounting.",
-  "reviewed": "2026-11-02",
+  "reviewed": "2026-11-03",
   "sidebar": {
     "order": 3
   }
@@ -54,7 +54,43 @@ Free-only mode applies to OpenRouter. It is normalized off for direct OpenAI, An
 
 ## Meta AI
 
-Set the explorer provider to **meta** and the model to **muse-wonder-1.0**, or another current Meta model ID. The gateway sends non-streaming [Responses API](https://dev.meta.ai/docs/protocols/responses) requests to `https://api.meta.ai/v1/responses` with bearer authentication. `META_API_KEY` is the token Meta’s docs call `MODEL_API_KEY`; an empty `META_API_KEY` falls back to `MODEL_API_KEY`. Requests set `store` to false, so prompts and screenshots are not retained by Meta. They also set `reasoning.effort` to `low`: Muse Wonder's reasoning tokens come out of the same `max_output_tokens` budget as the JSON answer, and a deeper pass can truncate that answer. Token totals come from the response. Meta does not report a dollar price in that usage object. A listed Meta model still has a standard price in Settings, which the workspace uses to estimate cost. Meta calls use Meta’s own API billing.
+Set the explorer provider to **meta** and the model to **muse-wonder-1.0**, or another current Meta model ID. The gateway sends non-streaming [Responses API](https://dev.meta.ai/docs/protocols/responses) requests to `https://api.meta.ai/v1/responses` with bearer authentication. `META_API_KEY` is the token Meta’s docs call `MODEL_API_KEY`; an empty `META_API_KEY` falls back to `MODEL_API_KEY`. Requests set `store` to false to disable server-managed conversation state. Contributor data use is governed separately by that tier. They also set `reasoning.effort` to `low`: Muse Wonder's reasoning tokens come out of the same `max_output_tokens` budget as the JSON answer, and a deeper pass can truncate that answer. Token totals come from the response. Meta does not report a dollar price in that usage object. A listed Meta model still has a standard price in Settings, which the workspace uses to estimate cost. Meta calls use Meta’s own API billing.
+
+## Computer-use recovery
+
+Each entry in **Settings → Models → Your models** shows whether computer use is
+available and has an **Allow computer-use recovery** checkbox. Recovery uses the
+exploration model and its selected API key; it never changes models or funding.
+The integration currently supports Meta's native Responses computer tool only.
+The same model through OpenRouter does not enable it.
+
+Recovery defaults on for direct **muse-spark-1.3** and **muse-wonder-1.0**, whose
+support Meta documents. Other models default off. In particular,
+**muse-spark-1.3-contributor** stays unverified until **Check compatibility**
+succeeds. A check makes one metered call with the key named beside the button;
+it sends no app screenshots and executes no returned actions. A text claim of
+support does not pass. Successful checks are scoped to the account, actual key
+and execution mode and expire after 30 days. After checking, enable the checkbox
+and save defaults. Projects and run overrides use the preference for their
+resolved model. New jobs freeze the resolved permission and connection.
+
+When native exploration cannot reach a control before dispatch, or no reachable
+native frontier remains, Scout can request one visual click, hover, panel scroll
+or drag. Every gesture has a prediction, fresh before/after evidence, assessment
+and ordinary usage accounting. Recovery has a maximum of six attempts per run,
+three per URL and one per unchanged screenshot, within the run's existing limits.
+Forms, credentials, transactions, destructive actions and pending provider safety
+checks do not gain permission through recovery. Typing and keyboard actions are
+not supported by this integration. An attempted native click is not retried.
+
+A changing screenshot cancels a coordinate action. A rejected or unavailable
+computer tool disables recovery for that run while normal exploration continues.
+Earlier findings remain intact. Replay uses the recorded gesture only when the
+exact source screenshot and current permission match; it never asks a model to
+invent a replacement path. Candidate verification can therefore be inconclusive
+when visual preconditions change.
+
+See [Meta's computer-use guide](https://dev.meta.ai/docs/computer-use).
 
 ## Usage accounting
 

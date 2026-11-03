@@ -27,7 +27,7 @@ export type Observation = {
   controls_truncated?: boolean;
 };
 export type ObservedControl = {
-  control_id: string; role: 'button' | 'link' | 'textbox' | 'searchbox' | 'combobox' | 'checkbox' | 'radio' | 'scroll'; name: string; href: string | null;
+  control_id: string; role: 'button' | 'link' | 'textbox' | 'searchbox' | 'combobox' | 'checkbox' | 'radio' | 'scroll' | 'visual'; name: string; href: string | null;
   disabled: boolean; submits_form: boolean; ambiguous: boolean;
   rect?: { x: number; y: number; width: number; height: number };
   occluded?: boolean;
@@ -43,7 +43,8 @@ export type ObservedControl = {
     authorization: 'search' | 'configured_test_form' | null; signature: string };
 };
 export type ControlAction = { type: 'click' } | { type: 'fill'; value: string } | { type: 'select'; value: string }
-  | { type: 'set_checked'; checked: boolean } | { type: 'scroll' } | { type: 'submit' };
+  | { type: 'set_checked'; checked: boolean } | { type: 'scroll' } | { type: 'submit' }
+  | {type:'computer';action:import('./computer-use.js').ComputerAction;screenshot_sha256:string};
 export type BrowserCommand = { type: 'navigate'; url: string } | (ControlAction & { control: ObservedControl });
 export type Capture = {
   schema_version: 1;
