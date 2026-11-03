@@ -7,7 +7,7 @@ import vm from 'node:vm';
 function workspace(options={}){
   const handlers={},documentHandlers={},saved=new Map(),node={innerHTML:'',classList:{add(){},remove(){}},querySelectorAll(){return[];},addEventListener(type,fn){(handlers[type]??=[]).push(fn);}};
   const document={activeElement:null,querySelector(){return node;},getElementById(){return null;},addEventListener(type,fn){(documentHandlers[type]??=[]).push(fn);}};
-  const location={hash:'#/workspace'},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
+  const location={pathname:'/workspace',search:'',hash:''},sandbox={document,location,window:{addEventListener(){}},sessionStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)},setInterval(){},setTimeout(){return 0;},clearTimeout(){},AbortSignal,URL,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000088'},...options};
   vm.createContext(sandbox);
   vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,home,landingView,workspaceRuns,workspaceSetup,activityView,activityButton,shell,runView,imagePanel,drawer,render,submitJob,followSubmittedJob,route,bootstrapSession,api,refresh,restartRequest,continueRequest,selectWebsite,workspaceWebsites};',sandbox);
   return {...sandbox.testing,node,document,handlers,documentHandlers,location,saved};
@@ -21,7 +21,11 @@ test('website selection scopes history and keeps the overview focused on the sel
   const ui=workspace();ui.state.runs=[run('a',{target_url:'https://a.test/signup'}),run('a2',{target_url:'https://a.test/pricing'}),run('b')];
   ui.selectWebsite('https://a.test',{prefill:true});
   assert.deepEqual(Array.from(ui.workspaceRuns(),r=>r.run_id),['a','a2']);
-  assert.match(ui.home(),/A fresh look at/);assert.match(ui.home(),/website-test-card/);assert.doesNotMatch(ui.home(),/b\.test|run-search/);
+  assert.match(ui.home(),/A fresh look at/);assert.match(ui.home(),/website-test-card/);
+  ui.state.providers={keys:[],providers:[],demo:{enabled:true,configured:true,model:'demo-model',remaining_usd:0.98,minimum_call_reserve_usd:0.001}};Object.assign(ui.state.settings,{provider:'meta',model:'demo-model',providerKeyId:'demo'});
+  assert.doesNotMatch(ui.home(),/Website overview|demo-launch-note/,'The overview skips the section label and the demo key note.');
+  ui.state.websiteOrigin='';assert.match(ui.home(),/demo-launch-note/,'The first-test page still explains the demo key.');ui.state.websiteOrigin='https://a.test';
+assert.doesNotMatch(ui.home(),/b\.test|run-search/);
   assert.match(ui.shell(ui.home()),/Test a new URL/);assert.doesNotMatch(ui.shell(ui.home()),/>Recent tests<\/div>/);
   ui.state.websitePage='tests';assert.match(ui.home(),/id="run-search"/);
 });
@@ -34,7 +38,7 @@ test('activity collects queued work and private sign-in across websites',()=>{
 test('a scoped URL restores the website and requests its history without dropping the complete website catalog',async()=>{
   const paths=[],catalog=[{origin:'https://old.test',run_count:120,target_url:'https://old.test/editor'},{origin:'https://new.test',run_count:5,target_url:'https://new.test'}];
   const ui=workspace({fetch:async path=>{paths.push(path);return response(path.startsWith('/v1/runs?')?{runs:[run('older',{target_url:'https://old.test/editor'})],websites:catalog,total:120,next_offset:50}:payloads()[path]);}});connect(ui);
-  ui.location.hash='#/website/https%3A%2F%2Fold.test/tests';await ui.route();
+  ui.location.pathname='/website/https%3A%2F%2Fold.test/tests';await ui.route();
   assert.equal(ui.state.websiteOrigin,'https://old.test');assert.equal(ui.state.websitePage,'tests');assert.equal(ui.state.url,'https://old.test/');
   assert.ok(paths.includes('/v1/runs?origin=https%3A%2F%2Fold.test&offset=0'));assert.equal(ui.state.runNextOffset,50);
   assert.equal(ui.workspaceWebsites().length,2);assert.match(ui.shell(ui.home()),/120 tests/);assert.match(ui.home(),/data-action="runs-page"/);
@@ -60,15 +64,15 @@ test('switching websites during a refresh rejects the old page and immediately f
   assert.equal(ui.state.runs[0].target_url,'https://b.test');assert.equal(ui.state.websiteOrigin,'https://b.test');assert.ok(paths.some(path=>path.startsWith('/v1/runs?origin=https%3A%2F%2Fb.test')));
 });
 test('switcher launches from settings return to the website while manual navigation wins a late admission',async()=>{
-  const data=payloads(),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job:{job_id:'new'}}:data[path])});connect(ui);ui.state.view='settings';ui.location.hash='#/settings/models';
+  const data=payloads(),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job:{job_id:'new'}}:data[path])});connect(ui);ui.state.view='settings';ui.location.pathname='/settings/models';
   await ui.submitJob({kind:'explore',target_url:'https://new.test'},{fromSwitcher:true});
-  assert.equal(ui.state.view,'workspace');assert.equal(ui.state.websiteOrigin,'https://new.test');assert.equal(ui.location.hash,'#/website/https%3A%2F%2Fnew.test');
+  assert.equal(ui.state.view,'workspace');assert.equal(ui.state.websiteOrigin,'https://new.test');assert.equal(ui.location.href,'/website/https%3A%2F%2Fnew.test');
   let release,entered;const started=new Promise(resolve=>entered=resolve),other=workspace({fetch:async(path,options)=>{
     if(options.method==='POST'){entered();return new Promise(resolve=>release=()=>resolve(response({job:{job_id:'late'}})));}return response(data[path]);
   }});connect(other);other.selectWebsite('https://a.test');
   const pending=other.submitJob({kind:'explore',target_url:'https://a.test/pricing'},{fromSwitcher:true});await started;
-  other.selectWebsite('https://b.test');other.location.hash='#/website/https%3A%2F%2Fb.test';release();await pending;
-  assert.equal(other.state.websiteOrigin,'https://b.test');assert.equal(other.state.trackedJobId,null);assert.equal(other.location.hash,'#/website/https%3A%2F%2Fb.test');
+  other.selectWebsite('https://b.test');other.location.pathname='/website/https%3A%2F%2Fb.test';release();await pending;
+  assert.equal(other.state.websiteOrigin,'https://b.test');assert.equal(other.state.trackedJobId,null);assert.equal(other.location.pathname,'/website/https%3A%2F%2Fb.test');assert.equal(other.location.href,undefined,'The late admission does not navigate.');
 });
 
 test('workspace filters combine URL/model search, review status and live/test mode',()=>{
@@ -93,16 +97,16 @@ test('new jobs stay in Workspace, follow exactly one linked run, and retain dura
   const job={job_id:'00000000-0000-4000-8000-000000000088',status:'queued',request:{kind:'explore',target_url:'https://test.app'}};
   const data=payloads([job]),ui=workspace({fetch:async(path,options)=>response(options.method==='POST'?{job,reused:false}:data[path])});connect(ui);
   await ui.submitJob({kind:'explore',target_url:'https://test.app'});
-  assert.equal(ui.location.hash,'#/website/https%3A%2F%2Ftest.app');assert.equal(ui.state.view,'workspace');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.tracked-job'),job.job_id);
+  assert.equal(ui.location.href,'/website/https%3A%2F%2Ftest.app');assert.equal(ui.state.view,'workspace');assert.equal(ui.state.trackedJobId,job.job_id);assert.equal(ui.saved.get('scout.tracked-job'),job.job_id);
   assert.match(ui.activityView(),/Your test will open here/);assert.equal(ui.followSubmittedJob(),false);
-  job.run_id='00000000-0000-4000-8000-000000000099';assert.equal(ui.followSubmittedJob(),true);assert.equal(ui.location.hash,'#/workspace/'+job.run_id);assert.equal(ui.state.trackedJobId,null);assert.equal(ui.followSubmittedJob(),false);
+  job.run_id='00000000-0000-4000-8000-000000000099';assert.equal(ui.followSubmittedJob(),true);assert.equal(ui.location.href,'/workspace/'+job.run_id);assert.equal(ui.state.trackedJobId,null);assert.equal(ui.followSubmittedJob(),false);
 });
 test('manual navigation cancels automatic follow intent and late admission does not hijack settings',async()=>{
   let complete,started;const waiting=new Promise(resolve=>{started=resolve;}),data=payloads();
   const ui=workspace({fetch:async(path,options)=>options.method==='POST'?{ok:true,status:202,json:()=>new Promise(resolve=>{complete=resolve;started();})}:response(data[path])});connect(ui);
   const pending=ui.submitJob({kind:'explore',target_url:'https://test.app'});await waiting;
-  ui.state.view='settings';ui.location.hash='#/settings';complete({job:{job_id:'job'}});await pending;
-  assert.equal(ui.state.trackedJobId,null);assert.equal(ui.location.hash,'#/settings');
+  ui.state.view='settings';ui.location.pathname='/settings';complete({job:{job_id:'job'}});await pending;
+  assert.equal(ui.state.trackedJobId,null);assert.equal(ui.location.pathname,'/settings');assert.equal(ui.location.href,undefined);
   ui.state.trackedJobId='old-job';await ui.route();assert.equal(ui.state.trackedJobId,null);
 });
 test('a rejected address is explained on the launch field',async()=>{
@@ -113,7 +117,7 @@ test('a rejected address is explained on the launch field',async()=>{
 });
 test('failed or cancelled admission without a run remains visible to its user',()=>{
   const ui=workspace();ui.state.trackedJobId='job';ui.state.jobs=[{job_id:'job',status:'failed',run_id:null,error:'<script>target failure</script>'}];
-  assert.match(ui.activityView(),/Your test could not start/);assert.match(ui.activityView(),/Job job/);assert.doesNotMatch(ui.activityView(),/#\/operations|back office/i);assert.doesNotMatch(ui.activityView(),/<script>/);
+  assert.match(ui.activityView(),/Your test could not start/);assert.match(ui.activityView(),/Job job/);assert.doesNotMatch(ui.activityView(),/\/operations|back office/i);assert.doesNotMatch(ui.activityView(),/<script>/);
   ui.state.jobs[0].status='cancelled';assert.match(ui.activityView(),/cancelled before launch/);assert.equal(ui.followSubmittedJob(),false);
 });
 const ready=ui=>Object.assign(ui.state,{settings:{provider:'openrouter',model:'model'},providers:{gateway_ready:true,providers:[{provider:'openrouter',configured:true}]},workers:[{available:true}]});
@@ -128,7 +132,7 @@ test('a stopped test starts again with the request that launched it',async()=>{
   ui.state.submitting=true;assert.match(ui.home(),/data-id="broken" aria-label="Run broken.test again" title="Run again" disabled/);ui.state.submitting=false;
   session.expires_at='2000-01-01T00:00:00Z';await click(ui,'restart-run','broken');
   assert.deepEqual(posted[0],{job_id:'00000000-0000-4000-8000-000000000088',kind:'explore',target_url:'https://broken.test',viewport_profile:'mobile',auth_mode:'sign_in',auto_reproduce:true,project_id:'project'});
-  assert.equal(ui.state.trackedJobId,'new');assert.equal(ui.location.hash,'#/website/https%3A%2F%2Fbroken.test');
+  assert.equal(ui.state.trackedJobId,'new');assert.equal(ui.location.href,'/website/https%3A%2F%2Fbroken.test');
 });
 test('a failed model plan names the request, the provider error and the reasoning budget',()=>{
   const ui=workspace(),requestId='f4b6e31f-07ee-4ab5-85d8-dcbc224bb977';
@@ -245,9 +249,9 @@ test('image inspection offers actual pixels, fit mode and pending evidence seman
   ui.state.drawer.image.fit=true;assert.match(ui.drawer(),/fit-resolution/);
 });
 test('run tabs support keyboard navigation and skip link does not change route',()=>{
-  const ui=workspace();connect(ui);const keys=ui.documentHandlers.keydown.at(-1),click=ui.documentHandlers.click.at(-1);let focused='';ui.document.getElementById=id=>({focus(){focused=id;},scrollIntoView(){}});
+  const ui=workspace();connect(ui);const keys=ui.documentHandlers.keydown.at(-1),click=event=>ui.documentHandlers.click.forEach(handler=>handler(event));let focused='';ui.document.getElementById=id=>({focus(){focused=id;},scrollIntoView(){}});
   keys({key:'End',preventDefault(){},target:{closest(){return {dataset:{action:'tab'}};}}});assert.equal(ui.state.tab,'flow');assert.equal(focused,'run-tab-flow');
-  click({preventDefault(){},target:{closest(){return true;}}});assert.equal(focused,'main-content');assert.equal(ui.location.hash,'#/workspace');
+  click({preventDefault(){},target:{closest(){return true;}}});assert.equal(focused,'main-content');assert.equal(ui.location.pathname,'/workspace');assert.equal(ui.location.href,undefined);
 });
 test('closing a drawer restores focus by stable identity after its opener was replaced',()=>{
   const ui=workspace();connect(ui);let dialog=false,focused='';
@@ -314,7 +318,7 @@ test('Spekios mode uses the cookie session and clears stale manual credentials',
 });
 test('Spekios without a session shows hosted sign-in instead of the token form',async()=>{
   const ui=workspace({fetch:async(path)=>path==='/v1/auth-mode'?response({mode:'spekios'}):{ok:false,status:401,json:async()=>({error:'unauthorized'})}});
-  await ui.bootstrapSession();assert.equal(ui.state.connected,false);assert.match(ui.node.innerHTML,/href="\/login"/);assert.doesNotMatch(ui.node.innerHTML,/id="token"|id="login-form"/);
+  await ui.bootstrapSession();assert.equal(ui.state.connected,false);assert.match(ui.node.innerHTML,/href="\/login\?next=%2Fworkspace"/,'Signing in returns to the page that asked.');assert.doesNotMatch(ui.node.innerHTML,/id="token"|id="login-form"/);
 });
 test('a late cookie-authenticated refresh cannot reopen an expired session',async()=>{
   const bodies=[];let allStarted;const started=new Promise(resolve=>{allStarted=resolve;});
@@ -327,12 +331,12 @@ test('a late cookie-authenticated refresh cannot reopen an expired session',asyn
 test('a price link routes to Settings → Models, moves to the model’s price and drops the target from the address',async()=>{
   const focused=[],replaced=[],field={focus(){focused.push('saved-0-input_usd_per_million');},scrollIntoView(){}};
   const settings={provider:'meta',model:'muse-spark-1.3',savedModels:[{provider:'meta',model:'muse-spark-1.3'}]};
-  const ui=workspace({window:{addEventListener(){},scrollTo(){},history:{replaceState:(_,__,url)=>replaced.push(url)}},fetch:async path=>response({...payloads(),'/v1/browser-jobs':{jobs:[],workers:[],settings,settings_revision:2},'/v1/app-memory':{scopes:[]}}[path]??{})});
+  const ui=workspace({window:{addEventListener(){},scrollTo(){}},history:{replaceState:(_,__,url)=>replaced.push(url)},fetch:async path=>response({...payloads(),'/v1/browser-jobs':{jobs:[],workers:[],settings,settings_revision:2},'/v1/app-memory':{scopes:[]}}[path]??{})});
   connect(ui);ui.document.getElementById=id=>id==='saved-0-input_usd_per_million'?field:null;
-  ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();
+  ui.location.pathname='/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();
   assert.equal(ui.state.view,'settings');assert.equal(ui.state.settingsSection,'models');
-  assert.deepEqual(replaced,['#/settings/models']);assert.deepEqual(focused,['saved-0-input_usd_per_million']);assert.equal(ui.state.priceTarget,null);
-  ui.location.hash='#/settings/models/price/%E0%A4%A';await ui.route();assert.equal(ui.state.priceTarget,null,'A malformed target is ignored.');
+  assert.deepEqual(replaced,['/settings/models']);assert.deepEqual(focused,['saved-0-input_usd_per_million']);assert.equal(ui.state.priceTarget,null);
+  ui.location.pathname='/settings/models/price/%E0%A4%A';await ui.route();assert.equal(ui.state.priceTarget,null,'A malformed target is ignored.');
 });
 
 test('background activity and notifications never enter the selected report or open by themselves',async()=>{
@@ -341,12 +345,12 @@ test('background activity and notifications never enter the selected report or o
   const ui=workspace({fetch:async path=>response(path==='/v1/runs/selected'?report:data[path])});connect(ui);
   Object.assign(ui.state,{runId:'selected',report,websiteOrigin:'https://selected.test',tab:'flow',trackedJobId:'other-job'});
   await ui.refresh();
-  assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');assert.equal(ui.location.hash,'#/workspace');
+  assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');assert.equal(ui.location.pathname,'/workspace');assert.equal(ui.location.href,undefined);
   const selected=ui.shell(ui.runView());assert.doesNotMatch(selected,/https:\/\/unrelated.test\/private|View run|Stop run|activity-card/);
   ui.state.error='<script>refresh failure</script>';assert.doesNotMatch(ui.shell(ui.runView()),/refresh failure|Showing the last available data/);
   await click(ui,'open-activity');
   assert.equal(ui.state.runId,'selected');assert.equal(ui.state.tab,'flow');assert.equal(ui.state.websiteOrigin,'https://selected.test');
-  const open=ui.drawer();assert.match(open,/role="dialog"/);assert.match(open,/Across all websites/);assert.match(open,/https:\/\/unrelated.test\/private/);assert.match(open,/data-action="cancel-job" data-id="other-job"/);assert.match(open,/#\/workspace\/other-run/);assert.match(open,/refresh failure/);assert.doesNotMatch(open,/<script>/);
+  const open=ui.drawer();assert.match(open,/role="dialog"/);assert.match(open,/Across all websites/);assert.match(open,/https:\/\/unrelated.test\/private/);assert.match(open,/data-action="cancel-job" data-id="other-job"/);assert.match(open,/\/workspace\/other-run/);assert.match(open,/refresh failure/);assert.doesNotMatch(open,/<script>/);
   await click(ui,'close-drawer');assert.equal(ui.state.drawer,null);assert.equal(ui.state.runId,'selected');
 });
 test('Activity stays live while open and evidence drawers keep their polling pause',async()=>{
@@ -362,7 +366,7 @@ test('Activity stays live while open and evidence drawers keep their polling pau
 test('Activity shows recent results once and keeps an older failed admission available',()=>{
   const ui=workspace();ui.state.trackedJobId='failed';ui.state.jobs=[{job_id:'failed',status:'failed',error:'worker unavailable',request:{kind:'explore',target_url:'https://old.test'}}];
   for(let i=0;i<12;i++)ui.state.jobs.push({job_id:'job-'+i,status:'completed',run_id:'run-'+i,finished_at:'2026-11-01T12:'+String(i).padStart(2,'0')+':00Z',request:{kind:'explore',target_url:'https://done.test'}});
-  const html=ui.activityView();assert.equal((html.match(/class="activity-card"/g)||[]).length,11);assert.equal((html.match(/Your test could not start/g)||[]).length,1);assert.match(html,/#\/workspace\/run-11/);assert.doesNotMatch(html,/#\/workspace\/run-0"/);
+  const html=ui.activityView();assert.equal((html.match(/class="activity-card"/g)||[]).length,11);assert.equal((html.match(/Your test could not start/g)||[]).length,1);assert.match(html,/\/workspace\/run-11/);assert.doesNotMatch(html,/\/workspace\/run-0"/);
   assert.match(ui.activityButton(),/0 running, 1 notifications/);
 });
 
@@ -373,7 +377,7 @@ test('desktop and mobile Activity controls have distinct focus identities',()=>{
 test('viewing the current run from Activity closes the panel without resetting its tab',async()=>{
   const ui=workspace();connect(ui);Object.assign(ui.state,{runId:'current',report:{run:run('current'),actions:[],captures:[]},tab:'flow',drawer:{activity:true,title:'Activity'}});
   await click(ui,'activity-view-run','current');assert.equal(ui.state.drawer,null);assert.equal(ui.state.tab,'flow');assert.equal(ui.state.runId,'current');
-  ui.state.drawer={activity:true,title:'Activity'};await click(ui,'activity-view-run','other');assert.equal(ui.state.drawer,null);assert.equal(ui.location.hash,'#/workspace/other');
+  ui.state.drawer={activity:true,title:'Activity'};await click(ui,'activity-view-run','other');assert.equal(ui.state.drawer,null);assert.equal(ui.location.href,'/workspace/other');
 });
 
 
@@ -394,7 +398,7 @@ test('price links from a website wait for an ongoing refresh before targeting th
   data['/v1/browser-jobs']={jobs:[],workers:[],settings,settings_revision:2};let delay=true;
   const ui=workspace({fetch:async path=>{if(path==='/v1/browser-jobs'&&delay){delay=false;entered();return new Promise(resolve=>release=()=>resolve(response(data[path])));}return response(data[path]);}});connect(ui);ui.selectWebsite('https://app.test');
   const focused=[];ui.document.getElementById=id=>id==='saved-0-input_usd_per_million'?{focus:()=>focused.push(id),scrollIntoView(){}}:null;
-  const pending=ui.refresh();await started;ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';const routed=ui.route();await new Promise(setImmediate);
+  const pending=ui.refresh();await started;ui.location.pathname='/settings/models/price/meta%7Cmuse-spark-1.3';const routed=ui.route();await new Promise(setImmediate);
   assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3','Keep the price target until the saved list has loaded.');release();await pending;await routed;await new Promise(setImmediate);
   assert.equal(ui.state.websiteOrigin,'','Settings cover the whole workspace, so no project stays selected.');assert.equal(ui.state.priceTarget,null);assert.deepEqual(focused,['saved-0-input_usd_per_million']);
 });
@@ -403,8 +407,8 @@ test('price links from a website wait for an ongoing refresh before targeting th
 test('manual navigation cancels a deferred price target before a late refresh completes',async()=>{
   let release,entered;const started=new Promise(resolve=>entered=resolve),data=payloads();let delay=true;
   const ui=workspace({fetch:async path=>{if(path==='/v1/browser-jobs'&&delay){delay=false;entered();return new Promise(resolve=>release=()=>resolve(response(data[path])));}return response(data[path]);}});connect(ui);
-  const pending=ui.refresh();await started;ui.location.hash='#/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3');
-  ui.location.hash='#/settings/data';await ui.route();assert.equal(ui.state.priceTarget,null);release();await pending;await new Promise(setImmediate);
+  const pending=ui.refresh();await started;ui.location.pathname='/settings/models/price/meta%7Cmuse-spark-1.3';await ui.route();assert.equal(ui.state.priceTarget,'meta|muse-spark-1.3');
+  ui.location.pathname='/settings/data';await ui.route();assert.equal(ui.state.priceTarget,null);release();await pending;await new Promise(setImmediate);
   assert.equal(ui.state.settingsSection,'data');assert.equal(ui.state.priceTarget,null);
 });
 
@@ -430,37 +434,37 @@ test('run again and continue keep the project and the model chosen for that run'
   assert.equal(ui.restartRequest('run',stopped).model,undefined,'Without a run choice the new job resolves its model again.');
 });
 
-test('#/workspace lists every project with counts across all of its tests instead of opening the first website',async()=>{
+test('/workspace lists every project with counts across all of its tests instead of opening the first website',async()=>{
   const paths=[],runs=[run('a',{target_url:'https://a.test/shop',summary:{actions:9,pending_findings:2,confirmed_findings:0}}),run('live',{target_url:'https://b.test/',lifecycle:'active',summary:{actions:42,pending_findings:0}})];
   const websites=[{origin:'https://a.test',run_count:12,target_url:'https://a.test/shop',last_test_at:'2026-11-02T09:00:00Z',active_runs:0,pending_findings:5,confirmed_findings:3},{origin:'https://b.test',run_count:1,target_url:'https://b.test/',last_test_at:'2026-11-02T10:00:00Z',active_runs:1,pending_findings:0,confirmed_findings:0}];
   const ui=workspace({fetch:async path=>{paths.push(path);return response(path==='/v1/runs'?{runs,websites,total:2}:payloads()[path]);}});connect(ui);
-  ui.location.hash='#/workspace';await ui.route();
+  ui.location.pathname='/workspace';await ui.route();
   assert.equal(ui.state.websitePage,'landing');assert.equal(ui.state.websiteOrigin,'','No project is chosen for the person.');assert.ok(paths.includes('/v1/runs'));
   const html=ui.node.innerHTML;
   assert.match(html,/<h1>Your projects<\/h1>/);assert.match(html,/2 projects · 1 running · 5 findings waiting for review/);
   assert.match(html,/<dt>To review<\/dt><dd class="attention">5<\/dd><\/div><div><dt>Confirmed<\/dt><dd>3<\/dd><\/div><div><dt>Tests<\/dt><dd>12<\/dd>/,'Counts come from every run of the website, not only the loaded page.');
-  assert.match(html,/<a class="attention-card" href="#\/workspace\/a\/findings">[\s\S]*?5 findings to review/);
-  assert.match(html,/href="#\/workspace\/live"><i class="dot green" aria-hidden="true"><\/i>Running now · 42 steps/);
+  assert.match(html,/<a class="attention-card" href="\/workspace\/a\/findings">[\s\S]*?5 findings to review/);
+  assert.match(html,/href="\/workspace\/live"><i class="dot green" aria-hidden="true"><\/i>Running now · 42 steps/);
   assert.match(html,/class="sidebar project-sidebar workspace-sidebar"/);assert.match(html,/Recent projects/);assert.doesNotMatch(html,/website-switcher/);
-  assert.match(html,/<div class="breadcrumb">[\s\S]*?<span>All projects<\/span>/);assert.match(html,/id="website-launch-form" class="workspace-launch"/);
-  ui.location.hash='#/website/https%3A%2F%2Fa.test';await ui.route();assert.equal(ui.state.websitePage,'overview');assert.equal(ui.state.websiteOrigin,'https://a.test');
-  assert.match(ui.node.innerHTML,/<a class="all-projects" href="#\/workspace">/);
-  ui.location.hash='#/workspace';await ui.route();assert.equal(ui.state.websiteOrigin,'','Returning to the list leaves the project.');
+  assert.match(html,/<div class="breadcrumb">[\s\S]*?<span>Projects<\/span>/);assert.match(html,/id="website-launch-form" class="workspace-launch"/);
+  ui.location.pathname='/website/https%3A%2F%2Fa.test';await ui.route();assert.equal(ui.state.websitePage,'overview');assert.equal(ui.state.websiteOrigin,'https://a.test');
+  assert.match(ui.node.innerHTML,/<a class="all-projects" href="\/workspace">/);
+  ui.location.pathname='/workspace';await ui.route();assert.equal(ui.state.websiteOrigin,'','Returning to the list leaves the project.');
   ui.state.websites=[{origin:'https://a.test',run_count:1,target_url:'https://a.test/shop'}];
   assert.match(ui.landingView(),/<dd class="attention">2<\/dd>/,'An API without catalog counts falls back to the loaded runs.');
 });
 test('an empty workspace landing is the first-test page and settings use the workspace sidebar',async()=>{
   const ui=workspace({fetch:async path=>response(payloads()[path])});connect(ui);
-  ui.location.hash='#/workspace';await ui.route();
+  ui.location.pathname='/workspace';await ui.route();
   assert.match(ui.node.innerHTML,/What should we explore\?/);assert.match(ui.node.innerHTML,/id="run-form"/);assert.doesNotMatch(ui.node.innerHTML,/Your projects/);
-  ui.location.hash='#/settings/models';await ui.route();
-  assert.match(ui.node.innerHTML,/workspace-sidebar/);assert.match(ui.node.innerHTML,/<a class="nav-item active" href="#\/settings" aria-current="page">/);assert.doesNotMatch(ui.node.innerHTML,/website-switcher/);
+  ui.location.pathname='/settings/models';await ui.route();
+  assert.match(ui.node.innerHTML,/workspace-sidebar/);assert.match(ui.node.innerHTML,/<a class="nav-item active" href="\/settings" aria-current="page">/);assert.doesNotMatch(ui.node.innerHTML,/website-switcher/);
 });
 
 test('the account menu holds the workspace, its status, theme, notifications and sign-out',async()=>{
   const data=payloads();data['/v1/identity']={workspace_name:'Larchwood team',principal_kind:'workspace_manager'};
   const ui=workspace({fetch:async path=>response(data[path])});connect(ui);
-  ui.location.hash='#/workspace';await ui.route();
+  ui.location.pathname='/workspace';await ui.route();
   const html=ui.node.innerHTML,menu=html.slice(html.indexOf('<details class="account-menu"'),html.indexOf('</details>',html.indexOf('<details class="account-menu"')));
   assert.match(menu,/<summary class="avatar" aria-label="Account and workspace: Larchwood team">L<\/summary>/);
   assert.match(menu,/Signed in with the workspace token/);assert.match(menu,/Browser worker<\/span><span class="small muted">Offline/);
@@ -468,4 +472,10 @@ test('the account menu holds the workspace, its status, theme, notifications and
   assert.equal((html.match(/data-action="logout"/g)||[]).length,1,'Sign out lives only in the account menu.');
   assert.match(html,/<aside[\s\S]*Browser worker offline[\s\S]*<\/aside>/,'The sidebar still warns when tests cannot run.');
   ui.state.developmentAccess=true;ui.render();assert.doesNotMatch(ui.node.innerHTML,/data-action="logout"/);assert.match(ui.node.innerHTML,/Local development · sign-in disabled/);
+});
+
+test('/workspace?activity opens Activity over the project list and drops the query',async()=>{
+  const replaced=[],ui=workspace({fetch:async path=>response(payloads()[path]),history:{replaceState:(_,__,url)=>replaced.push(url)}});connect(ui);
+  Object.assign(ui.location,{pathname:'/workspace',search:'?activity'});await ui.route();
+  assert.equal(ui.state.websitePage,'landing');assert.equal(ui.state.drawer?.activity,true);assert.deepEqual(replaced,['/workspace']);
 });

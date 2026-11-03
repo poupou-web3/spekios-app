@@ -1,4 +1,4 @@
-// Workspace landing at #/workspace: every project (one website origin each), what needs attention
+// Workspace landing at /workspace: every project (one website origin each), what needs attention
 // across them and the latest tests. With no project yet it is the first-test page.
 import {icon,pill} from '/assets/ui/components.js';
 import {date,esc,fixture,name,number,runStatus} from '/assets/ui/format.js';
@@ -18,7 +18,7 @@ function activeWork(origin){
 }
 function testKind(run){return run.config?.fix_verification?'Fix check':run.config?.replay_of?'Fresh-browser recheck':'Exploration';}
 // Findings are reviewed on a run's Findings tab. Open the newest loaded run that still has some, else the project.
-function findingsHref(origin){const run=runsOf(origin).find(r=>!r.config?.replay_of&&Number(r.summary?.pending_findings)>0);return run?'#/workspace/'+run.run_id+'/findings':websiteHref(origin);}
+function findingsHref(origin){const run=runsOf(origin).find(r=>!r.config?.replay_of&&Number(r.summary?.pending_findings)>0);return run?'/workspace/'+run.run_id+'/findings':websiteHref(origin);}
 
 function attention(sites){
   const signIns=(state.access.requests||[]).filter(request=>['waiting','active'].includes(request.status)).map(request=>`<button type="button" class="attention-card" data-action="open-activity"><span class="small muted">${esc(websiteLabel(request.origin))}</span><strong>${request.status==='active'?'Private sign-in in progress':'Sign-in requested'}</strong><span class="attention-link">Open Activity</span></button>`);
@@ -31,14 +31,14 @@ function attention(sites){
 function projectCard(site){
   const pending=siteCount(site,'pending_findings'),confirmed=siteCount(site,'confirmed_findings'),tests=Number(site.run_count)||runsOf(site.origin).length;
   const work=activeWork(site.origin),label=websiteLabel(site.origin);
-  const status=work.active?`<a class="project-status running" href="${work.run?'#/workspace/'+esc(work.run.run_id):websiteHref(site.origin)}"><i class="dot green" aria-hidden="true"></i>${work.run?`Running now · ${number(work.run.summary?.actions)} steps`:'Starting a test'}</a>`
+  const status=work.active?`<a class="project-status running" href="${work.run?'/workspace/'+esc(work.run.run_id):websiteHref(site.origin)}"><i class="dot green" aria-hidden="true"></i>${work.run?`Running now · ${number(work.run.summary?.actions)} steps`:'Starting a test'}</a>`
     :site.last_test_at?`<span class="project-status">Last test ${esc(date(site.last_test_at))}</span>`:'<span class="project-status">No tests yet</span>';
   return `<article class="project-card"><header>${websiteFavicon(site.origin)}<div><h3><a href="${websiteHref(site.origin)}">${esc(label)}</a></h3><p class="small muted mono project-path" title="${esc(site.target_url?websitePath(site.target_url):'/')}">${esc(site.target_url?websitePath(site.target_url):'/')}</p></div></header><dl class="project-stats"><div><dt>To review</dt><dd class="${pending?'attention':''}">${number(pending)}</dd></div><div><dt>Confirmed</dt><dd>${number(confirmed)}</dd></div><div><dt>Tests</dt><dd>${number(tests)}</dd></div></dl><footer>${status}<a class="button" href="${websiteHref(site.origin)}" aria-label="Open ${esc(label)}">Open${icon('arrow')}</a></footer></article>`;
 }
 
 function latest(){
   const runs=state.runs.slice(0,6);if(!runs.length)return '';
-  return `<section class="workspace-section" aria-labelledby="latest-title"><h2 id="latest-title">Latest across projects</h2><ol class="workspace-latest">${runs.map(run=>`<li><span class="small muted">${esc(date(run.created_at))}</span><span class="workspace-latest-text"><strong>${esc(websiteLabel(websiteOrigin(run.target_url)))}</strong> · ${esc(testKind(run))}${fixture(run)?' · test data':''}${Number(run.summary?.pending_findings)&&!run.config?.replay_of?` · ${number(run.summary.pending_findings)} to review`:''}</span>${pill(runStatus(run))}<a href="#/workspace/${esc(run.run_id)}" aria-label="Open ${esc(name(run))}">Open</a></li>`).join('')}</ol></section>`;
+  return `<section class="workspace-section" aria-labelledby="latest-title"><h2 id="latest-title">Latest across projects</h2><ol class="workspace-latest">${runs.map(run=>`<li><span class="small muted">${esc(date(run.created_at))}</span><span class="workspace-latest-text"><strong>${esc(websiteLabel(websiteOrigin(run.target_url)))}</strong> · ${esc(testKind(run))}${fixture(run)?' · test data':''}${Number(run.summary?.pending_findings)&&!run.config?.replay_of?` · ${number(run.summary.pending_findings)} to review`:''}</span>${pill(runStatus(run))}<a href="/workspace/${esc(run.run_id)}" aria-label="Open ${esc(name(run))}">Open</a></li>`).join('')}</ol></section>`;
 }
 
 function launch(){

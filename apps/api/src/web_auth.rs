@@ -258,8 +258,20 @@ fn return_path(value: &str) -> Option<&str> {
         return None;
     }
     let page = value.split('#').next()?;
-    ["/", "/connect", "/issues"]
-        .contains(&page)
+    // Customer pages only: the workspace (routed by path) and the two pages served beside it.
+    let (path, query) = page.split_once('?').unwrap_or((page, ""));
+    let workspace = ["/workspace/", "/website/", "/settings/"]
+        .iter()
+        .any(|prefix| path.strip_prefix(prefix).is_some_and(|rest| !rest.is_empty()))
+        && !path.contains("//")
+        && query.is_empty();
+    let issue = path
+        .strip_prefix("/issues/")
+        .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'));
+    let issues_query = query.is_empty() || query.starts_with("origin=") && !query.contains('&');
+    (["/", "/workspace", "/settings", "/connect"].contains(&page)
+        || workspace
+        || (path == "/issues" || issue) && issues_query)
         .then_some(value)
 }
 fn unavailable() -> Response {
@@ -727,8 +739,23 @@ mod tests {
             "/%2fevil.test",
             "/connect?next=evil",
             "/\n",
+            "/workspace//evil.test",
+            "/website/",
+            "/settings/models?next=evil",
+            "/issues/../login",
+            "/issues?next=evil",
         ] {
             assert!(return_path(path).is_none());
+        }
+        for path in [
+            "/workspace",
+            "/workspace/00000000-0000-4000-8000-000000000001/findings",
+            "/website/https%3A%2F%2Fshop.test/tests",
+            "/settings/models",
+            "/issues/00000000-0000-4000-8000-000000000001",
+            "/issues?origin=https%3A%2F%2Fshop.test",
+        ] {
+            assert_eq!(return_path(path), Some(path));
         }
         assert_eq!(
             return_path("/connect#authorization=abc"),

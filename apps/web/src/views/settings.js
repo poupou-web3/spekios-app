@@ -1,5 +1,5 @@
 import {computerUseField,computerUseStatus} from '../computer-use.js';
-// Workspace settings, one section per page (#/settings/<section>): models, exploration, limits,
+// Workspace settings, one section per page (/settings/<section>): models, exploration, limits,
 // memory and sessions, appearance. One draft spans the sections and the save bar follows it.
 import {button,icon,toast} from '/assets/ui/components.js';
 import {catalogEntry,catalogModels} from '/assets/ui/catalog.js';
@@ -25,7 +25,7 @@ export const LIMITS=[['max_actions','maxActions','Maximum actions',1,MAX_ACTIONS
   ['stop_after_idle_actions','stopAfterIdleActions','Stop after actions with nothing new',5,1000,1]];
 // How each run's actions are shared: new territory, deep journeys and re-walks of known paths.
 export const STRATEGY=[['breadth','New territory'],['depth','Deep journeys'],['rewalk','Re-walk known paths']],DEFAULT_STRATEGY={breadth:50,depth:30,rewalk:20,adaptive:true};
-// [key, title, icon, summary]. The first section opens on #/settings.
+// [key, title, icon, summary]. The first section opens on /settings.
 export const SETTINGS_SECTIONS=[['models','Models','bolt','Which models explore, and the list you pick them from'],['exploration','Exploration','flow','Screen size, strategy and automatic rechecks'],
   ['limits','Limits','clock','When explorations stop, per project or model'],['data','Memory & sessions','database','What runs remember and saved app sign-ins'],['appearance','Appearance','image','Light or dark theme in this browser']];
 // The draft fields each form section edits, for its unsaved-changes mark and error links.
@@ -38,7 +38,7 @@ const MAX_OVERRIDES=50,MAX_PROJECT_MODELS=50,UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9
 // Model IDs never contain "|", so a provider and model ID make one option value.
 const modelChoice=(provider,model)=>`${provider}|${model}`;
 // A link to Settings → Models that opens at one model's prices (see focusPriceTarget).
-export function priceLink(provider,model){return `#/settings/models/price/${encodeURIComponent(modelChoice(provider,model))}`;}
+export function priceLink(provider,model){return `/settings/models/price/${encodeURIComponent(modelChoice(provider,model))}`;}
 export const freeModel=model=>model==='openrouter/free'||String(model).endsWith(':free');
 const splitChoice=value=>{const [provider,...rest]=String(value).split('|');return [provider,rest.join('|')];};
 const paidOpenRouter=(provider,model)=>provider==='openrouter'&&!freeModel(String(model).trim());
@@ -399,7 +399,7 @@ export function appearancePanel(){
 // Revision, unsaved sections, conflicts and errors, with links to the section that needs attention.
 function saveBar(section){
   const draft=configurationDraft(),conflict=draft.dirty&&draft.revision!==state.settingsRevision,issue=configurationIssue(draft.values),changed=changedSections(draft);
-  const title=key=>SETTINGS_SECTIONS.find(([k])=>k===key)[1],link=key=>key===section?esc(title(key)):`<a href="#/settings/${key}">${esc(title(key))}</a>`;
+  const title=key=>SETTINGS_SECTIONS.find(([k])=>k===key)[1],link=key=>key===section?esc(title(key)):`<a href="/settings/${key}">${esc(title(key))}</a>`;
   const status=draft.saving?'Saving your defaults…':draft.dirty?`Unsaved changes in ${changed.map(link).join(', ')||'these settings'}.`:`Saved revision ${esc(state.settingsRevision)} · applies to new explorations.`;
   return `<div class="settings-savebar${draft.dirty?' dirty':''}" role="region" aria-label="Save defaults"><div class="settings-savebar-status"><p><strong>${status}</strong></p><p class="small muted">Queued and running jobs keep their original settings. Saving does not call a model or test a connection.</p>${conflict?`<div class="settings-feedback notice" role="status">Saved defaults are now revision ${esc(state.settingsRevision)}. Your edits still use revision ${esc(draft.revision)}. ${draft.requestId?'A previous save may have completed. Retry save to check its original receipt, or discard your edits.':'Review the current values before keeping your edits.'}</div>`:''}${draft.error?`<p class="settings-feedback notice error" role="alert">${esc(draft.error)}</p>`:''}${draft.message?`<p class="settings-feedback" role="status">${esc(draft.message)}</p>`:''}${draft.dirty&&issue?`<p class="settings-feedback notice error">${issue[0]===section?'':`${link(issue[0])}: `}${esc(issue[1])}</p>`:''}</div><div class="configuration-actions">${conflict?`<button type="button" class="button" data-action="rebase-configuration" ${draft.saving?'disabled':''}>Keep my edits on revision ${esc(state.settingsRevision)}</button>`:''}<button type="button" class="button" data-action="discard-configuration" ${!draft.dirty||draft.saving?'disabled':''}>Discard edits</button><button type="submit" class="button primary" ${draft.saving||!draft.dirty||conflict&&!draft.requestId||issue?'disabled':''}>${draft.saving?'Saving…':draft.requestId?'Retry save':'Save defaults'}</button></div></div>`;
 }
@@ -412,6 +412,6 @@ export function configurationView(section=settingsSection()){
 export function settingsView(){
   const section=settingsSection(),draft=configurationDraft(),changed=changedSections(draft),issue=draft.dirty?configurationIssue(draft.values):null;
   const nav=SETTINGS_SECTIONS.map(([key,title,glyph,summary])=>{const mark=issue?.[0]===key?'<span class="settings-nav-mark error" title="Needs a fix before saving"></span><span class="sr-only">, needs a fix</span>':changed.includes(key)?'<span class="settings-nav-mark" title="Unsaved changes"></span><span class="sr-only">, unsaved changes</span>':'';
-    return `<a class="settings-nav-item${key===section?' active':''}" href="#/settings/${key}" ${key===section?'aria-current="page"':''}>${icon(glyph)}<span>${esc(title)}${mark}</span><small>${esc(summary)}</small></a>`;}).join('');
+    return `<a class="settings-nav-item${key===section?' active':''}" href="/settings/${key}" ${key===section?'aria-current="page"':''}>${icon(glyph)}<span>${esc(title)}${mark}</span><small>${esc(summary)}</small></a>`;}).join('');
   return `<div class="page-heading"><div><div class="eyebrow">Workspace</div><h1>Settings</h1><p>The models new explorations use, how far they go, what they remember and how Spekios looks in this browser.</p></div></div><div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections">${nav}</nav><form id="exploration-configuration-form" class="configuration-form settings-form" aria-labelledby="settings-section-title">${configurationView(section)}</form></div>`;
 }

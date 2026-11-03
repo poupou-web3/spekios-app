@@ -1,8 +1,10 @@
-// Rendering, data refresh and hash routing for the workspace (#/workspace, #/workspace/<run>[/<action>], #/settings[/<section>]).
+// Rendering, data refresh and path routing for the workspace (/workspace, /website/<origin>[/tests],
+// /workspace/<run>[/findings|/flow|/<action>], /settings[/<section>]). See navigation.js.
 import {get} from './api.js';
 import {clearImages,loadImages} from './images.js';
 import {clearTrackedJob,followSubmittedJob} from './jobs.js';
 import {syncPrivateAccess} from './private-login.js';
+import {currentPath,normalizeAddress} from './navigation.js';
 import {login,shell} from './shell.js';
 import {root,state} from './state.js';
 import {closeReportExport} from './views/export.js';
@@ -78,12 +80,15 @@ export async function refresh(){
   }catch(error){if((token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)){state.error=error.message;render();}}finally{refreshing=false;if(refreshAgain||origin!==state.websiteOrigin||offset!==state.runOffset){refreshAgain=false;void refresh();}}
 }
 export async function route(){
-  const parts=location.hash.replace(/^#\/?/,'').split('/');
+  const parts=currentPath().replace(/^\/+/,'').split('/');normalizeAddress();
+  // /workspace?activity (the Activity link on the Connect and Issues pages) opens the Activity panel.
+  const search=globalThis.location?.search||'',openActivity=/^\?activity(?:[=&]|$)/.test(search);
+  if(openActivity)globalThis.history?.replaceState?.(null,'',globalThis.location.pathname);
   state.priceTarget=null;
   state.view=parts[0]==='settings'?'settings':'workspace';
   let origin='';if(parts[0]==='website'){try{origin=websiteOrigin(decodeURIComponent(parts[1]||''));}catch{}}
   const run=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'');
-  // #/workspace (and an unknown address) is the project list. It and settings belong to no project.
+  // /workspace (and an unknown address) is the project list. It and settings belong to no project.
   state.websitePage=origin?parts[2]==='tests'?'tests':'overview':run?'overview':'landing';
   if(state.websitePage!=='tests')state.runOffset=0;
   if(origin)selectWebsite(origin,{prefill:origin!==state.websiteOrigin});
@@ -92,14 +97,14 @@ export async function route(){
   else state.websiteOrigin='';
   // Each settings section is its own page, opened at the top. Unknown sections show the first.
   if(state.view==='settings'){const section=SETTINGS_SECTIONS.some(([key])=>key===parts[1])?parts[1]:SETTINGS_SECTIONS[0][0];if(section!==state.settingsSection){state.settingsSection=section;window.scrollTo?.(0,0);}
-    // #/settings/models/price/<provider|model> opens at that model's prices; the address then drops the target.
-    if(section==='models'&&parts[2]==='price'&&parts[3]){try{state.priceTarget=decodeURIComponent(parts[3]);}catch{state.priceTarget=null;}window.history?.replaceState?.(null,'','#/settings/models');}}
+    // /settings/models/price/<provider|model> opens at that model's prices; the address then drops the target.
+    if(section==='models'&&parts[2]==='price'&&parts[3]){try{state.priceTarget=decodeURIComponent(parts[3]);}catch{state.priceTarget=null;}globalThis.history?.replaceState?.(null,'','/settings/models');}}
   const id=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'')?parts[1]:null;
   if(state.trackedJobId&&(state.view!=='workspace'||id))clearTrackedJob();
   if(id!==state.runId){state.runId=id;state.report=null;state.reportEtag='';state.actionId=null;state.tab='actions';state.image='after';state.findingFilter='needs_review';clearImages();}
   const action=/^[\da-f-]{36}$/.test(parts[2]||'')?parts[2]:null;if(action){state.actionId=action;state.tab='actions';}
   if(id&&['findings','flow'].includes(parts[2]))state.tab=parts[2];
-  closeReportExport();state.drawer=null;render();await refresh();
+  closeReportExport();state.drawer=openActivity?{title:'Activity',activity:true}:null;render();await refresh();
   if(state.focusLaunch&&state.view==='workspace'&&!state.runId){state.focusLaunch=false;document.getElementById('target-url')?.focus();}
   if(state.openFindingsRun===state.runId){state.tab='findings';state.findingFilter='needs_review';state.openFindingsRun=null;render();}
 }

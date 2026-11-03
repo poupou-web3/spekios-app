@@ -1,8 +1,10 @@
 // Keep the selected website visible when opening the separately served customer pages.
+import {icon} from '/assets/ui/components.js';
+import {esc} from '/assets/ui/format.js';
 import {bindThemeSwitch} from '/assets/ui/theme.js';
 import {accountMenuMarkup} from './account-menu.js';
 import {setNotificationsEnabled} from './notifications.js';
-import {bindWebsiteFavicons,browserTargetUrl,clearWebsiteNavigation,groupWebsites,launchUrlError,rememberWebsiteShortcut,savedWebsite,saveWebsite,updateWebsiteLaunchHint,websiteHref,websiteLabel,websiteOrigin,websiteSidebar,workspaceSidebar} from './websites.js';
+import {mobileNav,withQueuedWebsites,bindWebsiteFavicons,browserTargetUrl,clearWebsiteNavigation,groupWebsites,launchUrlError,rememberWebsiteShortcut,savedWebsite,saveWebsite,updateWebsiteLaunchHint,websiteHref,websiteLabel,websiteOrigin,websiteSidebar,workspaceSidebar} from './websites.js';
 
 const standaloneOrigin=()=>websiteOrigin(new URLSearchParams(location.search).get('origin'))||savedWebsite();
 // Drawn as soon as the page script runs, before sign-in is known, so the sidebar is in place from the
@@ -10,18 +12,27 @@ const standaloneOrigin=()=>websiteOrigin(new URLSearchParams(location.search).ge
 export function prepareWebsitePage(page){
   const slot=document.querySelector('[data-workspace-sidebar]');
   if(slot?.dataset?.workspaceSidebar===undefined||slot.innerHTML)return;
-  slot.innerHTML=page==='connect'?workspaceSidebar({page,external:true}):websiteSidebar({origin:standaloneOrigin(),page,external:true});
+  slot.innerHTML=page==='connect'?workspaceSidebar({page}):websiteSidebar({origin:standaloneOrigin(),page,external:true});
+  drawBreadcrumb(page,standaloneOrigin());
+  const footer=document.querySelector('.website-mobile-nav');if(footer)footer.innerHTML=mobileNav();
 }
+// The same top bar as the workspace: where this page sits, then the account menu.
+export function pageBreadcrumb(page,origin){
+  if(page==='connect')return `${icon('grid')}<span>Connect your agent</span>`;
+  return `${icon('grid')}<a href="/workspace">Projects</a>${icon('chevron')}${origin?`<a href="${websiteHref(origin)}">${esc(websiteLabel(origin))}</a>${icon('chevron')}`:''}<span>Issues & fixes</span>`;
+}
+function drawBreadcrumb(page,origin){const node=document.querySelector('[data-page-topbar] .breadcrumb');if(node)node.innerHTML=pageBreadcrumb(page,origin);}
 // Signed-in pages draw the sidebar and account menu at once with what is known, then again when the
 // website list arrives, so the layout never jumps. Connect your agent belongs to the whole workspace.
 export async function mountWebsitePage({page,request,identity=null,mode={}}){
   const slot=document.querySelector('[data-workspace-sidebar]');
   if(slot?.dataset?.workspaceSidebar===undefined)return null;
   let origin=standaloneOrigin(),websites=[],runs=[],draft='',error='',submitting=false,worker=null,gateway=null;
-  const workspacePage=page==='connect',header=document.querySelector('.connection-top .row');
+  const workspacePage=page==='connect',header=document.querySelector('[data-page-topbar] .topbar-right');
   bindWebsiteFavicons(slot);
   function draw(open=false){
-    slot.innerHTML=workspacePage?workspaceSidebar({websites,page,external:true}):websiteSidebar({websites,origin,page,runs:runs.filter(run=>websiteOrigin(run.target_url)===origin),external:true,newUrl:draft,error,submitting});
+    drawBreadcrumb(page,origin);
+    slot.innerHTML=workspacePage?workspaceSidebar({websites,page}):websiteSidebar({websites,origin,page,runs:runs.filter(run=>websiteOrigin(run.target_url)===origin),external:true,newUrl:draft,error,submitting});
     const disclosure=slot.querySelector('details');if(disclosure)disclosure.open=open;
   }
   // The account menu holds the theme switch, so it takes the header's theme slot.
@@ -45,7 +56,7 @@ export async function mountWebsitePage({page,request,identity=null,mode={}}){
     document.addEventListener('keydown',event=>{const menu=header.querySelector('.account-menu');if(event.key==='Escape'&&menu?.open){event.preventDefault();menu.open=false;menu.querySelector('summary')?.focus();}});
   }
   const [catalog,jobs,providers]=await Promise.all([request('/v1/runs'),request('/v1/browser-jobs').catch(()=>null),request('/v1/model-providers').catch(()=>null)]);
-  websites=groupWebsites(catalog.websites||[],catalog.runs||[]);runs=catalog.runs||[];
+  websites=withQueuedWebsites(groupWebsites(catalog.websites||[],catalog.runs||[]),jobs?.jobs);runs=catalog.runs||[];
   worker=jobs?(jobs.workers||[]).some(w=>w.available):null;gateway=providers?providers.gateway_ready===true:null;
   if(!origin&&!workspacePage)origin=websites[0]?.origin||'';
   if(origin)saveWebsite(origin);if(page==='issues')rememberWebsiteShortcut(origin,'issues');

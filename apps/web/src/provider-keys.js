@@ -39,9 +39,9 @@ export function demoPanel(){
 }
 export function launchConnection(model){
   const d=state.providers.demo;
-  if(model.key==='demo'&&d)return `<div class="demo-launch-note"><strong>Spekios demo key · ${money(d.remaining_usd)} remaining</strong><p class="small">${esc(d.model)} only. Meta Contributor mode may use demo prompts and screenshots to improve its models.</p><a href="#/settings/models">Manage models and API keys</a></div>`;
+  if(model.key==='demo'&&d)return `<div class="demo-launch-note"><strong>Spekios demo key · ${money(d.remaining_usd)} remaining</strong><p class="small">${esc(d.model)} only. Meta Contributor mode may use demo prompts and screenshots to improve its models.</p><a href="/settings/models">Manage models and API keys</a></div>`;
   const key=providerKeys(model.provider).find(k=>model.key?k.key_id===model.key:k.is_default);
-  return key?`<p class="small muted launch-key-note">Using your key: <strong>${esc(key.name)}</strong>. Billed by your provider; demo credits are not used. <a href="#/settings/models">Manage keys</a></p>`:'';
+  return key?`<p class="small muted launch-key-note">Using your key: <strong>${esc(key.name)}</strong>. Billed by your provider; demo credits are not used. <a href="/settings/models">Manage keys</a></p>`:'';
 }
 export function keysPanel(){
   if(!Array.isArray(state.providers.keys))return '';

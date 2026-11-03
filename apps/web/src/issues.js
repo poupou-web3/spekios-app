@@ -25,6 +25,10 @@ function trackingBadge(issue){
 }
 const activityLabels={'issue.discovered':'First discovered','issue.observed_again':'Observed again in a run','issue.reviewed':'Human review recorded','issue.triaged':'Triage decision recorded','verification.queued':'Candidate check queued','verification.started':'Candidate check started','verification.finished':'Candidate check finished'};
 function triageBadge(issue){const key=issue.triage_status||'untriaged';return make('span',triageLabels[key]||key,`pill ${key==='bug'?'red':key==='intended_behavior'||key==='duplicate'?'green':''}`);}
+// The selected issue is part of the path (/issues/<id>); an old /issues#<id> address still opens it.
+function selectedIssue(){const path=/^\/issues\/([\da-f-]{36})$/i.exec(location.pathname);return path?path[1]:/^#[\da-f-]{36}$/i.test(location.hash)?location.hash.slice(1):'';}
+// Keeps the project filter (?origin=) while moving between issues.
+function issueHref(id){return '/issues/'+encodeURIComponent(id)+location.search;}
 function link(text,path,className='button quiet'){const n=make('a',text,className);n.href=path;return n;}
 function stamp(value){return value?new Date(value).toLocaleString():'Not recorded';}
 async function api(path,body){
@@ -72,7 +76,7 @@ async function list(){
   const snapshot=JSON.stringify({page,issueId});if(snapshot===listSnapshot)return;listSnapshot=snapshot;
   const root=$('#issue-list');root.replaceChildren();
   if(!page.issues.length)root.append(make('p',page.total?'No issues on this page.':'No issues match this view. Start an exploration to discover behavior worth checking.','issue-empty small muted'));
-  for(const issue of page.issues){const a=link('',`/issues#${issue.issue_id}`,'issue-index-item');if(issue.issue_id===issueId)a.setAttribute('aria-current','true');a.append(trackingBadge(issue),triageBadge(issue),make('h3',issue.title),make('p',issue.source_target_url,'small muted'),make('code',issue.issue_id.slice(0,8),'small'));root.append(a);}
+  for(const issue of page.issues){const a=link('',issueHref(issue.issue_id),'issue-index-item');if(issue.issue_id===issueId)a.setAttribute('aria-current','true');a.append(trackingBadge(issue),triageBadge(issue),make('h3',issue.title),make('p',issue.source_target_url,'small muted'),make('code',issue.issue_id.slice(0,8),'small'));root.append(a);}
 }
 function renderOriginal(){
   const {issue,original,handoff}=detail,root=$('#issue-original');root.replaceChildren();
@@ -80,13 +84,13 @@ function renderOriginal(){
   const id=make('p',undefined,'small');id.append(make('span','Issue ID · '),make('code',issue.issue_id));root.append(id,make('p',issue.source_target_url,'small muted'),trackingBadge(issue));
   if(issue.tracking?.status==='observed_again')root.append(make('p','This behavior was observed in a later run. Earlier candidate check results remain in the history; they do not establish a fix on this run’s deployment.','small muted'));
   root.append(make('p',`Last observed ${stamp(issue.tracking?.last_observed_at||issue.last_seen_at)}`,'small muted'));
-  if(issue.canonical_issue_id&&issue.canonical_issue_id!==issue.issue_id)root.append(link('Open the linked original issue',`/issues#${issue.canonical_issue_id}`));
+  if(issue.canonical_issue_id&&issue.canonical_issue_id!==issue.issue_id)root.append(link('Open the linked original issue',issueHref(issue.canonical_issue_id)));
   if(detail.execution_mode==='protocol_fixture')root.append(make('p','SIMULATED MODEL · browser and screenshots are real; this run tests the protocol.','tag'));
   const pair=make('div',undefined,'issue-behavior');for(const [label,value] of [['Expected',original.expected_result],['Actual',original.observed_result]]){const p=make('div');p.append(make('h3',label),make('p',value||'Not recorded'));pair.append(p);}root.append(pair);
   root.append(make('p',`${issue.viewport_profile||'Recorded viewport'} · First seen ${stamp(issue.first_seen_at)} · ${issue.occurrence_count} recorded occurrence(s)`,'small muted'));
   root.append(make('p',`Human review: ${handoff.human_review?.disposition||'not reviewed'}. The original model suspicion and each candidate result remain separate.`,'small muted'));
   const path=make('details',undefined,'issue-path');path.append(make('summary','Recorded reproduction steps'));const ol=make('ol');for(const step of handoff.reproduction?.recorded_steps||[]){const li=make('li');li.append(make('strong',step.command?.type||'Recorded action'),make('p',step.expected_result||'Expectation not recorded','small'));ol.append(li);}path.append(ol);root.append(path);
-  root.append(link('Open original run & diagnostics',`/#/workspace/${issue.source_run_id}/${issue.source_action_id}`));
+  root.append(link('Open original run & diagnostics',`/workspace/${issue.source_run_id}/${issue.source_action_id}`));
   evidence(root,[original.before_capture_id,original.after_capture_id],'Original evidence');
   const usageLine=make('p','Original exploration usage · '+usage(detail.usage.source_run),'small muted');usageLine.id='source-run-usage';root.append(usageLine);
 }
@@ -98,7 +102,7 @@ function renderHistory(){
     if(check.deployment_ref)article.append(make('p',check.deployment_ref,'small muted'));
     if(check.result?.reason)article.append(make('p',check.result.reason,'small'));
     article.append(make('p',usage(check.usage),'small muted'));
-    const buttons=make('div',undefined,'row');if(check.run_id)buttons.append(link('Open candidate run',`/#/workspace/${check.run_id}`));
+    const buttons=make('div',undefined,'row');if(check.run_id)buttons.append(link('Open candidate run',`/workspace/${check.run_id}`));
     if(check.result){const b=make('button',selectedVerification===check.verification_id?'Evidence selected':'Compare evidence','button');b.setAttribute('aria-pressed',String(selectedVerification===check.verification_id));b.addEventListener('click',()=>{selectedVerification=check.verification_id;releaseImages();renderOriginal();renderHistory();renderCandidate();});buttons.append(b);}
     if(['queued','running'].includes(check.job_status)){const b=make('button','Stop check','button');b.addEventListener('click',async()=>{b.disabled=true;try{await api(`/v1/browser-jobs/${check.job_id}/cancel`,{});message('Stopping check. An incomplete check cannot establish a fix.');await loadDetail(false);}catch(e){message(e.message);b.disabled=false;}});buttons.append(b);}
     article.append(buttons);root.append(article);
@@ -109,15 +113,15 @@ function renderHistory(){
     item.append(make('strong',stamp(occurrence.created_at)),make('p',occurrence.target_url||'Recorded run','small muted'));
     if(occurrence.expected_result)item.append(make('p','Expected: '+occurrence.expected_result,'small'));
     if(occurrence.observed_result)item.append(make('p','Observed: '+occurrence.observed_result,'small'));
-    item.append(link('Open this occurrence',`/#/workspace/${occurrence.run_id}/${occurrence.action_id}`));occurrences.append(item);
+    item.append(link('Open this occurrence',`/workspace/${occurrence.run_id}/${occurrence.action_id}`));occurrences.append(item);
   }
   if(!detail.occurrences.items.length)occurrences.append(make('p','No recorded occurrence on this page.','small muted'));
   const related=$('#issue-related');related.replaceChildren();
   for(const finding of detail.related_findings?.items||[]){
-    const item=make('p',undefined,'issue-event small');item.append(make('strong',finding.relation==='linked_duplicate'?'Linked duplicate · ':'Same interface, separate finding · '),link(finding.title,`/issues#${finding.issue_id}`,''),trackingBadge(finding),make('span',' · Last observed '+stamp(finding.last_seen_at)));related.append(item);
+    const item=make('p',undefined,'issue-event small');item.append(make('strong',finding.relation==='linked_duplicate'?'Linked duplicate · ':'Same interface, separate finding · '),link(finding.title,issueHref(finding.issue_id),''),trackingBadge(finding),make('span',' · Last observed '+stamp(finding.last_seen_at)));related.append(item);
   }
   if(!(detail.related_findings?.items||[]).length)related.append(make('p','No related findings recorded.','small muted'));
-  const history=$('#issue-events');history.replaceChildren();for(const event of detail.history.items){const p=make('p',undefined,'issue-event small');p.append(make('strong',activityLabels[event.event_type]||event.event_type.replaceAll('.',' · ')),make('span',` · ${stamp(event.occurred_at)}${event.payload.outcome?' · '+(labels[event.payload.outcome]||event.payload.outcome):''}${event.payload.verification_id?' · check '+event.payload.verification_id.slice(0,8):''}${event.payload.disposition?' · '+event.payload.disposition:''}`));if(event.payload.run_id)p.append(link('Open run',`/#/workspace/${event.payload.run_id}`));history.append(p);}
+  const history=$('#issue-events');history.replaceChildren();for(const event of detail.history.items){const p=make('p',undefined,'issue-event small');p.append(make('strong',activityLabels[event.event_type]||event.event_type.replaceAll('.',' · ')),make('span',` · ${stamp(event.occurred_at)}${event.payload.outcome?' · '+(labels[event.payload.outcome]||event.payload.outcome):''}${event.payload.verification_id?' · check '+event.payload.verification_id.slice(0,8):''}${event.payload.disposition?' · '+event.payload.disposition:''}`));if(event.payload.run_id)p.append(link('Open run',`/workspace/${event.payload.run_id}`));history.append(p);}
   $('#history-more').hidden=!['verifications','history','occurrences'].some(key=>detail[key].pagination.next_offset!==null);
 }
 function renderCandidate(){
@@ -132,14 +136,14 @@ function renderTriage(reset){
   const t=detail.issue.triage,current=$('#triage-current');current.replaceChildren();
   if(!t)current.append(make('strong','Not triaged yet. '),make('span','Decide whether this is a bug, intended behavior or a duplicate. Agents can decide too; a person can always change it.'));
   else{current.append(make('strong',`${triageLabels[t.decision]||t.decision} · decided by ${deciders[t.actor]||t.actor} · ${stamp(t.created_at)}`),make('span',' — '+t.rationale));
-    if(t.duplicate_of)current.append(make('span',' Duplicate of '),link(t.duplicate_of.slice(0,8),`/issues#${t.duplicate_of}`,'')); 
-    if(t.matched_issue_id)current.append(make('span',' Matched '),link(t.matched_issue_id.slice(0,8),`/issues#${t.matched_issue_id}`,''));}
+    if(t.duplicate_of)current.append(make('span',' Duplicate of '),link(t.duplicate_of.slice(0,8),issueHref(t.duplicate_of),'')); 
+    if(t.matched_issue_id)current.append(make('span',' Matched '),link(t.matched_issue_id.slice(0,8),issueHref(t.matched_issue_id),''));}
   if(reset){$('#triage-decision').value=t?.decision||'bug';$('#triage-duplicate').value=t?.duplicate_of||'';$('#triage-rationale').value='';$('#triage-error').textContent='';}
   showDuplicate();
 }
 function showDuplicate(){const duplicate=$('#triage-decision').value==='duplicate';$('#triage-duplicate').hidden=!duplicate;$('#triage-duplicate-label').hidden=!duplicate;$('#triage-duplicate').required=duplicate;}
 async function submitTriage(event){
-  event.preventDefault();if(busy||!detail||issueId!==location.hash.slice(1))return;$('#triage-error').textContent='';
+  event.preventDefault();if(busy||!detail||issueId!==selectedIssue())return;$('#triage-error').textContent='';
   const id=issueId,decision=$('#triage-decision').value,rationale=$('#triage-rationale').value.trim(),duplicate=$('#triage-duplicate').value.trim();
   if(!rationale){$('#triage-error').textContent='Say why, so later readers and agents can rely on the decision.';return;}
   if(decision==='duplicate'&&(!uuid(duplicate)||duplicate===id)){$('#triage-error').textContent='Enter the full ID of the issue this one repeats.';return;}
@@ -155,7 +159,7 @@ function renderRecheck(value){
   const root=$('#recheck-result');root.replaceChildren();if(!value)return;const c=value.counts;
   root.append(make('p',`${value.complete?'Recheck finished':'Recheck running'} · ${value.candidate_origin}${value.deployment_ref?' · '+value.deployment_ref:''}`,'small'),
     make('p',`${c.selected} open issue(s) · ${c.resolved} resolved · ${c.still_reproducible} still reproducible · ${c.blocked} blocked · ${c.inconclusive} inconclusive · ${c.pending} pending${c.skipped?` · ${c.skipped} not checkable`:''}${value.omitted_issues?` · ${value.omitted_issues} more not included`:''}`,'small muted'));
-  const ul=make('ul','', 'small');for(const item of value.items){const li=make('li');li.append(link(item.title||item.issue_id.slice(0,8),`/issues#${item.issue_id}`,''),make('span',' · '+(item.outcome?labels[item.outcome]||item.outcome:item.skipped_reason?'Not checkable: '+item.skipped_reason:item.status||'queued')));ul.append(li);}root.append(ul);
+  const ul=make('ul','', 'small');for(const item of value.items){const li=make('li');li.append(link(item.title||item.issue_id.slice(0,8),issueHref(item.issue_id),''),make('span',' · '+(item.outcome?labels[item.outcome]||item.outcome:item.skipped_reason?'Not checkable: '+item.skipped_reason:item.status||'queued')));ul.append(li);}root.append(ul);
 }
 async function submitRecheck(event){
   event.preventDefault();$('#recheck-error').textContent='';
@@ -188,7 +192,7 @@ function pendingDraft(id){
   return null;
 }
 async function submit(event){
-  event.preventDefault();if(busy||!detail||issueId!==location.hash.slice(1))return;$('#verify-error').textContent='';
+  event.preventDefault();if(busy||!detail||issueId!==selectedIssue())return;$('#verify-error').textContent='';
   if(!draft){let candidate;try{candidate=new URL($('#candidate-url').value.trim());if(!['http:','https:'].includes(candidate.protocol)||candidate.username||candidate.password)throw new Error();}catch{$('#verify-error').textContent='Enter an HTTP or HTTPS candidate URL without credentials.';return;}
     draft={issue_id:issueId,verification_id:crypto.randomUUID(),candidate_url:candidate.href};const label=$('#deployment-ref').value.trim();if(label)draft.deployment_ref=label;const session=$('#candidate-session').value;if(session)draft.session_id=session;
     sessionStorage.setItem(pendingKey(issueId),JSON.stringify(draft));freezeDraft(true);
@@ -198,13 +202,13 @@ async function submit(event){
   try{
     const {issue_id,...body}=submitted;const receipt=await api(`/v1/issues/${issue_id}/verifications`,body);
     if(sessionStorage.getItem(pendingKey(issue_id))===JSON.stringify(submitted))sessionStorage.removeItem(pendingKey(issue_id));
-    if(issueId!==issue_id||location.hash.slice(1)!==issue_id)return;
+    if(issueId!==issue_id||selectedIssue()!==issue_id)return;
     draft=null;freezeDraft(false);$('#verify-receipt').textContent=`Check ${receipt.verification_id} ${receipt.reused?'already exists':'queued'}. You can leave this page; Spekios keeps working.`;message('Candidate check submitted. Its outcome and usage will appear below.');await loadDetail(false);
-  }catch(e){if(issueId===submitted.issue_id&&location.hash.slice(1)===submitted.issue_id)$('#verify-error').textContent=e.status===400||e.status===403?'This check was not accepted: '+e.message+'. Adjust the deployment or workspace access, then start a different check.':'Could not confirm submission: '+e.message+'. Retry the same check to avoid starting it twice.';}
+  }catch(e){if(issueId===submitted.issue_id&&selectedIssue()===submitted.issue_id)$('#verify-error').textContent=e.status===400||e.status===403?'This check was not accepted: '+e.message+'. Adjust the deployment or workspace access, then start a different check.':'Could not confirm submission: '+e.message+'. Retry the same check to avoid starting it twice.';}
   finally{busy=false;$('#verify-submit').disabled=false;$('#verify-new').disabled=false;}
 }
 async function loadDetail(reset=true){
-  const version=++detailVersion,id=location.hash.slice(1),current=()=>version===detailVersion&&location.hash.slice(1)===id;
+  const version=++detailVersion,id=selectedIssue(),current=()=>version===detailVersion&&selectedIssue()===id;
   if(!uuid(id)){issueId='';detail=null;releaseImages();$('#issue-empty').hidden=false;$('#issue-detail').hidden=true;return;}
   const changed=issueId!==id;if(changed){issueId=id;detail=null;pageLimit=5;selectedVerification='';releaseImages();$('#issue-detail').hidden=true;$('#issue-empty').hidden=false;$('#verify-receipt').textContent='';$('#verify-error').textContent='';$('#candidate-url').value='';$('#deployment-ref').value='';draft=null;freezeDraft(false);
     $('#candidate-session').value='';
@@ -233,7 +237,15 @@ $('#verify-form').addEventListener('submit',submit);
 $('#triage-form').addEventListener('submit',submitTriage);$('#triage-decision').addEventListener('change',showDuplicate);$('#recheck-form').addEventListener('submit',submitRecheck);
 $('#verify-new').addEventListener('click',()=>{if(busy)return;draft=null;sessionStorage.removeItem(pendingKey(issueId));freezeDraft(false);$('#verify-error').textContent='';});
 $('#refresh-sessions').addEventListener('click',sessions);$('#issue-refresh').addEventListener('click',refresh);$('#history-more').addEventListener('click',more);
-window.addEventListener('hashchange',async()=>{await loadDetail().then(list).catch(e=>message(e.message));});window.addEventListener('pagehide',releaseImages);
+const showSelected=async()=>{await loadDetail().then(list).catch(e=>message(e.message));};
+if(/^#[\da-f-]{36}$/i.test(location.hash))history.replaceState(null,'',issueHref(location.hash.slice(1)));
+// Choosing another issue stays on this page; Back and Forward return to the issues shown before.
+document.addEventListener('click',event=>{
+  if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+  const a=event.target.closest?.('a[href^="/issues/"]');if(!a||a.target)return;
+  event.preventDefault();if(a.getAttribute('href')!==location.pathname+location.search)history.pushState(null,'',a.getAttribute('href'));void showSelected();
+});
+window.addEventListener('popstate',showSelected);window.addEventListener('hashchange',showSelected);window.addEventListener('pagehide',releaseImages);
 $('.skip-link').addEventListener('click',event=>{event.preventDefault();$('#main-content').focus();$('#main-content').scrollIntoView({block:'start'});});
 async function start(){try{const mode=(await (await fetch('/v1/auth-mode',{redirect:'error'})).json()).mode;development=mode==='local_development';spekios=mode==='spekios';if(development||spekios)token='';if(token||development||spekios)await ready();else $('#issue-login').hidden=false;}catch(e){message(e.message);}}
 await start();
