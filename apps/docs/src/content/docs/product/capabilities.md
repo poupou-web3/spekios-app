@@ -16,7 +16,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 | --- | --- |
 | Input | URL-only exploration of explicitly permitted HTTP(S) origins. |
 | Browser | Chromium with desktop, tablet and mobile viewport profiles. |
-| Actions | Native navigation, click, text/search fill, single-select, checkbox/radio, document scroll and permitted form submission. |
+| Actions | Native navigation, click, text/search fill, single-select, checkbox/radio, document scroll and permitted form submission. Conditional direct-Meta computer-use recovery adds visual clicks, hover, panel scroll and explicit drag gestures; [capability checks and opt-outs](../../getting-started/models/#computer-use-recovery) apply. |
 | Planning | Likely-action ranking, recorded graph/frontier, duplicate avoidance, branch returns, stale-state replanning, controls further down the page, versioned active-run testing focus and [memory across runs](../../guides/app-memory/) with reopening of unfinished pages. An [app map](../../guides/app-memory/#the-app-map) of states and transitions carried between runs and compared run to run. Each run [shares its actions](../../guides/exploration-strategy/) between new territory, deep journeys and re-walks of the map, with depth and coverage reported per level. [Fewer model calls](../../guides/exploration-cost/): unchanged screens reuse earlier rankings, and an optional cheaper model handles navigation. No action, time, token or cost limit unless a user [sets one](../../guides/exploration-limits/). |
 | Checks | Pre-action expectations, per-action assessments, exact image differences, sampled completion frames and redacted diagnostics. |
 | Findings | Original suspicions, fresh-browser replay, optional bounded automatic replay and append-only human review. |
@@ -31,7 +31,7 @@ Scout is a local developer preview. This page distinguishes implemented behavior
 ## Not implemented yet
 
 - Native mobile apps, Firefox or WebKit coverage.
-- Arbitrary JavaScript, custom dropdown/contenteditable controls, file uploads, downloads or iframe interaction.
+- Arbitrary JavaScript, general custom input/contenteditable support, file uploads, downloads or iframe interaction. Visual recovery can operate some custom menus and draggable controls; it does not authorize arbitrary interactions.
 - General account creation, checkout or unapproved form submissions.
 - Google/external OAuth handoff, passkeys or reuse of an ordinary desktop browser’s cookies.
 - Subscription login that spends ChatGPT, Claude or coding-agent usage allowances.

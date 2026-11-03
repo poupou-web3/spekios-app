@@ -174,6 +174,7 @@ export function reportSummary(report){
 
 function commandFields(command={}){
   const rows=[field('Command',command.type??'Not recorded')];
+  if(command.type==='computer')rows.push(field('Visual gesture',command.action),field('Source screenshot SHA-256',command.screenshot_sha256));
   if(command.type==='navigate')rows.push(field('URL',command.url));
   if(command.control){rows.push(field('Control',command.control.name),field('Control role',command.control.role),field('Control ID',command.control.control_id));}
   else if(command.button!=null)rows.push(field('Button',command.button));

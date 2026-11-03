@@ -12,6 +12,20 @@ function workspace(fetch=async()=>response({})){const handlers={},node={innerHTM
   const ui=sandbox.testing;Object.assign(ui.state,{connected:true,developmentAccess:true,settings:{...defaults},settingsRevision:3,view:'settings'});return {...ui,node,handlers};
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
+test('computer use separates capability from permission and persists explicit opt-outs',async()=>{
+  let sent;const ui=workspace(async(path,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}},201);});
+  ui.state.settings={...defaults,provider:'meta',model:'muse-spark-1.3',freeOnly:false,savedModels:[{provider:'meta',model:'muse-spark-1.3'},{provider:'meta',model:'muse-spark-1.3-contributor'},{provider:'openrouter',model:'meta/muse-spark-1.3'}]};
+  ui.state.providers={providers:[{provider:'meta',configured:true}],computer_use:{documented_models:['muse-spark-1.3'],verified_connections:[]}};
+  let html=ui.configurationView('models');
+  assert.match(html,/saved\.0\.computer_use" checked/);assert.match(html,/saved\.1\.computer_use"\s+disabled/);assert.match(html,/saved\.2\.computer_use"\s+disabled/);
+  assert.match(html,/one metered model call/);assert.match(html,/No app screenshots/);
+  assert.equal(ui.updateConfiguration('saved.1.computer_use',true),false);
+  assert.equal(ui.updateConfiguration('saved.2.computer_use',true),false);
+  ui.state.providers.computer_use.verified_connections=[{model:'muse-spark-1.3-contributor',funding_source:'operator',provider_key_id:null}];
+  assert.equal(ui.updateConfiguration('saved.1.computer_use',true),true);
+  assert.equal(ui.updateConfiguration('saved.0.computer_use',false),true);
+  await ui.saveConfiguration();assert.equal(sent.saved_models[0].computer_use,false);assert.equal(sent.saved_models[1].computer_use,true);
+});
 test('demo exhaustion leaves personal models and named key choices available',()=>{
   const ui=workspace(),one='11111111-1111-4111-8111-111111111111',two='22222222-2222-4222-8222-222222222222';
   ui.state.providers={gateway_ready:true,vault_ready:true,keys:[{key_id:one,provider:'openai',name:'Production <key>',is_default:true},{key_id:two,provider:'openai',name:'Personal',is_default:false}],providers:[{provider:'openai',configured:true},{provider:'meta',configured:false}],demo:{enabled:true,configured:true,model:'muse-spark-1.3-contributor',allowance_usd:1,spent_usd:1,remaining_usd:0,reserved_usd:0,minimum_call_reserve_usd:0.00082}};

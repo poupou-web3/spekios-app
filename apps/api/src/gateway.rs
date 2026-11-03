@@ -291,6 +291,10 @@ impl Gateway {
         status["demo"] = demo;
         status["vault_ready"] = json!(self.vault.is_some());
         status["operator_access"] = json!(principal.operator);
+        if principal.is_manager() || principal.operator {
+            let rows = db.query("SELECT DISTINCT r.model,r.provider_key_id,r.funding_source FROM model_requests r JOIN model_calls c USING(request_id) WHERE r.workspace_id=$1 AND r.user_id=$2 AND r.execution_mode=$3 AND r.provider='meta' AND r.spec->>'computer_use_probe'='true' AND r.state='completed' AND c.state='completed' AND r.created_at>now()-interval '30 days' AND (r.funding_source<>'demo' OR r.provider_key_id=(SELECT key_id FROM demo_settings WHERE singleton)) AND (r.funding_source<>'personal' OR EXISTS(SELECT 1 FROM provider_keys k WHERE k.key_id=r.provider_key_id AND k.revoked_at IS NULL))",&[&principal.workspace_id,&principal.user_id,&self.execution_mode()]).await.map_err(|_|"database_unavailable")?;
+            status["computer_use"] = json!({"documented_models":["muse-spark-1.3","muse-wonder-1.0"],"verified_connections":rows.iter().map(|r|json!({"model":r.get::<_,String>(0),"provider_key_id":r.get::<_,Option<Uuid>>(1),"funding_source":r.get::<_,String>(2)})).collect::<Vec<_>>()});
+        }
         if !principal.is_manager() && !principal.operator {
             // Provider readiness is an agent capability; private key names and
             // account balances are not part of that discovery surface.
@@ -501,7 +505,7 @@ impl Gateway {
         Ok(())
     }
 
-    async fn admit(
+    pub(crate) async fn admit(
         &self,
         spec: &ModelRequest,
         principal: &crate::identity::Principal,
@@ -602,6 +606,26 @@ impl Gateway {
             )
             .await?
         };
+        if spec.computer_use && !spec.computer_use_probe {
+            if run_config
+                .as_ref()
+                .is_none_or(|config| config["model_connection"]["computerUse"] != true)
+            {
+                return Err("computer_use_disabled");
+            }
+            if !crate::models::documented_computer_use(spec.provider, &spec.model)
+                && !crate::computer_use::verified(
+                    &*tx,
+                    &owner,
+                    &spec.model,
+                    &funding,
+                    self.execution_mode(),
+                )
+                .await?
+            {
+                return Err("computer_use_unverified");
+            }
+        }
         if funding.key_id.is_some() && self.vault.is_none() {
             return Err("provider_vault_not_configured");
         }
@@ -905,6 +929,14 @@ impl Gateway {
                 result.response_base64 = STANDARD.encode(&cleaned);
                 if result.response_complete {
                     interpret(spec.provider, &cleaned, &mut result);
+                    if spec.computer_use {
+                        crate::models::interpret_computer(&cleaned, &mut result);
+                        if result.returned_model.as_deref() != Some(spec.model.as_str()) {
+                            result.state = "failed".into();
+                            result.error = Some("computer_use_model_mismatch".into());
+                            result.output_text = None;
+                        }
+                    }
                     // Only explicit rate limits are retried. Ambiguous transport,
                     // timeout and 5xx errors require a new user decision.
                     if result.http_status == Some(429) {

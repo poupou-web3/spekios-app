@@ -41,6 +41,13 @@ test('clock labels and a few pixels of scroll do not change recorded preconditio
   assert.equal((bound as any).control.name,'Save 3s ago');
   fresh.observation.text='Offline';assert.equal(preconditionsMatch(before,fresh,source,candidate),false);
 });
+test('visual recovery verification requires the exact screenshot and never rebinds coordinates',()=>{
+  const before=capture(),fresh=capture(candidate);
+  const command={type:'computer',control:{...control,role:'visual'},action:{type:'scroll',x:5,y:5,scroll_x:0,scroll_y:300},screenshot_sha256:before.sha256} as unknown as BrowserCommand;
+  const step={before,command} as any,verification={source_entry:source,candidate_url:candidate} as any;
+  assert.equal(bindVerificationCommand(step,fresh,verification),command);
+  fresh.sha256='changed-pixels';assert.throws(()=>bindVerificationCommand(step,fresh,verification),/visual preconditions changed/);
+});
 test('missing, disabled, occluded, truncated or differently authenticated preconditions are not silently healed',()=>{
   for(const change of [(c:any)=>c.observation.controls=[],(c:any)=>c.observation.controls[0].enabled=false,(c:any)=>c.observation.controls[0].occluded=true,(c:any)=>c.observation.controls_truncated=true,(c:any)=>c.observation.auth_context_id='different-auth']){
     const before=capture(),fresh=structuredClone(capture(candidate));change(fresh);assert.equal(preconditionsMatch(before,fresh,source,candidate),false);
