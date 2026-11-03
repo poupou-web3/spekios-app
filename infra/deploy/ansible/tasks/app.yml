@@ -86,7 +86,7 @@
   ansible.builtin.set_fact:
     scout_release: "{{ scout_root }}/releases/{{ scout_rev.stdout }}"
     scout_env_file: "{{ scout_root }}/shared/.env"
-    scout_compose_files: compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml
+    scout_compose_files: "compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml{{ ':compose.demos.yaml' if scout_demo_sites | bool else '' }}"
 
 - name: Create the release folders
   ansible.builtin.file:
@@ -179,6 +179,16 @@
   loop: [origin.pem, origin.key, aop-ca.pem]
   notify: Restart edge
 
+- name: Install the separate demo Origin certificate
+  ansible.builtin.copy:
+    src: "{{ scout_local_secrets_dir }}/demo-origin.pem"
+    dest: "{{ scout_cert_dir }}/demo-origin.pem"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  when: scout_demo_sites | bool
+  notify: Restart edge
+
 # ---- Deploy.
 
 - name: Point current at the release
@@ -227,6 +237,18 @@
     return_content: true
   register: scout_public_health
   until: scout_public_health.status == 200
+  retries: 12
+  delay: 10
+
+- name: Confirm both public demonstration shops answer through Cloudflare
+  delegate_to: localhost
+  become: false
+  ansible.builtin.uri:
+    url: "https://{{ item }}/"
+    return_content: true
+  loop: "{{ [scout_demo_fixed_host, scout_demo_faulty_host] if scout_demo_sites | bool else [] }}"
+  register: scout_demo_health
+  until: scout_demo_health.status == 200 and 'Larchwood' in scout_demo_health.content
   retries: 12
   delay: 10
 

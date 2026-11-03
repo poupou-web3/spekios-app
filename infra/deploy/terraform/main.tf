@@ -5,12 +5,14 @@ provider "hcloud" {}
 provider "cloudflare" {}
 
 locals {
-  fqdn        = "${var.app_subdomain}.${var.cloudflare_zone}"
-  bo_fqdn     = "${var.backoffice_subdomain}.${var.cloudflare_zone}"
-  ssh_fqdn    = "${var.ssh_subdomain}.${var.cloudflare_zone}"
-  hostnames   = [local.fqdn, local.bo_fqdn]
-  secrets_dir = "${path.module}/../.secrets"
-  labels      = { app = "scout", managed_by = "terraform" }
+  fqdn          = "${var.app_subdomain}.${var.cloudflare_zone}"
+  bo_fqdn       = "${var.backoffice_subdomain}.${var.cloudflare_zone}"
+  ssh_fqdn      = "${var.ssh_subdomain}.${var.cloudflare_zone}"
+  demo_hosts    = var.demo_sites_enabled ? { fixed = "larchwood.${var.cloudflare_zone}", faulty = "larchwood-faulty.${var.cloudflare_zone}" } : {}
+  hostnames     = [local.fqdn, local.bo_fqdn]
+  all_hostnames = concat(local.hostnames, values(local.demo_hosts))
+  secrets_dir   = "${path.module}/../.secrets"
+  labels        = { app = "scout", managed_by = "terraform" }
 
   # The private half of ssh_public_key_path, for Ansible and the ssh outputs.
   ssh_private_key_path = trimsuffix(pathexpand(var.ssh_public_key_path), ".pub")
@@ -144,6 +146,17 @@ resource "cloudflare_dns_record" "backoffice" {
   comment = "Scout operator console on Hetzner ${var.server_name} (Cloudflare Access)"
 }
 
+resource "cloudflare_dns_record" "demo" {
+  for_each = local.demo_hosts
+  zone_id  = data.cloudflare_zone.this.id
+  name     = each.value
+  type     = "A"
+  content  = hcloud_server.scout.ipv4_address
+  proxied  = true
+  ttl      = 1
+  comment  = "Larchwood ${each.key} demonstration on ${var.server_name}"
+}
+
 # ---- Origin TLS: a Cloudflare Origin certificate, trusted by Cloudflare only.
 
 resource "tls_private_key" "origin" {
@@ -167,6 +180,31 @@ resource "cloudflare_origin_ca_certificate" "origin" {
   requested_validity = 5475
 }
 
+# A separate certificate leaves the live app/operator certificate untouched.
+# Reuse its private key; the demo container never mounts that key.
+resource "tls_cert_request" "demo" {
+  count           = var.demo_sites_enabled ? 1 : 0
+  private_key_pem = tls_private_key.origin.private_key_pem
+  dns_names       = values(local.demo_hosts)
+  subject { common_name = local.demo_hosts.fixed }
+}
+
+resource "cloudflare_origin_ca_certificate" "demo" {
+  count              = var.demo_sites_enabled ? 1 : 0
+  csr                = tls_cert_request.demo[0].cert_request_pem
+  hostnames          = values(local.demo_hosts)
+  request_type       = "origin-ecc"
+  requested_validity = 5475
+}
+
+resource "local_file" "demo_cert" {
+  count                = var.demo_sites_enabled ? 1 : 0
+  filename             = "${local.secrets_dir}/demo-origin.pem"
+  content              = cloudflare_origin_ca_certificate.demo[0].certificate
+  file_permission      = "0600"
+  directory_permission = "0700"
+}
+
 # Full (strict) for these hostnames only, leaving the rest of the zone untouched.
 resource "cloudflare_ruleset" "origin_tls" {
   count       = var.manage_ssl_rule ? 1 : 0
@@ -179,7 +217,7 @@ resource "cloudflare_ruleset" "origin_tls" {
   rules = [{
     ref               = "scout_app_tls_strict"
     description       = "Full (strict) TLS to the Scout origin"
-    expression        = "(http.host in {${join(" ", [for h in local.hostnames : "\"${h}\""])}})"
+    expression        = "(http.host in {${join(" ", [for h in local.all_hostnames : "\"${h}\""])}})"
     action            = "set_config"
     action_parameters = { ssl = "strict" }
     enabled           = true
@@ -386,6 +424,9 @@ resource "local_file" "inventory" {
           ansible_ssh_private_key_file = local.ssh_private_key_path
           scout_public_host            = local.fqdn
           scout_backoffice_host        = local.bo_fqdn
+          scout_demo_sites             = var.demo_sites_enabled
+          scout_demo_fixed_host        = lookup(local.demo_hosts, "fixed", "")
+          scout_demo_faulty_host       = lookup(local.demo_hosts, "faulty", "")
         }
       }
     }

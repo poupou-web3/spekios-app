@@ -189,3 +189,31 @@ Keep the state file somewhere safe. If more than one person deploys, the next st
 - **The Deploy workflow says a secret "is not set":** `just cloud-ci-setup` hasn't run for this repository yet.
 - **The Deploy workflow can't connect (`Connection closed`, `websocket: bad handshake`):** check the tunnel on the server with `sudo systemctl status scout-ssh-tunnel` and `sudo journalctl -u scout-ssh-tunnel -n 50`. If the Zero Trust dashboard shows the tunnel as *Healthy*, the service token is probably wrong or rotated, so run `just cloud-ci-setup` again.
 - **The Deploy workflow fails on "Confirm the public URL" but a local deploy works:** Cloudflare is challenging GitHub's runner addresses (Bot Fight Mode or a WAF rule). Skip that check for `/healthz` on `app.spekios.com`.
+
+## Public demonstration shops
+
+Set `demo_sites_enabled = true` in the private Terraform variables and apply
+the reviewed plan. This creates proxied `larchwood.<zone>` (fixed) and
+`larchwood-faulty.<zone>` (14 intentional bugs) DNS records, adds them to the
+strict TLS rule and issues a separate demo Origin certificate. The existing
+app/operator certificate is unchanged. The certificate uses the existing
+origin key and the existing Authenticated Origin Pulls CA.
+
+Run `just cloud-ci-setup` to store `DEMO_ORIGIN_PEM` and the nonsecret
+`SCOUT_DEMO_SITES`, `SCOUT_DEMO_FIXED_HOST`, `SCOUT_DEMO_FAULTY_HOST` variables.
+Terraform also writes those fields into the laptop's Ansible inventory. Merge
+code into main, then main into prod to release it. The playbook verifies both
+public demo homepages as part of deployment.
+
+With demos enabled, `scripts/deploy.sh edge` includes `compose.demos.yaml`.
+The demo process has no credentials, data mounts or published host ports. Its
+own Docker network connects it only to the HTTPS edge. The two hostnames use
+separate browser storage and are marked noindex. Demo state is disposable;
+no real accounts, payments or mail are involved.
+
+In the customer workspace, start a test against each HTTPS URL. Each becomes a
+separate website with its own history. If project IDs are useful for agents,
+add named fixed/faulty project model entries in Settings and choose the matching
+project when launching. A launch uses the account/project's selected model,
+key and limits; infrastructure deployment does not create accounts or spend
+model credits.

@@ -90,6 +90,18 @@ if [[ "$edge" == 1 ]]; then
       ;;
   esac
 fi
+demo_sites=$(read_env SCOUT_DEMO_SITES)
+if [[ "$demo_sites" == "true" ]]; then
+  [[ "$edge" == 1 && "${edge_tls:-}" == origin ]] || { echo "Demo sites require the Cloudflare Origin HTTPS edge." >&2; exit 1; }
+  fixed_host=$(read_env SCOUT_DEMO_FIXED_HOST)
+  faulty_host=$(read_env SCOUT_DEMO_FAULTY_HOST)
+  for demo_host in "$fixed_host" "$faulty_host"; do
+    [[ "$demo_host" =~ ^[a-zA-Z0-9.-]+$ && "$demo_host" == *.* && "$demo_host" != "$host" && "$demo_host" != "$backoffice_host" ]] || { echo "Set distinct valid demo hostnames." >&2; exit 1; }
+  done
+  [[ "$fixed_host" != "$faulty_host" ]] || { echo "The fixed and faulty demos need separate hostnames." >&2; exit 1; }
+  export SCOUT_DEMO_FIXED_HOST="$fixed_host" SCOUT_DEMO_FAULTY_HOST="$faulty_host"
+  COMPOSE_FILE="$COMPOSE_FILE:compose.demos.yaml"
+fi
 if [[ "$bypass" == "true" && "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
   echo "Refusing to publish the workspace while SCOUT_DEV_AUTH_BYPASS=true." >&2
   exit 1
@@ -122,5 +134,9 @@ if [[ "$edge" == 1 ]]; then
   echo "Public workspace: ${origin}"
 elif [[ "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
   echo "This publish address has no TLS. Run scripts/deploy.sh edge after setting SCOUT_PUBLIC_HOST and SCOUT_PUBLIC_ORIGIN."
+fi
+if [[ "$demo_sites" == true ]]; then
+  echo "Fixed demo: https://${fixed_host}"
+  echo "Faulty demo: https://${faulty_host}"
 fi
 echo "PostgreSQL, ClickHouse and the evidence bucket stay on the Compose network. Their host ports are loopback-only."
