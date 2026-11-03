@@ -10,6 +10,8 @@ Open **Connect your agent** in your Scout workspace. Choose your agent app, copy
 
 Scout’s twenty-six tools let your agent submit a URL, check progress, retrieve a report and find related tests later. You can follow the same runs and evidence in the Scout workspace.
 
+For a terminal agent, use the [standalone CLI](../cli/). It supports browser approval, project selection, JSON output and durable job retries without a repository checkout.
+
 ## Connect from an agent app
 
 1. Open **/connect** on your Scout server. For this local installation, use **http://127.0.0.1:18080/connect**.
