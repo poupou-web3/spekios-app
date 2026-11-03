@@ -4,23 +4,25 @@ A dependency-free Node.js 22+ CLI for agents. Every command prints one JSON obje
 on stdout. Browser approval replaces pasted account credentials. The same account,
 projects and jobs remain visible in the web app.
 
-Download the standalone executable from your Spekios server:
+Install once from your Spekios server (Node.js 22+ and npm):
 
 ```sh
-curl --fail --show-error --location https://app.spekios.com/assets/cli/spekios.mjs -o spekios.mjs
-node spekios.mjs --help
-node spekios.mjs auth login --name "Coding agent"
+npm install --global https://app.spekios.com/assets/cli/spekios-cli.tgz
+spekios --help
+spekios auth login --name "Coding agent"
 ```
+
+The package installs `spekios` into npm’s global command directory. Node.js stays behind the command. Repeat the install command to update. No npm account or registry token is needed.
 
 Give `verification_url` to the account owner. After they sign in and approve:
 
 ```sh
-node spekios.mjs auth complete
-node spekios.mjs project list
-node spekios.mjs project use <project-uuid>
-node spekios.mjs run https://your-app.example
-node spekios.mjs status <job-uuid>
-node spekios.mjs report <job-uuid>
+spekios auth complete
+spekios project list
+spekios project use <project-uuid>
+spekios run https://your-app.example
+spekios status <job-uuid>
+spekios report <job-uuid>
 ```
 
 `auth login` returns immediately with exit 3 while approval is pending. Use
@@ -49,7 +51,7 @@ A run's job UUID and exact arguments are saved privately **before** submission.
 If a request times out, its error includes `request_id` and `retry_command`:
 
 ```sh
-node spekios.mjs retry <request-uuid>
+spekios retry <request-uuid>
 ```
 
 Retry uses the original server, workspace, project, model/key reference and inputs,
@@ -61,10 +63,10 @@ server revision and eligibility checks still apply when retrying them.
 Discover the live API tools and their input schemas:
 
 ```sh
-node spekios.mjs tools list
-node spekios.mjs tools call scout_get_project --input '{"project_id":"<uuid>"}'
-node spekios.mjs tools call scout_get_report --input @next-page.json
-node spekios.mjs tools call scout_cancel_work --input '{"kind":"job","id":"<uuid>"}'
+spekios tools list
+spekios tools call scout_get_project --input '{"project_id":"<uuid>"}'
+spekios tools call scout_get_report --input @next-page.json
+spekios tools call scout_cancel_work --input '{"kind":"job","id":"<uuid>"}'
 ```
 
 `--input -` reads JSON from stdin. Generic calls preserve the supplied arguments;
@@ -116,7 +118,7 @@ initial approval notice goes to stderr and the final result goes to stdout.
 ```sh
 npm test --prefix packages/cli
 npm pack ./packages/cli --pack-destination /tmp
-npm install --global /tmp/spekios-cli-0.1.0.tgz
+npm install --global /tmp/spekios-cli-0.1.1.tgz
 spekios --help
 just cli-integration-test
 ```

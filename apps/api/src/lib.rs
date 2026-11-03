@@ -1380,6 +1380,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cli_package_is_public_embedded_and_not_cached() {
+        for authorization in [None, Some("Bearer wrong")] {
+            let response = request("/assets/cli/spekios-cli.tgz", authorization).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "application/gzip");
+            assert_eq!(response.headers()["cache-control"], "no-store");
+            assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+            let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+            assert_eq!(
+                bytes.as_ref(),
+                include_bytes!(concat!(env!("OUT_DIR"), "/spekios-cli.tgz"))
+            );
+            assert_eq!(&bytes[..2], &[0x1f, 0x8b]);
+        }
+    }
+
+    #[tokio::test]
     async fn invalid_ids_do_not_reach_the_database() {
         assert_eq!(
             request("/v1/runs/not-a-uuid", Some(&format!("Bearer {TOKEN}")))

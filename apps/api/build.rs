@@ -1,9 +1,10 @@
-// Embeds the customer workspace (apps/web/src) and the shared UI kit (packages/web-ui/src).
+// Embeds the customer workspace, shared UI kit, and public CLI downloads.
 // The generated table is a closed list: requests are matched against it and never read from disk.
 // The operator back office (apps/backoffice) is deployed separately and is never embedded here.
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 fn collect(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) {
@@ -53,6 +54,29 @@ fn main() {
     code.push_str("];\n");
     let out = PathBuf::from(env::var("OUT_DIR").expect("build output directory"));
     fs::write(out.join("web_assets.rs"), code).expect("write embedded asset table");
+    // Serve an installable package without requiring Node/npm on the build host.
+    // Only this fixed file list enters the archive; profiles and tests stay out.
+    let package_root = out.join("cli-package");
+    let package = package_root.join("package");
+    if package_root.exists() {
+        fs::remove_dir_all(&package_root).expect("clear CLI package staging directory");
+    }
+    fs::create_dir_all(&package).expect("create CLI package staging directory");
+    for name in ["package.json", "README.md", "spekios.mjs"] {
+        let source = cli.parent().unwrap().join(name);
+        fs::copy(&source, package.join(name)).expect("stage CLI package file");
+        println!("cargo:rerun-if-changed={}", source.display());
+    }
+    let status = Command::new("tar")
+        .env("COPYFILE_DISABLE", "1")
+        .arg("-czf")
+        .arg(out.join("spekios-cli.tgz"))
+        .arg("-C")
+        .arg(&package_root)
+        .arg("package")
+        .status()
+        .expect("tar is required to build the hosted CLI package");
+    assert!(status.success(), "create hosted CLI package");
     println!("cargo:rerun-if-changed={}", app.display());
     println!("cargo:rerun-if-changed={}", ui.display());
     println!("cargo:rerun-if-changed={}", cli.display());

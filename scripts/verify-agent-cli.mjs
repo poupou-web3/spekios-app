@@ -18,11 +18,11 @@ const pool=new Pool({host:process.env.PGHOST,port:Number(process.env.PGPORT),use
 const operator=randomBytes(32).toString('hex'),issuer='https://cli-identity.example.test/auth/v1';
 const actors=[0,1].map(()=>({user:randomUUID(),workspace:randomUUID(),subject:randomUUID(),cookie:randomBytes(32).toString('base64url')}));
 const portServer=createServer();await new Promise(r=>portServer.listen(0,'127.0.0.1',r));const port=portServer.address().port;await new Promise(r=>portServer.close(r));
-const origin=`http://localhost:${port}`,entry=join(temporary,'spekios.mjs'),cwd=join(temporary,'project'),config=join(temporary,'config');await mkdir(cwd);
+const origin=`http://localhost:${port}`,entry=join(temporary,'install','bin','spekios'),cwd=join(temporary,'project'),config=join(temporary,'config');await mkdir(cwd);
 let api,browser;const errors=[];let apiLog='';
 async function run(args){
   const env={...process.env,SPEKIOS_CONFIG_DIR:config};delete env.SPEKIOS_TOKEN;delete env.SPEKIOS_SERVER;
-  const child=spawn(process.execPath,[entry,...args],{cwd,env,stdio:['ignore','pipe','pipe']});let stdout='',stderr='';
+  const child=spawn(entry,args,{cwd,env,stdio:['ignore','pipe','pipe']});let stdout='',stderr='';
   child.stdout.on('data',c=>stdout+=c);child.stderr.on('data',c=>stderr+=c);
   const code=await new Promise((r,j)=>{child.on('error',j);child.on('exit',r);});
   assert.ok(!stdout.includes('scout_agent_')&&!stderr.includes('scout_agent_'),'CLI output leaked an agent credential');
@@ -47,9 +47,18 @@ try{
     if(api.exitCode!==null)throw Error('Local API exited: '+apiLog);
     if(await fetch(origin+'/readyz',{headers:{Authorization:`Bearer ${operator}`}}).then(r=>r.ok).catch(()=>false))break;await delay(100);
   }
-  const download=await fetch(origin+'/assets/cli/spekios.mjs');assert.equal(download.status,200);const bytes=await download.text();
-  assert.equal(bytes,await readFile(join(root,'packages/cli/spekios.mjs'),'utf8'));await writeFile(entry,bytes,{mode:0o600});
-  assert.equal((await run(['--version'])).code,0);
+  const download=await fetch(origin+'/assets/cli/spekios-cli.tgz');assert.equal(download.status,200);assert.equal(download.headers.get('content-type'),'application/gzip');
+  const archive=join(temporary,'spekios-cli.tgz');await writeFile(archive,Buffer.from(await download.arrayBuffer()));
+  async function execute(program,args){
+    const child=spawn(program,args,{cwd:temporary,stdio:['ignore','pipe','pipe']});let out='',err='';child.stdout.on('data',c=>out+=c);child.stderr.on('data',c=>err+=c);
+    const code=await new Promise((r,j)=>{child.on('error',j);child.on('exit',r);});assert.equal(code,0,err);return out;
+  }
+  const files=(await execute('tar',['-tzf',archive])).trim().split('\n').filter(p=>!p.endsWith('/')).sort();
+  assert.deepEqual(files,['package/README.md','package/package.json','package/spekios.mjs']);
+  const metadata=JSON.parse(await execute('tar',['-xOf',archive,'package/package.json']));assert.equal(metadata.bin.spekios,'spekios.mjs');
+  await execute('npm',['install','--global','--prefix',join(temporary,'install'),'--cache',join(temporary,'npm-cache'),'--ignore-scripts','--no-audit','--no-fund',origin+'/assets/cli/spekios-cli.tgz']);
+  assert.equal(await readFile(entry,'utf8'),await readFile(join(root,'packages/cli/spekios.mjs'),'utf8'));
+  const version=await run(['--version']);assert.equal(version.code,0);assert.equal(version.data.version,metadata.version);
   browser=await chromium.launch({headless:true,...(!existsSync(chromium.executablePath())?{channel:'chrome'}:{})});
   async function approve(profile,actor,{scopes,name}={}){
     const args=['--server',origin,'--profile',profile,'auth','login','--name',name||`CLI ${profile}`];if(scopes)args.push('--scopes',scopes);
@@ -96,9 +105,9 @@ try{
   assert.equal(Number((await pool.query('SELECT count(*) FROM runtime_runs')).rows[0].count),0);
   assert.equal(Number((await pool.query('SELECT count(*) FROM model_calls')).rows[0].count),0);
   assert.deepEqual(errors,[]);
-  const report={passed:true,checks:['downloaded standalone CLI','real browser account approval','PKCE exchange and private credentials','project context and agent attribution','idempotent retry','cross-account isolation','read-only permissions','self-revocation'],queued_jobs:1,executed_runs:0,model_calls:0};
+  const report={passed:true,checks:['hosted npm package contains only public files','globally installed spekios command','real browser account approval','PKCE exchange and private credentials','project context and agent attribution','idempotent retry','cross-account isolation','read-only permissions','self-revocation'],queued_jobs:1,executed_runs:0,model_calls:0};
   await mkdir(join(root,'artifacts/agent-cli'),{recursive:true});await writeFile(join(root,'artifacts/agent-cli/verification.json'),JSON.stringify(report,null,2)+'\n');
-  console.log('Agent CLI real API/browser verification passed: one queued/cancelled job, zero executed runs or model calls.');
+  console.log('Installed spekios command real API/browser verification passed: one queued/cancelled job, zero executed runs or model calls.');
 }finally{
   await browser?.close();if(api&&api.exitCode===null){const closed=new Promise(r=>api.once('exit',r));api.kill('SIGTERM');await closed;}
   await pool.end();await rm(temporary,{recursive:true,force:true});
