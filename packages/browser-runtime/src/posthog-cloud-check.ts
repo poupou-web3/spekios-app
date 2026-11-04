@@ -28,12 +28,13 @@ try{
     })());
   });
   const origin=`http://127.0.0.1:${(demo.address() as AddressInfo).port}`;
+  // Mark even the initial automatic events as synthetic before SDK initialization.
+  await page.route(origin+'/config.json',async route=>{
+    await page.evaluate('var originalInit=window.posthog.init;window.posthog.init=function(token,options){return originalInit.call(this,token,{...options,opt_out_useragent_filter:true,before_send:function(event){event.properties.spekios_setup_check=true;event.properties.spekios_synthetic=true;event.properties.source_environment="local_preview";return event;}})}');
+    await route.continue();
+  });
   await page.goto(origin);
-  await page.waitForFunction(()=>document.getElementById('monitoring-status')?.textContent?.startsWith('Ready.'));
-  // Override bot filtering for this explicitly requested setup check only;
-  // the real demo retains ordinary SDK bot filtering and anonymous identities.
-  await page.evaluate('window.posthog.set_config({opt_out_useragent_filter:true,before_send:function(event){event.properties.spekios_setup_check=true;event.properties.spekios_synthetic=true;event.properties.source_environment="local_preview";return event;}})');
-  await page.getByTestId('start-recording').click();
+  await page.waitForFunction(()=>document.getElementById('monitoring-status')?.textContent?.startsWith('Demo visits are recorded automatically.'));
   const recordingStarted=await page.waitForFunction(()=>(window as any).posthog.sessionRecordingStarted(),{},{timeout:15000}).then(()=>true,()=>false);
   await page.getByTestId('browse').click();
   await page.getByTestId('open-bottle').click();
@@ -42,7 +43,7 @@ try{
   await page.getByTestId('bag').click();
   await page.getByTestId('place-demo-order').click();
   await page.getByTestId('order-confirmation').waitFor();
-  await page.getByTestId('finish-recording').click();
+  await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:false})));
   await page.waitForTimeout(6000);
   const responses=await Promise.all(deliveries);
   const result={timestamp:new Date().toISOString(),source_environment:'local_preview',synthetic:true,ingestionHost:config.host,uiHost:config.uiHost,toolbarEnabled:config.toolbarEnabled,recordingStarted,responses,scriptErrors:errors,acceptedRequests:responses.filter(r=>r.status>=200&&r.status<300).length,ingestionPersistenceVerified:false,note:'HTTP acceptance is checked; dashboard/session queries still require a private read credential.'};

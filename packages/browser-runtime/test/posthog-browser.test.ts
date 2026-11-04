@@ -26,16 +26,23 @@ test('real demo SDK captures a journey, which is inferred and executed in a fres
   try{
     const page=await browser.newPage({viewport:{width:1280,height:900},userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'});
     const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+    // Install the observation hook before init so the first automatic pageview
+    // and snapshot must be captured without any button click.
+    await page.route(origin+'/config.json',async route=>{
+      await page.evaluate('window.__captured=[];var originalInit=window.posthog.init;window.posthog.init=function(token,options){return originalInit.call(this,token,{...options,opt_out_useragent_filter:true,before_send:function(event){window.__captured.push(JSON.parse(JSON.stringify({...event,timestamp:new Date().toISOString()})));return event;}})}');
+      await route.continue();
+    });
     await page.goto(origin);
-    await page.waitForFunction(()=>document.getElementById('monitoring-status')?.textContent?.startsWith('Ready.'));
+    await page.waitForFunction(()=>document.getElementById('monitoring-status')?.textContent?.startsWith('Demo visits are recorded automatically.'));
+    assert.equal(await page.getByTestId('start-recording').count(),0);
+    assert.equal(await page.getByTestId('finish-recording').count(),0);
+    assert.equal(await page.evaluate('window.__captured.filter(e=>e.event==="$pageview").length'),1);
+    await page.waitForFunction(()=>(window as any).posthog.sessionRecordingStarted());
+    await page.waitForFunction(()=>(window as any).__captured.some((e:any)=>e.event==='$snapshot'));
+
     const artifacts=new URL('../../../artifacts/posthog/',import.meta.url);
     await mkdir(artifacts,{recursive:true});
     await page.screenshot({path:new URL('demo-desktop.png',artifacts).pathname,fullPage:true});
-    // SDK bot filtering correctly excludes Playwright. Disable it only in this
-    // protocol test to exercise capture through the real SDK.
-    await page.evaluate('window.__captured=[];window.posthog.set_config({opt_out_useragent_filter:true,before_send:function(event){window.__captured.push(JSON.parse(JSON.stringify({...event,timestamp:new Date().toISOString()})));return event;}})');
-    await page.getByTestId('start-recording').click();
-    await page.waitForFunction(()=>(window as any).posthog.sessionRecordingStarted());
     await page.getByTestId('browse').click();
     await page.getByTestId('open-bottle').click();
     await page.getByTestId('size').selectOption('large');
@@ -46,10 +53,10 @@ test('real demo SDK captures a journey, which is inferred and executed in a fres
     await page.getByTestId('place-demo-order').click();
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate('window.__captured.some(e=>e.event==="spekios_checkpoint"&&e.properties.selector===\'[data-testid="order-confirmation"]\')'),true,JSON.stringify(await page.evaluate('({captured:window.__captured.map(e=>({event:e.event,selector:e.properties&&e.properties.selector})),status:document.getElementById("monitoring-status").textContent})')));
-    await page.getByTestId('finish-recording').click();
+    await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:false})));
     const captured=await page.evaluate(()=>(window as any).__captured);
     const events:RecordedEvent[]=captured.map((e:any)=>({uuid:e.uuid,event:e.event,timestamp:e.timestamp,properties:e.properties}));
-    assert.ok(events.some(e=>e.event==='spekios_session_complete'));
+    assert.ok(events.some(e=>e.event==='spekios_session_complete'&&e.properties.reason==='pagehide'));
     assert.ok(events.filter(e=>e.event==='$pageview'||e.event.startsWith('spekios_')).every(e=>e.properties.spekios_demo===true));
     assert.ok(events.some(e=>e.event==='$snapshot'),'The real SDK also emits session recording snapshots.');
     assert.ok(events.some(e=>e.properties.$session_id),'SDK attaches real session IDs.');
@@ -60,6 +67,11 @@ test('real demo SDK captures a journey, which is inferred and executed in a fres
     const broken=flow.steps.map(s=>s.action==='observe'&&s.value?.includes('confirmed')?{...s,value:'Something else happened.'}:s);
     const failed=await replayFlow(browser,origin,broken);assert.equal(failed.status,'failed');assert.equal(failed.error,'recorded_observation_mismatch');
     const interrupted=await replayFlow(browser,origin,flow.steps,async()=>false);assert.equal(interrupted.status,'interrupted');
+    const replayPage=await browser.newPage();const feedback:string[]=[];
+    await replayPage.addInitScript(()=>{(window as any).__SPEKIOS_REPLAY__=true;});
+    replayPage.on('request',req=>{if(new URL(req.url()).origin===phOrigin)feedback.push(req.url());});
+    await replayPage.goto(origin);await replayPage.getByText('Automated validation. This visit is excluded from analytics.').waitFor();
+    assert.deepEqual(feedback,[]);await replayPage.close();
     await page.setViewportSize({width:390,height:844});await page.goto(origin);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Demo fits a mobile screen.');
     await page.screenshot({path:new URL('demo-mobile.png',artifacts).pathname,fullPage:true});
@@ -86,7 +98,7 @@ test('toolbar-enabled demo exposes window.posthog and loads toolbar assets with 
   try{
     const page=await browser.newPage(),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${(demo.address() as AddressInfo).port}`);
-    await page.waitForFunction(()=>document.getElementById('monitoring-status')?.textContent?.startsWith('Ready.'));
+    await page.waitForFunction(()=>document.getElementById('monitoring-status')?.textContent?.startsWith('Demo visits are recorded automatically.'));
     assert.equal(await page.getByTestId('browse').getAttribute('data-attr'),'browse');
     assert.equal(await page.evaluate('window.posthog.config.ui_host'),'https://eu.posthog.com');
     await page.evaluate('window.posthog.loadToolbar({action:"ph_authorize",userIntent:"add-action"})');
