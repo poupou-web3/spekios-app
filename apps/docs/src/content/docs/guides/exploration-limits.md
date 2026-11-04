@@ -2,7 +2,7 @@
 {
   "title": "Set exploration limits",
   "description": "Explorations have no limit by default. Set your own action, time, token and cost limits, and different limits for a project or a model.",
-  "reviewed": "2026-10-31",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 7}
 }
 ---
@@ -34,9 +34,9 @@ Agents and API clients choose the project with **project_id** when they start wo
 
 ## What a job keeps
 
-A job keeps the limits resolved when it was admitted, under **settings** in the job and **limits** in the run configuration. Changing your settings later does not change queued or running jobs. The run records why it stopped: **action_budget_reached**, **time_budget_reached**, **token_budget_reached**, **cost_budget_reached**, **no_new_states** or **no_reachable_unexplored_controls**.
+A job keeps the limits resolved when it was admitted, under **settings** in the job and **limits** in the run configuration. Changing your settings later does not change queued or running jobs. The run records why it stopped: **action_budget_reached**, **time_budget_reached**, **token_budget_reached**, **cost_budget_reached**, **model_request_budget_reached** (a model-call cap derived from the action limit), **no_new_states** or **no_reachable_unexplored_controls**.
 
-If a worker stops mid-run, the exploration continues in a new run with the actions it has left; without an action limit it can always continue, up to three times.
+If a worker stops mid-run, the job is marked interrupted and is not resumed automatically. **Continue exploration** starts a new job from the recorded graph with your current limits.
 
 ## Server defaults
 

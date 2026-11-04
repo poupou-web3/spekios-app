@@ -2,7 +2,7 @@
 {
   "title": "Models, usage and settings API",
   "description": "Inspect provider availability, submit bounded model requests, read nullable usage and save revisioned Spekios exploration defaults.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 7
   }
@@ -49,13 +49,13 @@ This gateway request does not execute browser actions. API keys stay server-side
 
 Workspace managers read **GET /v1/exploration-settings**, then POST the complete new preference set to the same path.
 
-Use a fresh **request_id**, the current **expected_revision**, provider, model, **viewport_profile**, **free_only**, **auto_reproduce**, **max_auto_reproductions** and **max_auto_replay_actions**. The optional boolean **app_memory** defaults to true. The limits **max_actions**, **max_minutes**, **max_tokens** and **max_cost_usd** are optional; absent or null means no limit. **stop_after_idle_actions** defaults to 50; null turns it off. **limit_overrides** lists limits for a **project_id**, **provider**, **model** or a combination; see [exploration limits](../../guides/exploration-limits/). The optional **saved_models** is the settings page's model list: up to 30 entries of **provider**, **model** and an optional **label** (up to 60 characters), each provider and model ID once, and optional **input_usd_per_million** and **output_usd_per_million** prices (0–10,000 US dollars per million tokens) that the workspace uses to estimate cost. Jobs do not freeze it.
+Use a fresh **request_id**, the current **expected_revision**, provider, model, **viewport_profile**, **free_only**, **auto_reproduce**, **max_auto_reproductions** and **max_auto_replay_actions**. The optional boolean **app_memory** defaults to true. The limits **max_actions**, **max_minutes**, **max_tokens** and **max_cost_usd** are optional; absent or null means no limit. **stop_after_idle_actions** defaults to 50; null turns it off. **limit_overrides** lists limits for a **project_id**, **provider**, **model** or a combination; see [exploration limits](../../guides/exploration-limits/). The optional **saved_models** is the settings page's model list: up to 30 entries of **provider**, **model** and an optional **label** (up to 60 characters), each provider and model ID once, and optional **input_usd_per_million** and **output_usd_per_million** prices (0–10,000 US dollars per million tokens) that the workspace uses to estimate cost. Jobs do not freeze it. Optional **project_models** assigns a model to a project; **exploration_strategy**, **reuse_rankings** (default true) and **navigation_model** are described in [exploration strategy](../../guides/exploration-strategy/) and [exploration cost](../../guides/exploration-cost/).
 
 The default revision is zero until the first saved preference. Action limits are 1–10,000, minutes 1–10,080, tokens 1,000–1,000,000,000, cost 0.01–100,000 USD; auto-reproduction case bounds 1–3; total replay-action bounds 1–100. A job freezes the limits resolved for its project and model at admission.
 
 A new save returns 201; an identical retry 200. Revision conflicts return 409. New jobs freeze the effective revision; existing jobs and retries do not adopt later defaults.
 
-Preferences can select a saved credential with **provider_key_id** (a UUID or `demo`), including in project and navigation model choices. They never contain the credential value. Allowed origins and test-form rules remain operator configuration.
+Preferences can select a saved credential with **provider_key_id** (a UUID or `demo`), including in project and navigation model choices. They never contain the credential value. Extra allowed network origins and test-form rules remain operator configuration.
 
 ## App memory
 
@@ -63,7 +63,7 @@ Preferences can select a saved credential with **provider_key_id** (a UUID or `d
 
 **POST /v1/app-memory/{scope_id}/forget** with an empty JSON body deletes that scope's derived pages and controls and returns 200. Runs and evidence are unchanged. An unknown scope returns 404; a scope in use returns 409 **memory_scope_in_use**.
 
-An exploration job (**POST /v1/browser-jobs** with kind **explore**, or the **scout_start_exploration** tool) accepts an optional boolean **app_memory** that overrides the saved default for that run. While the gateway uses simulated models, omitted **app_memory** means off. Reproduction and fix-verification jobs reject it; they never use memory. See [explore deeper across runs](../../guides/app-memory/).
+An exploration job (**POST /v1/browser-jobs** with kind **explore**, or the **scout_start_exploration** tool) accepts an optional boolean **app_memory** that overrides the saved default for that run. Reproduction and fix-verification jobs reject it; they never use memory. See [explore deeper across runs](../../guides/app-memory/).
 
 ## Named provider keys and demo credits
 

@@ -12,15 +12,15 @@ Triage closes Spekios's loop: the agent decides what is wrong, Spekios records i
 | `agent` | `scout_triage_issue`, or any request with an agent credential | Agent and Spekios decisions |
 | `system` | Historical automatic matches retained for audit | Nothing; it only triages new issues |
 
-`scout_triage_issue(...)` is the single write path. It locks the issue, resolves `duplicate_of` to its canonical issue (refusing cycles), returns an identical current decision as `reused`, checks `expected_revision`, and refuses `human_decision_present` when an agent would replace a person. Each revision bumps the issue revision and appends an `issue.triaged` event, exported to ClickHouse with the other issue events.
+The PostgreSQL function `scout_triage_issue(...)` is the single write path (the MCP tool of the same name calls it through the API). It locks the issue, resolves `duplicate_of` to its canonical issue (refusing cycles), returns an identical current decision as `reused`, checks `expected_revision`, and refuses `human_decision_present` when an agent would replace a person. Each revision bumps the issue revision and appends an `issue.triaged` event, exported to ClickHouse with the other issue events.
 
 Finding reviews stay separate: they label one action's evidence (with reproduction requirements for confirmation and training implications). Triage decides what Spekios does next with an issue.
 
 ## Behavior identity and known behavior
 
-Migration [029-issue-handoff-history.sql](../../infra/postgres/029-issue-handoff-history.sql) adds append-only `issue_signatures` aliases and replaces path-dependent matching. Its version-2 signature covers the page URL without its fragment, normalized command identity, viewport profile and dimensions, project, execution mode, saved auth session (or isolated auth context), and case/whitespace-normalized expected and observed results. Missing observations are isolated by action ID. A per-owner/signature advisory lock serializes concurrent observations.
+Issues are matched through append-only `issue_signatures` aliases ([029-issue-handoff-history.sql](../../infra/postgres/029-issue-handoff-history.sql)). The version-2 signature covers the page URL without its fragment, normalized command identity, viewport profile and dimensions, project, execution mode, saved auth session (or isolated auth context), and case/whitespace-normalized expected and observed results. Missing observations are isolated by action ID. A per-owner/signature advisory lock serializes concurrent observations.
 
-Existing IDs, fingerprints and snapshots remain unchanged. Backfill assigns a signature to the earliest existing issue. Future strict matches append an occurrence and lifecycle event to that issue, retaining human decisions. Historical separate IDs remain accessible. A changed failure stays untriaged even on a previously intended control: the loose `issue_behaviors` key supplies bounded related-finding suggestions, not automatic triage inheritance. Manual duplicates retain canonical links.
+Strict matches append an occurrence and lifecycle event to that issue, retaining human decisions. Historical separate IDs remain accessible. A changed failure stays untriaged even on a previously intended control: the loose `issue_behaviors` key supplies bounded related-finding suggestions, not automatic triage inheritance. Manual duplicates retain canonical links.
 
 `scout_issue_tracking` combines latest observation and candidate check without claiming a global fix. A completed positive candidate check is `verified_on_candidate`; a later observation is `observed_again`. Absence in an exploration has no lifecycle effect. The API returns occurrences/activity newest first and exposes tracking in issue summaries and run handoffs.
 
@@ -38,9 +38,8 @@ Run reports carry each persistent issue's current triage. The coding-agent repor
 
 `GET /v1/rechecks/{id}` (`scout_get_recheck`) summarizes each item's verification and counts resolved, still reproducible, blocked, inconclusive, pending and skipped checks; `complete` is true once every admitted check has an outcome. [scripts/scout-recheck.mjs](../../scripts/scout-recheck.mjs) starts a recheck, waits and exits 0, 1 (regression, or with `--strict` any unconfirmed item), 2 (refused) or 3 (timeout). `just recheck URL` runs it against the local stack.
 
-## Verification
+## Tests
 
-- `cargo test` covers triage input rules, candidate URL derivation and stable verification IDs; `apps/web/test/issues.test.mjs` covers the triage form, conflicts, the open filter and recheck retries.
-- An end-to-end check against an isolated API and database covered: human triage and identical retries; automatic recognition across a different path and scroll position; agent triage refused over a person's decision; automatic duplicates, cycle and stale-revision refusals; the open list and knowledge roll-ups; report labels and counts; recheck admission, reuse, conflict and origin refusal; and the CI script's exit code on a regression.
-- `just finding-handoff-test` uses disposable PostgreSQL, real Chromium captures and the installed CLI to check legacy identity migration, concurrent occurrences, scope separation, retained review/evidence, candidate tracking, exact API/preview/copy equality, polling, account isolation and durable candidate admission/cancellation. History outcomes are fixtures and no model calls run.
-- Not yet covered by the fixture suites: rechecks executed by a real worker, and triage written from an agent credential over REST.
+- `just api-test` covers triage input rules, candidate URL derivation and stable verification IDs; `just web-test` (`apps/web/test/issues.test.mjs`) covers the triage form, conflicts, the open filter and recheck retries.
+- `just finding-handoff-test` uses disposable PostgreSQL, real Chromium captures and the installed CLI to check identity migration, concurrent occurrences, scope separation, retained review/evidence, candidate tracking, exact API/preview/copy equality, polling, account isolation and durable candidate admission and cancellation. It makes no model calls.
+- Not covered by automated suites: rechecks executed by a real worker, and triage written from an agent credential over REST.

@@ -2,7 +2,7 @@
 {
   "title": "Common questions",
   "description": "Answers about URL-only input, unchanged screenshots, model access, free models, training evidence, API access and Spekios coverage.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 6
   }
@@ -10,7 +10,7 @@
 ---
 ## Do I need to write a test brief?
 
-No. The first version starts from a URL and infers likely user actions. The operator sets the model, action budget and permitted app origins.
+No. Spekios starts from a URL and infers likely user actions. You choose the model in **Settings** and can set optional limits. A [testing focus](../../guides/testing-focus/) can steer a running exploration, but it is never required.
 
 ## Does every screenshot change mean a bug?
 
@@ -18,7 +18,7 @@ No. Changes help locate the outcome. Spekios compares behavior with an expectati
 
 ## Can I use my own model?
 
-You can configure an OpenAI, Anthropic, OpenRouter or Meta AI API key and select a compatible model. Meta AI uses `muse-wonder-1.0` on the Responses API. Custom provider adapters and subscription authentication are not implemented. See [model connections](../../getting-started/models/).
+You can add OpenAI, Anthropic, OpenRouter or Meta AI API keys and choose any compatible model ID from those providers. Custom provider adapters and subscription authentication are not implemented. See [model connections](../../getting-started/models/).
 
 ## Can an agent start work and come back later?
 
@@ -38,7 +38,7 @@ They are retained with provenance and evidence IDs, but recording is not trainin
 
 ## Is a completed run a passing test suite?
 
-No. Completion means the bounded browser execution ended. Findings, blocked branches, unsupported actions and budget limits remain relevant.
+No. Completion means the browser execution ended. Findings, blocked branches, unsupported actions and reached limits remain relevant.
 
 ## Can I deploy the documentation myself?
 

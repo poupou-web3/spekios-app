@@ -2,7 +2,7 @@
 {
   "title": "Use the CLI",
   "description": "Connect a terminal agent to a Spekios project through browser approval, then submit durable jobs and read structured reports.",
-  "reviewed": "2026-11-03",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 3}
 }
 ---
@@ -12,7 +12,7 @@ Install it with Node.js 22+ and npm. The `spekios` command then runs directly, w
 
 ## Connect an agent
 
-Install the CLI once from your own Spekios server. For the hosted app:
+Install the CLI once from your Spekios server. For the hosted app:
 
 ~~~sh
 npm install --global https://app.spekios.com/assets/cli/spekios-cli.tgz
@@ -28,6 +28,11 @@ spekios auth complete
 spekios project list
 spekios project use <project-uuid>
 ~~~
+
+The CLI uses **https://app.spekios.com** by default. For a self-hosted server,
+install from its **/assets/cli/spekios-cli.tgz** and add `--server <origin>` (or set
+**SPEKIOS_SERVER**) to `auth login`; later commands use the server saved with the
+credential.
 
 Login returns immediately with exit code 3 while approval is needed. Complete
 polls once; `auth complete --wait` can wait for approval. `auth login --open` opens
@@ -59,10 +64,14 @@ spekios history --domain your-app.example
 ~~~
 
 Run returns immediately, using the project's configured model, key and limits.
+`--provider` with `--model` (plus optional `--key` and `--free-only`) overrides the
+model for that run; `--viewport`, `--auth-mode` and `--task-id` are also accepted.
 Starting a test can change target-app data and use model credits. The Spekios
 demo has a lifetime account allowance and its Contributor data-use policy;
 personal-key calls use the provider's billing. Reading progress/reports/history
 makes no model calls. Follow `poll_after_ms` rather than keeping a tight poll loop.
+`history` accepts `--domain`, `--url`, `--offset` and `--limit` (1–50); `usage`
+reads agent-attributed usage and `auth status` checks the saved identity.
 
 ## Investigate and verify a finding
 

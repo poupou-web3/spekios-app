@@ -2,17 +2,19 @@
 {
   "title": "Access and recording boundaries",
   "description": "Understand which sites Spekios can test, the browser sandbox, the private sign-in boundary, local authentication and requirements before shared deployment.",
-  "reviewed": "2026-10-30",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 3
   }
 }
 ---
-Spekios’s backend is currently intended for a trusted local developer. Public static documentation is independent of that backend.
+Spekios’s backend is built for one trusted team on one machine. Public static documentation is independent of that backend.
 
 ## Target policy
 
-Any public https site can be tested. Local, private, internal and plain-http origins must be listed exactly in **SCOUT_ALLOWED_ORIGINS**. A public page cannot use that list to reach a private address. The worker revalidates actions and blocks recognized credential, payment and destructive contexts. General account creation and unapproved form submission are not available.
+Any http or https address can be submitted, including local, private and internal ones; URLs with embedded credentials and other schemes are rejected. Anyone who can start a test can therefore point the browser at any address the browser sandbox can reach.
+
+During a run, top-level navigation stays on the entry page's origin or another host of the same registered domain. Page resources may load from the page's own origin and public https/wss addresses. A local or private page may also load from the exact origins in **SCOUT_ALLOWED_ORIGINS**; a public https page never gets that list. The worker revalidates actions and blocks recognized credential, payment and destructive contexts. Unapproved form submission is not available.
 
 This policy does not guarantee that an allowed button cannot change data. Spekios acts like a user; on an app with real data, prefer a test account.
 
@@ -27,7 +29,7 @@ Every target page runs in the **browser-sandbox** container, not beside Spekios'
 
 The browser worker keeps the credentials and the encrypted saved-login vault. It drives the sandboxed browser over Playwright's protocol and sends a saved session's cookies only into the run that uses them.
 
-The sandbox can still reach the internet, the bundled fixture app, the worker's private-login port, which requires the operator token, and whatever the Docker host exposes to containers, such as **host.docker.internal** on Docker Desktop. Spekios's loopback-published ports there still require their credentials. Keep **SCOUT_DEV_AUTH_BYPASS** off unless you need it.
+The sandbox can still reach the internet, the bundled fixture and Larchwood apps, the worker's private-login port, which requires the operator token, and whatever the Docker host exposes to containers, such as **host.docker.internal** on Docker Desktop. Spekios's loopback-published ports there still require their credentials. Keep **SCOUT_DEV_AUTH_BYPASS** off unless you need it.
 
 Container isolation shares the host kernel. A Chromium exploit that also escapes the container would reach the Docker host; a virtual-machine boundary is not implemented. If Chromium cannot start its own sandbox on your host, set **SCOUT_CHROMIUM_SANDBOX=false** and recreate the browser-sandbox service; the container boundary above still applies, and **just isolation-test** reports the setting.
 
@@ -49,7 +51,7 @@ MCP requires a Bearer token even with local GUI development bypass enabled. Brow
 
 ## Shared remote deployment
 
-Before exposing the backend, implement and verify the intended TLS, identity, per-user authorization, per-tenant browser isolation, egress controls, secret management and backup/recovery policy.
+`just deploy edge` adds HTTPS through Caddy, and the optional hosted Spekios login adds human sign-in. Before exposing the backend to people you do not fully trust, also decide and verify per-tenant browser isolation, egress controls for the browser network, secret management and backup/recovery. Keep the operator back office on a private network or behind an identity-aware proxy.
 
 Application workspace boundaries, loopback port bindings and container caps do not amount to a multitenant production service.
 

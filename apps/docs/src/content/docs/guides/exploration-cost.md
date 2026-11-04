@@ -2,7 +2,7 @@
 {
   "title": "Spend fewer model calls per exploration",
   "description": "Reuse a screen's ranking from earlier runs when it has not changed, and send navigation to a cheaper model while state-changing actions keep the full assessment.",
-  "reviewed": "2026-11-01",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 9}
 }
 ---
@@ -10,7 +10,7 @@ Most of an exploration's cost is model calls. Each action normally needs a ranki
 
 ## Reuse unchanged rankings
 
-With **Reuse a screen's ranking from earlier runs when it hasn't changed** on (the default), a run that reaches a screen an earlier run already ranked uses that ranking instead of asking the model again. It needs [app memory](../app-memory/). Without memory, every screen is ranked fresh.
+With **Reuse a screen’s ranking from earlier runs when it hasn’t changed** on (the default, under **Settings → Models → Cost controls**), a run that reaches a screen an earlier run already ranked uses that ranking instead of asking the model again. It needs [app memory](../app-memory/). Without memory, every screen is ranked fresh.
 
 A ranking is reused only when all of these hold:
 
@@ -31,7 +31,7 @@ A reused ranking is recorded as its own planning decision with status **reused**
 
 ## Use a cheaper model for navigation
 
-Set **Navigation model provider** and **Navigation model ID** to send navigation to a cheaper model. Navigation means opening a URL (the entry page, a return to it, a remembered page), following a link and scrolling. The navigation model predicts and assesses these actions. Everything else keeps the exploration model:
+In **Settings → Models → Models in use**, choose a **Navigation model** from your model list to send navigation to a cheaper model. A project can choose its own navigation model under **Project models**, and an API run can send one with its `model`. Navigation means opening a URL (the entry page, a return to it, a remembered page), following a link and scrolling. The navigation model predicts and assesses these actions. Everything else keeps the exploration model:
 
 - ranking the screen;
 - clicks on buttons, form entry, selections, checkboxes and submissions;
@@ -58,8 +58,8 @@ The run configuration records:
 
 Each assessment has **model_tier**. Each model request keeps its provider and model, so reported tokens and cost show which model they came from.
 
-With an action limit, a run with a navigation model allows up to `4 × actions + 6` model requests instead of `3 × actions + 6`, which leaves room for one reassessment per action.
+With an action limit, a run with a navigation model allows up to `4 × actions + 6` model requests instead of `3 × actions + 6`, which leaves room for one reassessment per action. Reaching that cap stops the run with **model_request_budget_reached**.
 
 ## API
 
-API clients send **reuse_rankings** (true or false) and **navigation_model** (`{"provider": "openrouter", "model": "vendor/small-model:free"}`, or null for one model) with the exploration settings. A job keeps the values it was admitted with.
+API clients save **reuse_rankings** (true or false) and **navigation_model** (`{"provider": "openrouter", "model": "vendor/small-model:free"}`, or null for one model) in their defaults with **POST /v1/exploration-settings**. A job keeps the values it was admitted with.

@@ -2,7 +2,7 @@
 {
   "title": "Spekios documentation",
   "description": "Learn Spekios: URL-first web exploration, recorded evidence, human-reviewed findings, MCP tools and a self-hosted HTTP API.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 0
   },
@@ -29,7 +29,7 @@ Spekios explores your web app from a URL, checks each action against a recorded 
 
 ## Start with your next task
 
-- **[Run Spekios locally](getting-started/local-setup/)** — Start the workspace, browser worker and storage services with Docker Compose.
+- **[Run Spekios locally](getting-started/local-setup/)** — Start the workspace, browser sandbox and storage services with Docker Compose.
 - **[Test your first URL](getting-started/first-run/)** — Submit a site, follow the run and inspect its recorded actions.
 - **[Connect a coding agent](agents/connect/)** — Use MCP or HTTP to submit work, return for a report and investigate a finding.
 - **[Install the agent skill](agents/skill/)** — Give your agent a small, reusable Spekios workflow without adding an SDK.
@@ -45,6 +45,6 @@ An unchanged screenshot can still reveal a failure. A changed screenshot can be 
 
 ## Know the current scope
 
-Spekios is a local developer preview. It tests public https sites and the local or private apps its operator allows, using Chromium in an isolated browser sandbox, bounded action budgets and API-key model connections. A completed run is a recorded exploration, not a claim that the entire app works.
+Spekios is a self-hosted developer preview. It tests any http or https address its browser can reach, including local and private apps, using Chromium in an isolated browser sandbox and API-key model connections. Explorations have no action limit unless you set one. A completed run is a recorded exploration, not a claim that the entire app works.
 
 Read [capabilities and limits](product/capabilities/) before using it with a new target. The documentation reflects implemented behavior; proposed features are labeled explicitly.

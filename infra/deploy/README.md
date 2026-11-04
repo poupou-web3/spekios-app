@@ -1,15 +1,15 @@
 # Production host: Hetzner + Cloudflare
 
-This folder deploys the single-machine stack from [deployment](../../docs/platform/deployment.md) onto one Hetzner Cloud **CX43** (8 vCPU, 16 GB, **Debian 13**). Two hostnames go through a **proxied** Cloudflare zone:
+This folder deploys the single-machine stack from [deployment](../../docs/platform/deployment.md) onto one Hetzner Cloud server (default **CX43**: 8 vCPU, 16 GB, **Debian 13**). Two hostnames go through a **proxied** Cloudflare zone:
 
 - **https://app.spekios.com** serves the customer workspace and API.
 - **https://bo.spekios.com** serves the operator console. Cloudflare Access sits in front of it, so only listed email addresses get through, and the console still asks for the operator token.
 
-Two tools do the work:
+Three tools do the work:
 
 - **Terraform** (OpenTofu works the same way) creates the server, its firewall, the DNS records, the Cloudflare Origin certificate, the Full (strict) TLS rule, the Authenticated Origin Pulls client certificate, the Access applications, and the Cloudflare Tunnel that GitHub deploys use for SSH.
-- **Ansible** hardens the host, patches the kernel and checks it, installs Docker and cloudflared, ships a committed revision of the code, and runs `scripts/deploy.sh edge`.
-- **GitHub Actions** ([deploy.yml](../../.github/workflows/deploy.yml)) runs that same Ansible release step on every push to `prod`.
+- **Ansible** hardens the host, patches the kernel and checks it, installs Docker and cloudflared, ships a commit from `origin/main`, and runs `scripts/deploy.sh edge` with `SCOUT_EDGE_TLS=origin`.
+- **GitHub Actions** ([deploy.yml](../../.github/workflows/deploy.yml)) runs that same Ansible release step (`--tags app`) on every push to `prod`.
 
 ```
 Internet ─▶ Cloudflare ── TLS + our client cert ─▶ Hetzner firewall ─▶ Caddy ─▶ api:8080         (app)
@@ -84,14 +84,13 @@ Port 22 stays limited to `admin_cidrs`; GitHub's runners never get through the H
 | `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` | The deploy key and the server's host keys |
 | `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | The Access service token |
 | `ORIGIN_PEM`, `ORIGIN_KEY`, `AOP_CA_PEM` | The files in `.secrets/` that Caddy needs |
+| `DEMO_ORIGIN_PEM` | The Larchwood demo certificate, when [demo shops](#public-demonstration-shops) are enabled |
+| `POSTHOG_ORIGIN_PEM`, `POSTHOG_ORIGIN_KEY` | The [PostHog demo](../../apps/posthog-demo/DEPLOY.md) certificate pair, when present in `.secrets/` |
 | `ANSIBLE_SECRETS_YML` | `ansible/secrets.yml` (provider keys, `SPEKIOS_*`), if you have one; it must not be vault-encrypted |
 
-Variables: `DEPLOY_SSH_HOST`, `SCOUT_PUBLIC_HOST` and `SCOUT_BACKOFFICE_HOST`.
+Variables: `DEPLOY_SSH_HOST`, `SCOUT_PUBLIC_HOST`, `SCOUT_BACKOFFICE_HOST`, `SCOUT_DEMO_SITES`, and `SCOUT_DEMO_FIXED_HOST`/`SCOUT_DEMO_FAULTY_HOST` when demo shops are enabled.
 
 Run `just cloud-ci-setup` again, then redeploy, whenever you change `secrets.yml`, rotate the service token (`tofu -chdir=infra/deploy/terraform apply -replace=cloudflare_zero_trust_access_service_token.deploy`) or move to a new server. These are repository secrets, readable by workflows on any branch, so only give write access to people who could deploy anyway. On a paid GitHub plan, you can move them into a `production` environment limited to `prod`.
-
-**Adding this to the existing server:** give the Cloudflare token the two new account permissions (step 5), then run `just cloud-check` and `just cloud-apply`. The apply adds the tunnel, the `ssh` DNS record, the Access app and the service token, and doesn't touch the server. Then run `just cloud-ci-setup` and merge the workflow into `main`, then merge `main` into `prod`.
-
 
 ## What is reachable
 
@@ -118,11 +117,11 @@ Inside the host:
 
 ## Kernel vulnerabilities (CVE-2026-98432)
 
-[CVE-2026-98432](https://security-tracker.debian.org/tracker/CVE-2026-98432) is a use-after-free in the IPv4 TCP handshake. It's remote and needs no login (CVSS 9.8), and is triggered by IP options in a SYN. The published exploit path needs a multipath TCP (MPTCP) listener. Go programs such as Caddy open those by default. This deployment handles it in five ways:
+[CVE-2026-98432](https://security-tracker.debian.org/tracker/CVE-2026-98432) is a use-after-free in the IPv4 TCP handshake. It's remote and needs no login (CVSS 9.8), and is triggered by IP options in a SYN. The published exploit path needs a multipath TCP (MPTCP) listener. Go programs such as Caddy open those by default. This deployment handles it in several ways:
 
-- **A patched OS.** Debian 13's security archive has the fix (`linux 6.12.113-1`, DSA-6568-1). Ubuntu 24.04 is still marked vulnerable ([tracker](https://ubuntu.com/security/CVE-2026-98432)), so the default image is `debian-13`.
+- **A patched OS.** Debian 13's security archive has the fix (`linux 6.12.113-1`, DSA-6568-1). Ubuntu 24.04 was still marked vulnerable when the minimum was recorded ([tracker](https://ubuntu.com/security/CVE-2026-98432)), so the default image is `debian-13`.
 - **Patched at first boot.** The Debian image itself ships a vulnerable kernel (`6.12.107-1`). cloud-init, set up by Terraform, installs every update (`dist-upgrade`) on first boot and reboots into the new kernel before anything else runs. Until then, only your SSH addresses can reach the server.
-- **A proven kernel.** The first thing Ansible does is boot the newest installed kernel, install anything published since, and boot again if needed. It then **refuses to configure or deploy anything** unless the running kernel's package is at least the version recorded in `scout_kernel_minimum` ([group_vars/scout.yml](ansible/group_vars/scout.yml)). A distribution without a recorded entry, such as Ubuntu today, is refused too.
+- **A proven kernel.** The first thing Ansible does is boot the newest installed kernel, install anything published since, and boot again if needed. It then **refuses to configure or deploy anything** unless the running kernel's package is at least the version recorded in `scout_kernel_minimum` ([group_vars/scout.yml](ansible/group_vars/scout.yml)). A distribution without a recorded entry, such as Ubuntu, is refused too.
 - **Staying patched.** Unattended upgrades install security updates daily and reboot at 04:30 (server time) when a kernel needs it. Containers restart on their own.
 - **Interim protections that don't depend on the patch.** `net.mptcp.enabled=0` turns off MPTCP, and an nftables rule drops inbound IPv4 TCP packets that carry IP options. That's the Red Hat and AlmaLinux mitigation, and ordinary traffic never sets them.
 - **Little exposure in the first place.** Only Cloudflare reaches 80 and 443. Cloudflare ends the client's TCP connection and opens its own to the origin, so a client's crafted SYN never reaches this kernel. SSH is limited to your addresses.
@@ -133,7 +132,7 @@ When a new kernel CVE matters, check the Debian tracker and raise `scout_kernel_
 
 ```sh
 ssh deploy@<ip>                         # `tofu -chdir=infra/deploy/terraform output ssh`
-cd /opt/scout/current && export COMPOSE_FILE=compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml
+cd /opt/scout/current && export COMPOSE_FILE=compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml  # append :compose.demos.yaml and/or :compose.posthog-demo-edge.yaml if enabled
 docker compose ps                       # status
 docker compose logs -f api
 sed -n 's/^SCOUT_API_TOKEN=//p' /opt/scout/shared/.env   # the operator token for bo.spekios.com (value only, without "SCOUT_API_TOKEN=")
@@ -150,21 +149,13 @@ Each release goes to `/opt/scout/releases/<sha>`, with `/opt/scout/current` poin
 
 ## Spekios sign-in on app.spekios.com
 
-Production sign-in was activated on 2 November 2026 with the separate
-`spekios-app` client, callback `https://app.spekios.com/auth/callback`, and account
-launch URL `https://app.spekios.com/login`. The app reports auth mode `spekios`.
-The local `spekios-local` client still only allows
-`http://localhost:18080/auth/callback`. For another production installation:
+Production uses its own Lovable client (`spekios-app`), separate from the local `spekios-local` client, with the redirect URI `https://app.spekios.com/auth/callback`; the sign-in page is `https://app.spekios.com/login`. To set it up on an installation:
 
-1. Register a second Lovable client whose redirect URI is exactly `https://app.spekios.com/auth/callback`. See [SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md).
-2. Put the five `SPEKIOS_*` values in `secrets.yml`.
-3. Run `just cloud-deploy --tags app`.
+1. Register a client whose redirect URI is exactly `https://app.spekios.com/auth/callback`. See [SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md).
+2. Put the five `SPEKIOS_*` values under `scout_env` in `secrets.yml` (see `secrets.example.yml`).
+3. Run `just cloud-deploy --tags app`, and `just cloud-ci-setup` so GitHub deploys keep them.
 
-The five settings are also saved in the original `front-clause` checkout's
-ignored `ansible/secrets.yml`, so future deployments keep sign-in enabled. Keep
-the backend secret paired with its registered Lovable hash; do not generate a
-replacement secret during an ordinary deployment. See
-[SPEKIOS_AUTH.md](../../SPEKIOS_AUTH.md) for verification and session behavior.
+Keep the backend secret paired with the hash registered in Lovable; do not generate a new secret during an ordinary deployment. With sign-in configured, `/v1/auth-mode` reports `spekios`.
 
 ## Files that stay private (all gitignored)
 
@@ -201,9 +192,8 @@ origin key and the existing Authenticated Origin Pulls CA.
 
 Run `just cloud-ci-setup` to store `DEMO_ORIGIN_PEM` and the nonsecret
 `SCOUT_DEMO_SITES`, `SCOUT_DEMO_FIXED_HOST`, `SCOUT_DEMO_FAULTY_HOST` variables.
-Terraform also writes those fields into the laptop's Ansible inventory. Merge
-code into main, then main into prod to release it. The playbook verifies both
-public demo homepages as part of deployment.
+Terraform also writes those fields into the local Ansible inventory. Release as
+usual; the playbook verifies both public demo homepages as part of deployment.
 
 With demos enabled, `scripts/deploy.sh edge` includes `compose.demos.yaml`.
 The demo process has no credentials, data mounts or published host ports. Its
@@ -217,3 +207,7 @@ add named fixed/faulty project model entries in Settings and choose the matching
 project when launching. A launch uses the account/project's selected model,
 key and limits; infrastructure deployment does not create accounts or spend
 model credits.
+
+## PostHog demo shop
+
+The separate PostHog demo at `demo-posthog.<zone>` is enabled with `posthog_demo_enabled` in Terraform and `scout_posthog_demo` in `secrets.yml`; its DNS record and certificate are created by hand. See [publishing the demo](../../apps/posthog-demo/DEPLOY.md).

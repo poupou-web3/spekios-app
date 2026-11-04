@@ -2,7 +2,7 @@
 {
   "title": "Use the workspace",
   "description": "Navigate Spekios’s run timeline, flow graph, evidence inspector, review filters, settings and theme.",
-  "reviewed": "2026-11-01",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 1
   }
@@ -12,17 +12,19 @@ The workspace helps a tester follow behavior. Operators of a Spekios deployment 
 
 ## User workspace
 
-Paste a URL on the workspace home and choose **Start testing**. The scheme is optional: `app.example.com` is tested as `https://app.example.com`. The line under the field shows whether Spekios is ready; **Change** opens screen size, sign-in and automatic rechecks. Follow the durable job and open its run. The timeline records each automated action with its expectation, outcome and assessment.
+**/workspace** lists your projects: one per website origin, with findings to review, confirmed findings and tests. Each project has an **Overview**, **Tests**, **Issues & fixes** and **Project settings** (an optional PostHog connection). **Activity**, **Connect your agent** and **Settings** sit at the bottom of the sidebar; the account menu at the top right shows worker and model gateway status.
 
-Use **Inspect action** to see exact typed parameters and linked evidence. Compare Before/After captures, open masks and sampled frames, and move between actions. The inspector preserves native image detail so small changes remain inspectable.
+Paste a URL and choose **Start testing**. The scheme is optional: `app.example.com` is tested as `https://app.example.com`, and `localhost:3000` as `http://host.docker.internal:3000`. The line under the field shows whether Spekios is ready; **Change** opens screen size, sign-in, saved app session, project, model, API key and automatic rechecks. A new test opens its project, which follows the job to its run.
 
-The **Flow** view shows states, transitions, frontier and planner decisions. Ranking scores describe selection order, not a measured probability of real-user behavior.
+A run report has **Actions**, **Findings** and **Flow map** tabs. **Actions** records each automated action with its expectation, outcome and assessment. Open an action to see exact typed parameters and linked evidence. Compare Before/After captures, open masks and sampled frames, and move between actions. The inspector preserves native image detail so small changes remain inspectable.
+
+The **Flow map** tab shows states, transitions, frontier and planner decisions. Ranking scores describe selection order, not a measured probability of real-user behavior.
 
 The run page shows input, output and total model tokens and an estimated cost; **Model usage** under the summary breaks them down by model. The run list shows the same for each run. See [estimate cost](../../getting-started/models/#estimate-cost).
 
 ## Findings and reviews
 
-Filters help find runs and original candidates by review state. An independent replay is shown as evidence about the original action, not as a second unrelated bug.
+**Tests** filters runs by status and data source; **Findings** filters original candidates by review state. An independent replay is shown as evidence about the original action, not as a second unrelated bug.
 
 Use [finding review](../findings/) to record a human conclusion and rationale. Export the selected run using [portable reports](../reports/).
 
@@ -34,14 +36,14 @@ Settings has one page per section, listed beside the content (or as tabs on a na
 - **Exploration:** default viewport, exploration strategy and automatic rechecks.
 - **Limits:** run limits and overrides for projects and models.
 - **Memory & sessions:** app memory on or off, remembered apps you can forget, and saved app sessions with removal controls.
-- **Appearance:** match your computer’s light or dark setting, or keep one theme in this browser. The same control sits in the top bar.
+- **Appearance:** match your computer’s light or dark setting, or keep one theme in this browser. The same control is in the account menu.
 
 ## Operator back office
 
-The team running Spekios uses a separate back office for service readiness, the browser job queue, model requests and attempts, ordered events and read-only server configuration. Outbox counters there indicate delivery state; they are not direct health probes for every service.
+The team running Spekios uses a separate back office for service readiness, the browser job queue, model requests and attempts, ordered runtime events, live service logs, provider connections and demo credits. Locally it runs at http://127.0.0.1:18083 and asks for **SCOUT_API_TOKEN**. Outbox counters there indicate delivery state; they are not direct health probes for every service.
 
 ## Configuration changes
 
-Saving defaults creates a new revision without restarting. Existing jobs retain their original configuration. Edit keys and allowed origins in the private environment configuration and restart the services.
+Saving defaults creates a new revision without restarting. Existing jobs retain their original configuration. Personal API keys are managed under **Settings → Models**. Operator environment keys and **SCOUT_ALLOWED_ORIGINS** live in the private environment configuration; restart the services after changing them.
 
 For queue, provider or storage problems, use [troubleshooting](../../operators/troubleshooting/).

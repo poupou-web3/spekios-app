@@ -2,7 +2,7 @@
 {
   "title": "MCP and HTTP tool reference",
   "description": "Browse the thirty-four Spekios tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
-  "reviewed": "2026-11-01",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 5
   }
@@ -14,6 +14,7 @@ The [downloadable catalog](../../mcp-tools.json) is a build-time snapshot. A run
 
 ## Discover and submit
 
+- [scout_whoami](../reference/scout_whoami/) — Workspace, agent identity and permissions.
 - [scout_status](../reference/scout_status/) — Inspect readiness and defaults.
 - [scout_new_request_id](../reference/scout_new_request_id/) — Allocate a command UUID.
 - [scout_list_projects](../reference/scout_list_projects/) — Project IDs and the model each would use.
@@ -37,17 +38,24 @@ See [testing focus](../../guides/testing-focus/) for boundaries, retries and his
 - [scout_get_job](../reference/scout_get_job/) — Durable queue detail.
 - [scout_list_runs](../reference/scout_list_runs/) — Recent owned runs.
 - [scout_get_run](../reference/scout_get_run/) — Compact recorded run.
+- [scout_list_sessions](../reference/scout_list_sessions/) — Full run history filtered by domain, URL, agent, project or task.
+- [scout_get_domain_summary](../reference/scout_get_domain_summary/) — Latest runs and coverage caveats for one hostname.
 
-## Decide and recheck
+See [agent identity and history](../identity/) for filters and paging.
 
+## Decide, verify and recheck
+
+- [scout_list_issues](../reference/scout_list_issues/) — Persistent issues, filtered by text, triage or verification outcome.
 - [scout_list_knowledge](../reference/scout_list_knowledge/) — Known bugs and intended behavior for a site.
 - [scout_get_app_map](../reference/scout_get_app_map/) — States, transitions and untried controls carried between runs.
 - [scout_compare_run](../reference/scout_compare_run/) — What a run found that earlier runs did not, and what changed.
 - [scout_triage_issue](../reference/scout_triage_issue/) — Decide whether an issue is a bug, intended behavior or a duplicate.
+- [scout_verify_fix](../reference/scout_verify_fix/) — Check one issue on a candidate deployment.
+- [scout_get_verification](../reference/scout_get_verification/) — Outcome and evidence of a fix verification.
 - [scout_recheck_deployment](../reference/scout_recheck_deployment/) — Verify a deployment against every open issue.
 - [scout_get_recheck](../reference/scout_get_recheck/) — Per-issue outcomes of a recheck.
 
-See [triage and rechecks](../../guides/triage/) for what each decision changes and how CI uses rechecks.
+See [triage and rechecks](../../guides/triage/) and [fix verification](../../guides/fix-verification/) for what each decision and outcome means.
 
 ## Inspect evidence and context
 

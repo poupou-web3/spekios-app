@@ -1,23 +1,27 @@
 # Larchwood visual assessment evaluation
 
-This pipeline freezes recorded Larchwood actions and compares the same evidence
-with full screenshots versus the production overview/crop policy. It accepts
-paraphrased descriptions of the same failure. It never replays site interactions
-or changes the original issue, evidence or review.
+This pipeline freezes recorded actions from the [Larchwood shop](../../../apps/bug-lab/README.md)
+and compares the same evidence assessed with full screenshots versus the production
+overview/crop policy (`src/assessment-vision.ts`, `packages/image-diff/attention.mjs`).
+It accepts paraphrased descriptions of the same failure. It never replays site
+interactions or changes the original issue, evidence or review.
 
-Run inside the recorder image, where PostgreSQL/S3/model-gateway credentials stay
-in the container environment. Do not copy provider secrets into dataset files.
+Commands: `snapshot`, `preview` (offline), `evaluate` (real model calls) and `report`;
+`--help` prints their options. Run them inside the recorder image, where
+PostgreSQL/S3/model-gateway credentials stay in the container environment. Do not copy
+provider secrets into dataset files. The simplest way is `just larchwood-eval`, which
+mounts `artifacts/evaluations` at `/evaluations`, runs as your user and sets
+`RECORDER_SPOOL=/evaluations/spool`:
 
 ```sh
 # SOURCE_RUN is a UUID from the intended user's public Larchwood recordings.
-docker compose run --rm --no-deps --entrypoint ./node_modules/.bin/tsx recorder \
-  evaluation/larchwood.ts snapshot --origin https://larchwood-faulty.spekios.com \
+just larchwood-eval snapshot --origin https://larchwood-faulty.spekios.com \
   --run SOURCE_RUN --out /evaluations/corpus --variant faulty
 ```
 
-Bind a private host directory to `/evaluations`. Set `RECORDER_SPOOL` to a private
-writable path for evaluation imports. When the host directory belongs to another
-UID, use Compose `--user "$(id -u):$(id -g)"`.
+To run it by hand, use `docker compose run --rm --no-deps --entrypoint ./node_modules/.bin/tsx recorder evaluation/larchwood.ts ...`,
+bind a private host directory to `/evaluations`, set `RECORDER_SPOOL` to a private
+writable path, and pass `--user "$(id -u):$(id -g)"` when that directory belongs to another UID.
 
 ## Freeze and inspect inputs
 
@@ -34,7 +38,7 @@ enter the assessor prompts. The snapshot records its manifest hash and checksum.
 
 ```sh
 # Offline: no database writes, model requests or spend.
-... evaluation/larchwood.ts preview --dataset /evaluations/corpus/dataset.json \
+just larchwood-eval preview --dataset /evaluations/corpus/dataset.json \
   --out /evaluations/review --limit 10 --repeats 3 \
   --experiment EXPERIMENT_UUID --max-calls 120 --max-cost-usd 0.25
 ```
@@ -48,13 +52,13 @@ differ. The preview explicitly records zero model calls and pending authorizatio
 After authorization for the selected production evidence and model use:
 
 ```sh
-... evaluation/larchwood.ts evaluate --dataset /evaluations/corpus/dataset.json \
+just larchwood-eval evaluate --dataset /evaluations/corpus/dataset.json \
   --out /evaluations/results --experiment EXPERIMENT_UUID \
   --limit 10 --repeats 3 --max-calls 120 --max-cost-usd 0.25
 ```
 
-The initial implementation uses `muse-spark-1.3-contributor` through the configured
-demo connection in the internal operator account. It imports cloned captures into
+It uses `muse-spark-1.3-contributor` through the configured demo connection in the
+internal operator account. It imports cloned captures into
 an evaluation run owned by that account. Customer allowances and original runs
 are not used for billing or mutated. Normal gateway metering, byte verification,
 immutable request IDs and credit limits apply. The model's Contributor data-use
