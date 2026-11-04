@@ -24,6 +24,7 @@ pub mod memory;
 use identity::{Principal, ScopedState};
 pub mod models;
 pub mod oauth;
+pub mod posthog;
 pub mod provider_access;
 pub mod reviews;
 mod runs;
@@ -113,6 +114,19 @@ impl AppState {
 
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
+        .route(
+            "/v1/websites/{origin}/posthog/connections",
+            get(posthog::list).post(posthog::create),
+        )
+        .route("/v1/websites/{origin}/posthog/connections/{id}", get(posthog::detail))
+        .route(
+            "/v1/websites/{origin}/posthog/connections/{id}/{action}",
+            axum::routing::post(posthog::action),
+        )
+        .route(
+            "/v1/websites/{origin}/posthog/connections/{connection}/workflows/{id}/replay",
+            axum::routing::post(posthog::replay),
+        )
         .route("/v1/issues", get(issues::list))
         .route("/v1/issues/{issue_id}", get(issues::detail))
         .route(

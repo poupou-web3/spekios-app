@@ -5,6 +5,7 @@ COPY apps/api/src ./src
 # Required by the opt-in disposable-database auth integration test.
 COPY infra/postgres/024-web-auth.sql /infra/postgres/024-web-auth.sql
 COPY infra/postgres/025-provider-access.sql /infra/postgres/025-provider-access.sql
+COPY infra/postgres/031-posthog.sql /infra/postgres/031-posthog.sql
 COPY apps/web /web
 COPY packages/web-ui/src /packages/web-ui/src
 COPY packages/cli/spekios.mjs packages/cli/package.json packages/cli/README.md /packages/cli/

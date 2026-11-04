@@ -10,7 +10,7 @@ locals {
   ssh_fqdn      = "${var.ssh_subdomain}.${var.cloudflare_zone}"
   demo_hosts    = var.demo_sites_enabled ? { fixed = "larchwood.${var.cloudflare_zone}", faulty = "larchwood-faulty.${var.cloudflare_zone}" } : {}
   hostnames     = [local.fqdn, local.bo_fqdn]
-  all_hostnames = concat(local.hostnames, values(local.demo_hosts))
+  all_hostnames = concat(local.hostnames, values(local.demo_hosts), var.posthog_demo_enabled ? ["demo-posthog.${var.cloudflare_zone}"] : [])
   secrets_dir   = "${path.module}/../.secrets"
   labels        = { app = "scout", managed_by = "terraform" }
 

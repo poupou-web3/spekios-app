@@ -1,0 +1,23 @@
+import {setupMonitoring,pageview,checkpoint} from './monitoring.js';
+const products=[{id:'daypack',name:'The Daypack',price:64,note:'Everything you need. Nothing you don’t.',color:'',shape:'<path d="M30 35 Q30 10 55 10 Q80 10 80 35 L88 110 Q55 125 22 110 Z"/><path d="M30 62 H80 V105 H30 Z M44 10 V4 H66 V10 M30 40 H80"/>'},{id:'bottle',name:'The Trail Bottle',price:28,note:'Keep your coffee warm. Your options open.',color:'ochre',shape:'<path d="M43 8 H67 V28 Q80 32 80 45 V110 Q55 120 30 110 V45 Q30 32 43 28 Z"/><path d="M43 18 H67 M30 55 H80"/>'},{id:'pouch',name:'The Field Pouch',price:32,note:'A place for all the little things.',color:'blue',shape:'<path d="M12 38 Q55 25 98 38 V100 Q55 115 12 100 Z"/><path d="M12 48 H98 M86 48 V62 M22 38 V24 H88 V38"/>'}];
+let selected=products[0],size='standard',bag=[];
+const view=document.getElementById('view');
+const art=p=>`<div class="product-art ${p.color}" aria-hidden="true"><svg viewBox="0 0 110 130">${p.shape}</svg></div>`;
+function catalogue(){view.innerHTML=`<div class="section-head"><div><span class="eyebrow">The everyday collection / 01</span><h2>Go lightly.</h2></div><span>Three essentials. A thousand little adventures.</span></div><div class="products">${products.map(p=>`<article class="product-card">${art(p)}<h3>${p.name}<span>€${p.price}</span></h3><p>${p.note}</p><button data-testid="open-${p.id}" data-product="${p.id}">Take a closer look ↗</button></article>`).join('')}</div>`;}
+function product(){view.innerHTML=`<section class="product-detail">${art(selected)}<div><span class="eyebrow">Fieldwork essentials</span><h2>${selected.name}</h2><p>${selected.note} Thoughtfully made for the everyday escape.</p><strong>€${selected.price}</strong><label for="size">Choose a size<select id="size" name="size" data-testid="size" data-replay-safe><option value="standard">Standard</option><option value="large">Large</option></select></label><button class="primary" data-testid="add-to-bag">Add to your bag ↗</button><p id="added" data-testid="added-status" data-checkpoint="Bag confirmation" role="status"></p></div></section>`;size='standard';}
+function showBag(){view.innerHTML=`<section><span class="eyebrow">Ready when you are</span><h2>Your bag</h2>${bag.length?`<div class="bag-row"><div><strong>${selected.name}</strong><p>${size==='large'?'Large':'Standard'} · Quantity ${bag.length}</p></div><strong>€${bag.reduce((n,p)=>n+p.price,0)}</strong></div><p class="notice">This is a demo checkout. No account, address, or payment is needed.</p><button class="primary" data-testid="place-demo-order">Place demo order ↗</button>`:'<p>Your bag is empty. Find something for the weekend.</p><button data-testid="continue-shopping">Continue shopping</button>'}</section>`;}
+function complete(){view.innerHTML=`<section class="complete"><div class="stamp" aria-hidden="true">✳</div><span class="eyebrow">All set for the weekend</span><h2 data-testid="order-confirmation" data-checkpoint="Demo order confirmation">Your demo order is confirmed.</h2><p>No payment was taken. Finish your recorded visit above, then open PostHog journeys in Spekios to see your flow appear and follow its browser validation.</p><button data-testid="continue-shopping">Back to the collection ↗</button></section>`;}
+function route(path,push=true){if(push)history.pushState(null,'',path);if(path==='/product')product();else if(path==='/bag')showBag();else if(path==='/complete')complete();else catalogue();for(const control of document.querySelectorAll('[data-testid]'))control.setAttribute('data-attr',control.dataset.testid);pageview();requestAnimationFrame(checkpoint);}
+document.addEventListener('click',event=>{
+  const el=event.target.closest('[data-testid]');if(!el)return;
+  const id=el.dataset.testid;
+  if(id==='home'){event.preventDefault();route('/');}
+  if(['shop','browse','continue-shopping'].includes(id)){route('/catalogue');view.scrollIntoView({behavior:'instant',block:'start'});}
+  if(el.dataset.product){selected=products.find(p=>p.id===el.dataset.product);route('/product');view.scrollIntoView({behavior:'instant',block:'start'});}
+  if(id==='add-to-bag'){bag.push(selected);document.getElementById('bag-count').textContent=bag.length;document.getElementById('added').textContent='Added to your bag.';requestAnimationFrame(checkpoint);}
+  if(id==='bag')route('/bag');
+  if(id==='place-demo-order')route('/complete');
+});
+document.addEventListener('change',event=>{if(event.target.dataset.testid==='size')size=event.target.value;});
+window.addEventListener('popstate',()=>route(location.pathname,false));
+route(location.pathname,false);await setupMonitoring();

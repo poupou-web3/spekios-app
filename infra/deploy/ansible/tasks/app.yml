@@ -86,7 +86,7 @@
   ansible.builtin.set_fact:
     scout_release: "{{ scout_root }}/releases/{{ scout_rev.stdout }}"
     scout_env_file: "{{ scout_root }}/shared/.env"
-    scout_compose_files: "compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml{{ ':compose.demos.yaml' if scout_demo_sites | bool else '' }}"
+    scout_compose_files: "compose.yaml:compose.deploy.yaml:compose.edge-origin.yaml{{ ':compose.demos.yaml' if scout_demo_sites | bool else '' }}{{ ':compose.posthog-demo-edge.yaml' if scout_posthog_demo | bool else '' }}"
 
 - name: Create the release folders
   ansible.builtin.file:
@@ -190,6 +190,46 @@
   notify: Restart edge
 
 # ---- Deploy.
+
+- name: Prepare the independent PostHog demo
+  when: scout_posthog_demo | bool
+  block:
+    - name: Require a dedicated public capture token
+      ansible.builtin.assert:
+        that: scout_posthog_demo_project_token is match('^phc_[A-Za-z0-9_-]{8,200}$')
+        fail_msg: Set the separate demo project's public PostHog capture token.
+      no_log: true
+
+    - name: Create the separate demo certificate folder
+      ansible.builtin.file:
+        path: "{{ scout_posthog_demo_cert_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+
+    - name: Install the separate PostHog demo certificate and key
+      ansible.builtin.copy:
+        src: "{{ scout_local_secrets_dir }}/posthog-origin.{{ item }}"
+        dest: "{{ scout_posthog_demo_cert_dir }}/origin.{{ item }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"
+      loop: [pem, key]
+      no_log: true
+
+    - name: Write the independent demo capture configuration
+      ansible.builtin.copy:
+        dest: "{{ scout_posthog_demo_env_file }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"
+        content: |
+          POSTHOG_DEMO_HOST=https://eu.i.posthog.com
+          POSTHOG_DEMO_UI_HOST=https://eu.posthog.com
+          POSTHOG_DEMO_TOOLBAR=true
+          POSTHOG_DEMO_PROJECT_TOKEN={{ scout_posthog_demo_project_token }}
+      no_log: true
 
 - name: Point current at the release
   ansible.builtin.file:
