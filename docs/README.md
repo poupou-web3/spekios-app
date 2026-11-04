@@ -4,52 +4,50 @@ Internal design and operator notes for Spekios. The published user guide is sepa
 
 ## Product
 
-- [Architecture and build sequence](./product/architecture.md) — system shape, session loop, and delivery order
-- [Requirements and data model](./product/implementation-plan.md) — behavior, schema, APIs, and acceptance checks
-- [Product reference](./product/reference.md) — exploratory session, reports, triage, and later regression ideas
+- [Architecture](./product/architecture.md) — components, the run flow, the rules the code keeps, and what is not built yet
 
 ## Exploration
 
-- [Run a URL](./exploration/overview.md) — what a bounded exploration records and where it stops
-- [Planner](./exploration/planner.md) — likely next actions, changed controls, branch returns, viewports, and memory across runs
+- [Run a URL](./exploration/overview.md) — what an exploration records, its settings, and where it stops
+- [Planner](./exploration/planner.md) — ranking next actions, strategies, model cost, and memory across runs
 - [Browser interactions](./exploration/interactions.md) — text, dropdowns, checkboxes, radios, and scrolling
 - [Action outcomes](./exploration/action-outcomes.md) — completion, form submission, and network/console evidence
+- [Computer use](./exploration/computer-use.md) — Meta computer-tool recovery when native controls run out
 - [Reproduction](./exploration/reproduction.md) — replay a suspect action in a fresh browser
-- [Automatic reproduction](./exploration/automatic-reproduction.md) — optional bounded rechecks after an opted-in run
+- [Automatic reproduction](./exploration/automatic-reproduction.md) — optional bounded rechecks after a run
 - [Cancellation](./exploration/cancellation.md) — stop queued or active work and keep evidence
 - [Private login](./exploration/private-login.md) — manual sign-in and saved sessions
 - [Finding reviews](./exploration/finding-reviews.md) — human confirmation, dismissal, and versioned labels
-- [Triage and rechecks](./exploration/triage.md) — bug, intended behavior and duplicate decisions, known behavior in later runs, deployment rechecks from CI
+- [Triage and rechecks](./exploration/triage.md) — bug, intended behavior and duplicate decisions, deployment rechecks from CI
 - [Larchwood, a shop with known bugs](./exploration/bug-lab.md) — measure what an exploration finds, misses and wrongly flags
 
 ## Runtime and evidence
 
-- [Browser runtime](./runtime/browser.md) — workers, isolation, recovery, and capacity
-- [Evidence and training data](./runtime/evidence.md) — captures, masks, and what may be exported
+- [Browser runtime](./runtime/browser.md) — workers, sandboxes, isolation, and recovery
+- [Evidence](./runtime/evidence.md) — captures, storage layout, and training labels
 - [Reports](./runtime/reports.md) — Markdown, JSON, and verified evidence ZIPs
 
 ## Platform
 
-- [Local infrastructure](./platform/infrastructure.md) — services that are actually running, and how to verify them
-- [Model connections](./platform/models.md) — providers, authentication modes, and token accounting
-- [Model gateway](./platform/model-gateway.md) — connect a provider, submit a call, and inspect usage
-- [Deployment](./platform/deployment.md) — local commands and the Kubernetes direction
-- [Workspace](./platform/workspace.md) — user workspace and operations console
-- [Service logs](./platform/logs.md) — every container's output, live in the back office, and what Spekios prints
+- [Local stack](./platform/infrastructure.md) — requirements, start, services, and common commands
+- [Deployment](./platform/deployment.md) — one-host deploy and public HTTPS
+- [Model gateway](./platform/model-gateway.md) — providers, calls, and usage accounting
+- [Provider access](./platform/provider-access.md) — personal keys and demo credits
+- [Workspace](./platform/workspace.md) — user workspace and back office
+- [Service logs](./platform/logs.md) — container output in the back office
+- [PostHog journeys](./platform/posthog.md) — import recorded sessions and validate flows
+- [Spekios sign-in](../SPEKIOS_AUTH.md) — hosted human login
 
 ## Agents
 
-- [MCP and HTTP interface](./agents/interface.md) — tools, authentication, and current limits
-- [Control plan](./agents/plan.md) — what the first agent increment covers and what remains
-
-## Reviews
-
-- [29 October 2026 cleanup](./reviews/2026-10-29-cleanup.md)
+- [MCP and HTTP interface](./agents/interface.md) — tools, authentication, and limits
 
 ## Code
 
 - [Rust API](../apps/api/README.md)
-- [Browser recorder](../packages/browser-runtime/README.md)
+- [Browser runtime](../packages/browser-runtime/README.md)
 - [Pixel differences](../packages/image-diff/README.md)
 - [Web workspace](../apps/web/README.md)
 - [Back office](../apps/backoffice/README.md)
+- [Agent CLI](../packages/cli/README.md)
+- [Production deployment](../infra/deploy/README.md)

@@ -2,7 +2,7 @@
 {
   "title": "Install the lightweight agent skill",
   "description": "Install Spekios’s small Agent Skills package for Codex, Claude Code or a compatible agent, then submit URLs and retrieve evidence-backed feedback.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 0
   }
@@ -61,9 +61,9 @@ The checksum verifies download integrity. It is not a publisher signature; obtai
 
 ## Connect Spekios once
 
-Follow [Connect your agent](../connect/) to add the HTTP connection URL and approve in your browser. The local Rust bridge remains an optional developer path. Spekios must already be running. A skill teaches an agent how to use the connection; installing instructions alone does not create it.
+Follow [Connect your agent](../connect/) to add the HTTP connection URL and approve in your browser. The local Rust bridge remains an optional developer path. A self-hosted Spekios server must already be running. A skill teaches an agent how to use the connection; installing instructions alone does not create it.
 
-If MCP is unavailable, the skill's optional HTTP reference explains the same tool dispatcher. Configure the trusted API origin and token through your agent's local secret mechanism. Do not paste credentials into a prompt or embed them in the skill.
+If MCP is unavailable, the [CLI](../cli/) reaches every tool through `spekios tools call`. The skill's optional HTTP reference describes direct calls to the same tool dispatcher with a native agent credential; MCP OAuth tokens only work on **/mcp**. Configure the API origin and token through your agent's local secret mechanism. Do not paste credentials into a prompt or embed them in the skill.
 
 ## Start working
 
@@ -81,19 +81,21 @@ In Claude Code:
 /scout-qa Explore https://your-app.example/ and report the findings.
 ~~~
 
-Replace the example URL with an exact permitted origin reachable by Spekios's browser worker. To inspect existing work, give the saved job/run ID instead of asking for another exploration.
+Replace the example URL with any HTTP(S) address Spekios's browser can reach. To inspect existing work, give the saved job/run ID instead of asking for another exploration.
 
 For a coding agent with repository access, add that it should investigate a selected finding and fix it if appropriate. The skill preserves your requested scope; asking for a report does not implicitly request code changes.
 
 ## What the agent learns
 
-- Check **scout_status** before assuming a provider or target is available.
+- Check **scout_whoami** and **scout_status** before assuming a provider is available, and look for earlier sessions first.
 - Save a job UUID and reuse it on uncertain retries.
 - Pull lightweight progress while continuing other authorized work.
 - Follow every report continuation and handle snapshot changes.
 - Use recorded locations, expectations, outcomes and evidence IDs to investigate.
+- Check known behavior and triage each finding as a bug, intended behavior, duplicate or needing review.
 - Send sign-in blockers to the human GUI handoff.
 - Keep the permanent issue ID, submit a candidate with **scout_verify_fix** and report its recorded outcome with original/candidate evidence and usage.
+- Recheck a whole deployment with **scout_recheck_deployment**.
 - Cancel durable work explicitly when asked.
 
 Agents can change an active exploration’s [testing focus](../../guides/testing-focus/) through the documented tools. The skill does not provide direct browser driving, source-code diagnosis, training approval or access to private sign-in material. Spekios continues using its configured provider's API access; installing a skill does not transfer a client subscription allowance.

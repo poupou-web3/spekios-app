@@ -9,7 +9,7 @@ Use the existing MCP tools (clients may prefix names). This skill supplies a wor
 
 ## Connect and find context
 
-Call **scout_whoami**, then **scout_status**. Check workspace, permissions, provider readiness and permitted origins. If tools are unavailable, read [HTTP fallback](references/http.md). Never ask for credentials in chat or silently change access.
+Call **scout_whoami**, then **scout_status**. Check workspace, permissions and provider readiness. If tools are unavailable, read [HTTP fallback](references/http.md). Never ask for credentials in chat or silently change access.
 
 Use **scout_list_sessions** or **scout_get_domain_summary** for earlier work on a URL, task or project. Keep nonsecret IDs across conversations. History does not prove current behavior.
 

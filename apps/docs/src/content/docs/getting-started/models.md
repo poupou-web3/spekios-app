@@ -44,7 +44,7 @@ The job records where its model came from in `settings.modelSource` (`run`, `pro
 
 The workspace does not offer an OpenRouter free-only switch: every saved model can be chosen, and saving **Models** clears a free-only default saved earlier. A project or run choice made in the workspace keeps free-only only when its OpenRouter model ID is itself free. A free-only choice never inherits a paid OpenRouter navigation model; the run uses one model instead.
 
-Preferences select saved keys by opaque reference. Key values are managed separately; allowed origins remain operator configuration.
+Preferences select saved keys by opaque reference. Key values are managed separately; **SCOUT_ALLOWED_ORIGINS** remains operator configuration.
 
 ## OpenRouter free-only mode (API)
 

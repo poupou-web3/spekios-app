@@ -25,6 +25,9 @@ spekios status <job-uuid>
 spekios report <job-uuid>
 ```
 
+`spekios --help` lists every command, including `auth status`, `project show`,
+`history`, `usage` and `id` (an offline UUID for durable request IDs).
+
 `auth login` returns immediately with exit 3 while approval is pending. Use
 `auth complete` to poll once, or `auth complete --wait` to wait up to two minutes.
 `--open` opens the approval URL on a machine with a browser; headless agents can
@@ -150,7 +153,9 @@ spekios --help
 just cli-integration-test
 ```
 
-The package includes the same standalone executable served by the API. It has no
+The Spekios API embeds this package at build time (`apps/api/build.rs`) and serves
+it at `/assets/cli/spekios-cli.tgz`, so a deployed server always offers the CLI that
+matches it. The CLI talks only to that server's REST API (`/v1/...`). It has no
 runtime dependencies and does not require the repository, Rust, Docker or a local
 Spekios server when used against the hosted app. The integration test uses Docker
 only to create a disposable database and runs no model inference.

@@ -1,6 +1,8 @@
 # HTTP fallback when MCP is unavailable
 
-Use a trusted HTTP client with redirects disabled. Respect the configured **SCOUT_API_URL**; the default local API is **http://127.0.0.1:18080**. Send **Authorization: Bearer** using the issued agent credential from the user's local secret configuration. Browser pairing through **scout-mcp login** avoids sharing an operator key. Use the server origin bound to that saved credential; do not reuse it at a different origin. Do not print the token or put it in a URL or skill file.
+If the **spekios** CLI is installed and connected, prefer **spekios tools call <name> --input <json>**; it handles credentials and retry receipts.
+
+Otherwise use a trusted HTTP client with redirects disabled. Use the configured Spekios origin: **https://app.spekios.com** for the hosted app, or **SCOUT_API_URL** for a local API (default **http://127.0.0.1:18080**). Send **Authorization: Bearer** using a native agent credential from the user's local secret configuration; browser pairing through **scout-mcp login** avoids sharing an operator key. MCP OAuth tokens only work on **/mcp**. Use the server origin bound to that saved credential; do not reuse it at a different origin. Do not print the token or put it in a URL or skill file.
 
 If there is no connection or token, give setup guidance. The optional loopback GUI bypass is not a general authentication mechanism. Installing this skill does not connect MCP or transfer a model subscription.
 

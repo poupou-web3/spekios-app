@@ -21,5 +21,11 @@ export const fixture = run => run.config?.training_status==='excluded_fixture';
 export const MODEL_PROVIDERS=['meta','openrouter','openai','anthropic'];
 export function providerRank(id){const i=MODEL_PROVIDERS.indexOf(id);return i<0?MODEL_PROVIDERS.length:i;}
 export function providerName(id){return {openai:'OpenAI',anthropic:'Anthropic',openrouter:'OpenRouter',meta:'Meta AI'}[id]||id||'No provider';}
-export function runStatus(run){return run.lifecycle==='active'&&run.cancel_requested_at?'cancelling':run.lifecycle;}
+export function runStatus(run){
+  if(run.lifecycle==='active'&&run.cancel_requested_at)return 'cancelling';
+  // Older runs stored a transient demo preparation outage as a failed run.
+  // Present it as an interruption; the stored lifecycle and evidence stay intact.
+  if(run.lifecycle==='failed'&&/model request.*\(demo_token_count_unavailable\)/i.test(run.error||''))return 'interrupted';
+  return run.lifecycle;
+}
 export function opsMode(mode){return mode==='protocol_fixture'?'Simulated':mode==='live'?'Live':'Unknown mode';}

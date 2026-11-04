@@ -7,8 +7,8 @@ Open a recorded run and choose **Export report**. The drawer pins the currently 
 | Format | Contents |
 | --- | --- |
 | Markdown | Readable execution summary, ordered actions, frozen expectations, observed results, human review history, reproduction lineage, coverage limits, usage and evidence IDs |
-| Evidence ZIP | Markdown and the existing run JSON, selected-run screenshots and recorded PNG/JSON artifacts, plus a SHA-256 manifest |
-| JSON | The full existing authenticated run-report projection, without changing its schema or adding separate provider payloads |
+| Evidence ZIP | Markdown and the run JSON, selected-run screenshots and recorded PNG/JSON artifacts, plus a SHA-256 manifest |
+| JSON | The full authenticated run report (`GET /v1/runs/{run_id}`), without provider payloads |
 
 Standalone Markdown contains no embedded or external image links. In a ZIP, Markdown references only verified images through fixed relative paths. Extract the archive before opening the Markdown in a viewer that supports local images. Text from the tested application, models and reviewers is escaped; long prose is explicitly truncated in the readable report while the raw JSON retains the source projection.
 
@@ -49,15 +49,15 @@ Related source/replay runs remain references by ID. Their evidence must be expor
 
 The evidence ZIP limits are 256 evidence inventory entries, 8 MiB per evidence file, 8 MiB for each generated document inside the bundle, 64 MiB for the ZIP and two minutes for evidence export. Declared aggregate size is checked before downloading, with space reserved for metadata and the ZIP directory. The final archive is checked again. Exceeding the inventory, document, aggregate or archive limits stops bundle export with a visible error; an oversized individual file can instead remain a manifest gap when the aggregate admission check passes. Standalone Markdown and JSON do not fetch evidence or use the ZIP's evidence limits.
 
-The drawer shows processed files, verified files, gaps and downloaded bytes. **Cancel download**, closing the drawer, navigating away or disconnecting aborts pending export work and prevents a late download. Cancelling an export does not cancel the browser run or change its evidence. Recorded JSON remains available when an evidence ZIP is too large; this increment does not add a streaming server export service.
+The drawer shows processed files, verified files, gaps and downloaded bytes. **Cancel download**, closing the drawer, navigating away or disconnecting aborts pending export work and prevents a late download. Cancelling an export does not cancel the browser run or change its evidence. Recorded JSON remains available when an evidence ZIP is too large. There is no server-side export service.
 
 ## Scope and storage
 
-The full JSON projection can include tested application URLs, observed page content, action arguments, diagnostics and review rationale. It retains the same scope as the previous JSON download. Separate raw model request/response payloads, provider credentials, workspace tokens and private saved login sessions are not fetched or added. Review application data before sharing an archive.
+The full JSON projection can include tested application URLs, observed page content, action arguments, diagnostics and review rationale. Separate raw model request/response payloads, provider credentials, workspace tokens and private saved login sessions are not fetched or added. Review application data before sharing an archive.
 
-Exports stay on the local machine: browser downloads or CLI output files. They make no model calls, create no PostgreSQL tables or rows, write no export objects to S3 and upload nothing off the machine. The browser uses existing authenticated read endpoints. The only API additions are the public static modules `/assets/report-export.js` and `/assets/report-bundle.js`, served with the existing CSP, `no-store` and `nosniff` headers; there is no new export API endpoint.
+Exports stay on the local machine: browser downloads or CLI output files. They make no model calls, create no PostgreSQL rows, write no objects to S3 and upload nothing. The report is built in the browser by `apps/web/src/report/export.js` and `bundle.js`, using the ordinary authenticated read endpoints; there is no export API endpoint.
 
-This is a portable execution report, not an approved training dataset. The manifest always sets `training_approval: false` and preserves recorded training classifications. Human confirmation does not approve privacy, redaction, sampling or training use. Fixtures remain excluded; dataset approval and external training uploads remain separate work.
+This is a portable execution report, not an approved training dataset. The manifest always sets `training_approval: false` and preserves recorded training classifications. Human confirmation does not approve privacy, redaction, sampling or training use. Fixtures remain excluded. See [evidence](./evidence.md#training-labels).
 
 ## Command line
 
@@ -69,15 +69,12 @@ just export-report RUN_UUID
 
 The command reads the local workspace token from the ignored `.env`, fetches the selected report and runs the same bundle implementation. It prints the export UUID, output path and verified/gap counts. Files are written under `artifacts/run-reports/<export_uuid>/spekios-run-<run_uuid>-evidence.zip`. The token is not included in the file or output. This command does not start a browser or call a model.
 
-## Verification
+## Tests
 
 ```sh
 just web-test
 just report-export-test
 just web-contract-test
-cargo test --locked --manifest-path apps/api/Cargo.toml
 ```
 
-Pure JavaScript tests cover readable projection, untrusted text, evidence ownership/references, integrity failures, bounds, archive paths, snapshot pinning and cancellation/disconnect behavior. The native Rust suite passes 35 tests; the static module test checks public access, exact embedded source, MIME, CSP and uncached security headers. Clippy passes with warnings denied.
-
-`report-export-test` reads existing local runs and writes [artifacts/report-export/verification.json](../../artifacts/report-export/verification.json). It renders stored reports and verifies representative ZIPs with Python's independent standard ZIP reader, including CRC32, path safety, byte lengths, SHA-256, exact manifest membership and a failed-capture gap. It also checks that export does not add model calls or mutate recorded runtime evidence. The final integration rendered 50 reports and checked three archives: an original human-confirmed source, a failed-capture run and a completed replay. The served modules match source and retain the expected security headers. At the default 484 × 724 browser viewport, Markdown and ZIP downloads completed; the actual downloaded ZIP independently passed CRC32 and file-hash checks for all 16 evidence files, with source confirmation retained. The drawer had no horizontal overflow or console errors; Escape closed it and returned focus to Export report. This is a focused local interaction check, not full browser/accessibility coverage. The record and screenshot are [artifacts/report-export/browser-verification.json](../../artifacts/report-export/browser-verification.json) and [artifacts/report-export/gui-report-export.jpg](../../artifacts/report-export/gui-report-export.jpg).
+`web-test` covers the readable projection, untrusted text, evidence ownership and references, integrity failures, bounds, archive paths, snapshot pinning and cancellation. `report-export-test` (`scripts/verify-report-export.mjs`) reads stored local runs, renders their reports and checks representative ZIPs with Python's standard ZIP reader: CRC32, path safety, byte lengths, SHA-256, exact manifest membership and failed-capture gaps. It also checks that exporting adds no model calls and changes no recorded evidence. Its result is written to the ignored `artifacts/report-export/`.

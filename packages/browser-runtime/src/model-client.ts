@@ -14,7 +14,8 @@ export function modelSettings(): ModelSettings {
 }
 export class ModelClient {
   constructor(readonly settings: ModelSettings, readonly endpoint = process.env.SCOUT_API_URL ?? 'http://api:8080',
-    private readonly token = process.env.SCOUT_API_TOKEN ?? '', readonly waitMs = 90000) {
+    // Allow bounded read-only token-count retries before the 60-second model call.
+    private readonly token = process.env.SCOUT_API_TOKEN ?? '', readonly waitMs = settings.providerKeyId==='demo'?180000:90000) {
     const url = new URL(endpoint);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash || token.length < 32) throw new Error('Invalid local model gateway configuration.');
     this.endpoint = url.origin;

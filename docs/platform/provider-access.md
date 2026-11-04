@@ -90,7 +90,8 @@ at job/request admission, and credit/key revocation is fenced at actual dispatch
 
 ## Verification
 
-`just provider-access-test` uses disposable PostgreSQL and fake keys. It checks
+`just provider-access-test` uses a disposable PostgreSQL container, fake keys, and a
+natively built API (it needs Docker and a Rust toolchain). It checks
 encryption binding/tampering, multiple keys per provider, ownership isolation,
 concurrent reservation limits, idempotent settlement, uncertain usage and personal
 funding after demo exhaustion. Its real-browser pass covers the back-office form,

@@ -8,7 +8,7 @@
 ---
 Open a running exploration and use **Testing focus** to describe what Spekios should explore next. For example: “Focus on search, filters and opening a result.” Start with a URL as usual; a testing focus is optional.
 
-Spekios finishes assessing its current action before applying the change to its next planning decision. Existing evidence and frozen expectations keep their original meaning. Focus changes do not expand the action budget, permitted origins or access rules.
+Spekios finishes assessing its current action before applying the change to its next planning decision. Existing evidence and frozen expectations keep their original meaning. Focus changes do not change your limits, navigation rules or access rules.
 
 ## Follow the acknowledgement
 

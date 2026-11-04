@@ -2,7 +2,7 @@
 {
   "title": "Self-host these docs",
   "description": "Build and deploy Spekios documentation as static HTML with Astro Starlight, local search, Markdown exports, OpenAPI, sitemap and Docker.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 5
   }
@@ -17,7 +17,7 @@ Use Node 24, then run from the repository root:
 ~~~sh
 npm ci --prefix apps/docs
 npm run build --prefix apps/docs
-npm run preview --prefix apps/docs -- --host 127.0.0.1
+npm run preview --prefix apps/docs
 ~~~
 
 Open **http://127.0.0.1:4321**. Built-in search is generated during the production build. Development mode explains that search is available after a build.
@@ -44,16 +44,16 @@ For a subpath deployment, also set **DOCS_BASE_PATH=/scout/** and mount the outp
 From the repository root:
 
 ~~~sh
-docker compose -f compose.docs.yaml up -d --build
+docker compose -f compose.docs.yaml up -d --build --wait
 ~~~
 
-This starts only the docs on **http://127.0.0.1:18090**, with no dependency on the API, databases or provider secrets.
+This starts only the docs on **http://127.0.0.1:18090**, with no dependency on the API, databases or provider secrets. `just docs-up` and `just docs-down` run the same commands.
 
 For a public build:
 
 ~~~sh
 DOCS_SITE_URL=https://docs.your-domain.tld \
-  docker compose -f compose.docs.yaml up -d --build
+  docker compose -f compose.docs.yaml up -d --build --wait
 ~~~
 
 Put your own TLS reverse proxy in front of the loopback port. For a subpath, set **DOCS_BASE_PATH** at the same time. The container serves its files at that configured prefix.

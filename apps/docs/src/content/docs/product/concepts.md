@@ -2,7 +2,7 @@
 {
   "title": "Runs, actions and evidence",
   "description": "Learn Spekios’s core data model: jobs, runs, states, actions, captures, artifacts, findings and independent reproductions.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 2
   }
@@ -12,20 +12,21 @@ Spekios keeps commands, browser observations and review decisions as distinct re
 
 | Record | Meaning |
 | --- | --- |
-| Job | A durable request to explore a URL or reproduce a suspected action. |
+| Job | A durable request to explore a URL, reproduce a suspected action or verify a fix on a candidate deployment. |
 | Run | One recorded browser execution, with configuration and lifecycle. |
 | State | An observed page state, including visible controls, input state and authentication context. |
 | Action | A typed browser operation with a frozen prediction, exact parameters and an assessment. |
 | Capture | A screenshot with a unique UUID, SHA-256, byte length and private object reference. |
 | Artifact | A manifest, image-difference mask, diagnostics or another recorded evidence object. |
 | Finding | An original suspected problem plus its independent reproduction and human-review overlays. |
+| Issue | A permanent ID for a suspected problem, shared by matching findings across runs, with its triage and fix-verification history. |
 | Settings revision | An append-only version of nonsecret defaults, frozen when a job is admitted. |
 
 ## Job status and run lifecycle
 
 The queue and browser execution have separate statuses. A job can fail during delivery after its browser run has already completed. Reports preserve both facts rather than converting a storage failure into an application bug.
 
-Use [progress](../../api/progress-reports/) to understand the current phase. An interrupted execution is not silently resumed by replaying uncertain actions.
+Use [progress](../../api/progress-reports/) to understand the current phase. An interrupted execution is not silently resumed by replaying uncertain actions; **Continue exploration** starts a new run from the recorded graph.
 
 ## Expected versus actual
 

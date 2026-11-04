@@ -2,7 +2,7 @@
 {
   "title": "Call agent tools over HTTP",
   "description": "Discover Spekios’s shared MCP schemas and invoke tools over authenticated JSON HTTP with consistent result envelopes and domain errors.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 6
   }
@@ -10,12 +10,14 @@
 ---
 The HTTP tool adapter exposes the same shared tools as MCP. It is useful when a client can make HTTP requests but does not implement MCP transport.
 
+Use a native agent credential from browser pairing (for example, the one **scout-mcp login** saves) as the Bearer token. MCP OAuth tokens are bound to **/mcp** and are rejected here. The examples read the token from **SPEKIOS_TOKEN** and the API origin, such as **https://app.spekios.com** or **http://127.0.0.1:18080**, from **SPEKIOS_SERVER**.
+
 ## Discover the catalog
 
 ~~~sh
 curl --fail-with-body \
-  --header "Authorization: Bearer $SCOUT_API_TOKEN" \
-  http://127.0.0.1:18080/v1/agent/tools
+  --header "Authorization: Bearer $SPEKIOS_TOKEN" \
+  "$SPEKIOS_SERVER/v1/agent/tools"
 ~~~
 
 The response includes instructions, tool names, schemas and annotations. The docs’ [catalog snapshot](../../mcp-tools.json) comes from the same Rust definition.
@@ -26,10 +28,10 @@ Send the argument object directly, without a JSON-RPC wrapper:
 
 ~~~sh
 curl --fail-with-body \
-  --header "Authorization: Bearer $SCOUT_API_TOKEN" \
+  --header "Authorization: Bearer $SPEKIOS_TOKEN" \
   --header "Content-Type: application/json" \
   --data '{"job_id":"00000000-0000-4000-8000-000000000001"}' \
-  http://127.0.0.1:18080/v1/agent/tools/scout_get_job
+  "$SPEKIOS_SERVER/v1/agent/tools/scout_get_job"
 ~~~
 
 ## Read the result

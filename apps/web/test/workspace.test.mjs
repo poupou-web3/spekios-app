@@ -153,6 +153,23 @@ test('a failed model plan names the request, the provider error and the reasonin
   ui.state.report.run.error='<script>alert(1)</script>';
   assert.doesNotMatch(ui.runView(),/<script>alert/);
 });
+test('a demo usage-check outage preserves progress and presents a compact interruption in reports and history',()=>{
+  const ui=workspace(),requestId='acc8a81e-f692-4f56-8c82-f6c4e863d631';
+  const stopped=run('interrupted',{lifecycle:'failed',error:`Model request ${requestId} did not complete (demo_token_count_unavailable).`,config:{runtime_version:'explorer-v1',execution_mode:'live',stop_reason:'execution_failed'}});
+  ui.state.report={run:stopped,actions:Array.from({length:54},(_,n)=>({action_id:`step-${n}`,ordinal:n,state:'completed',spec:{command:{type:'navigate',url:'https://interrupted.test'}}})),captures:[],events:[{event_type:'model.decision_failed',payload:{request_id:requestId,kind:'assessment'}}],model_requests:[{request_id:requestId,state:'failed',error:'demo_token_count_unavailable',provider:'meta',model:'muse-spark-1.3-contributor'}],model_calls:[]};
+  const html=ui.runView();
+  assert.match(html,/>Interrupted<\/span>/);assert.match(html,/Exploration interrupted · results saved/);
+  assert.match(html,/54 completed actions saved/);assert.match(html,/data-action="continue-run"/);
+  assert.match(html,/<div class="notice model-interruption" role="status">/);
+  assert.match(html,/<details data-disclosure="model-interruption"><summary>Details<\/summary>/);
+  assert.match(html,/stopped before the model call was sent/);assert.match(html,new RegExp(`Request ${requestId}`));
+  assert.doesNotMatch(html,/>Failed<\/span>|Execution failed|class="notice error"|<details[^>]*\bopen\b/);
+  ui.state.runs=[stopped];ui.state.websiteOrigin='https://interrupted.test';ui.state.websitePage='tests';
+  assert.match(ui.home(),/>Interrupted<\/span>/);assert.doesNotMatch(ui.home(),/>Failed<\/span>/);
+  assert.equal(stopped.lifecycle,'failed','Historical operational state is retained.');
+  stopped.error='page.screenshot: Target crashed';
+  assert.match(ui.runView(),/class="notice error"/);assert.match(ui.runView(),/>Failed<\/span>/);
+});
 test('a stopped exploration can continue from its recorded pages or start again',async()=>{
   const posted=[],ui=workspace({fetch:async(path,options)=>{if(options.method==='POST'){posted.push(JSON.parse(options.body));return response({job:{job_id:'new'},reused:false});}return response(payloads()[path]);}});connect(ui);ready(ui);
   const stopped=run('stopped',{lifecycle:'failed',config:{runtime_version:'explorer-v1',replay_of:null,viewport_profile:'desktop',auth_mode:'public'}});

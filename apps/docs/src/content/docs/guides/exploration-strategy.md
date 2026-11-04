@@ -2,7 +2,7 @@
 {
   "title": "Share a run between breadth, depth and re-walks",
   "description": "Each exploration shares its actions between new territory, deep journeys and re-walking paths earlier runs recorded. Set the split, and read depth and coverage per level.",
-  "reviewed": "2026-11-01",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 8}
 }
 ---
@@ -61,7 +61,7 @@ An active [testing focus](../testing-focus/) pauses re-walks until it is cleared
 
 ## Depth and coverage per level
 
-Depth is the number of screens from the entry page along the discovery tree. Scrolling, filling part of a form or closing a menu shows another view of the same screen, which keeps that screen's depth. The **Flow** tab shows:
+Depth is the number of screens from the entry page along the discovery tree. Scrolling, filling part of a form or closing a menu shows another view of the same screen, which keeps that screen's depth. The **Flow map** tab shows:
 
 - **Discovery tree**: each screen once, under the screen it was first reached from, with the action that reached it and how many of its controls were tried. A screen's other views are listed with it, and what was found from them appears under the screen.
 - **Depth and coverage**: for each depth, the screens reached and how many of their usable controls were tried in any view. Blocked controls are counted separately.

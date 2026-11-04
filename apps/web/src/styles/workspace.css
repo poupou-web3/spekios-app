@@ -336,6 +336,9 @@ a.stat-link:hover { border-color: var(--brand-line); background: var(--brand-sof
 .settings-feedback { margin: 16px 0 0; padding: 11px 14px; border: 1px solid var(--green-line); border-radius: var(--r-md); background: var(--green-bg); color: var(--green); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-feedback.error, .settings-feedback[role="alert"] { border-color: var(--red-line); background: var(--red-bg); color: var(--red); }
 .settings-feedback.notice:not(.error) { border-color: var(--amber-line); background: var(--amber-bg); color: var(--amber); }
+.model-interruption details { margin-top: 3px; }
+.model-interruption summary { width: fit-content; cursor: pointer; color: var(--muted); }
+.model-interruption details[open] { margin-top: 8px; }
 .dirty-indicator { border-color: var(--amber-line); background: var(--amber-bg); color: var(--amber); }
 .dirty-indicator::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 /* Setup checklist */

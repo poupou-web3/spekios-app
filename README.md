@@ -1,58 +1,141 @@
 # Spekios
 
-**PostHog journeys:** the Cloud connector shows analytics per website, discovers recorded journeys and validates generated flows in a test browser. The [setup guide](./docs/platform/posthog.md) and [standalone demo shop](./apps/posthog-demo/README.md) keep Cloud demo monitoring separate from the product. No website is instrumented or deployed automatically.
+Spekios is exploratory QA for web apps. Give it a URL and it explores the app in a real Chromium browser:
 
-**Spekios sign-in:** [Google, Apple and email/password login through the Lovable wrapper](./SPEKIOS_AUTH.md), including localhost setup and the secure handoff contract.
+1. Before each action, it predicts what should happen.
+2. It records before/after screenshots.
+3. It flags anything that doesn't match the prediction.
 
-**Documentation:** [Product, agent and API guides](./apps/docs/README.md). Start the independent, self-hosted documentation with `docker compose -f compose.docs.yaml up -d --build --wait`, then open [Spekios docs](http://127.0.0.1:18090). It includes plain Markdown, LLM indexes, OpenAPI and generated MCP tool references.
+Suspected bugs can be replayed in a fresh browser and reviewed by a person. After a fix they can be rechecked against a new deployment.
 
-**For users and their agents:** Open **Connect your agent** in the workspace, add the displayed MCP URL in a compatible agent app and approve in your browser. No checkout or `just` command is needed for this connection. [User connection guide](./apps/docs/src/content/docs/agents/connect.md). Cloud connectors require a publicly reachable HTTPS Spekios deployment; the default stack remains local.
+People use the web workspace. Coding agents use the same jobs and evidence over MCP, HTTP or a CLI.
 
-**Agent skill:** Run `python3 scripts/install-scout-skill.py --client codex` (or `--client claude`) to install a small Spekios workflow without an SDK. [Installation and usage](./apps/docs/src/content/docs/agents/skill.md) also covers project scope, custom skill directories and the downloadable ZIP. Configure MCP separately.
+## Architecture
 
-A local exploratory QA system. The product design starts with a URL, infers likely user flows, records every action, and checks the result against an expectation established before acting.
-
-**Implemented:** browser-approved persistent agent identities, private workspace scope, domain/task history and per-agent token attribution; a user workspace and operations console; a Rust/Axum API and durable OpenAI/Claude/OpenRouter gateway; workspace and agent usage accounting; Docker Compose and just commands; PostgreSQL, ClickHouse and a private S3-compatible bucket; all seven supplied screenshots archived with unique IDs and verified hashes; lossless screenshot differences; a bounded URL-driven Chromium explorer with model predictions, per-action assessments and a persisted flow graph; and fresh-browser replay of suspected bugs, including optional bounded automatic scheduling. The GUI submits durable jobs to a background browser worker, displays stored evidence, and cancels queued or active work with recovery across restarts. Human reviewers can confirm or dismiss findings with versioned evidence and review history. Every model attempt records request/response evidence and nullable usage, with recovery and replay-safe export. Agents can operate the same jobs and inspect verified evidence through 32 MCP/HTTP tools and a native Rust stdio bridge. Permanent issues are triaged as bugs, intended behavior or duplicates by people or agents, later runs recognize known behavior, and deployment rechecks (from the workspace, an agent or CI) verify every open issue on a new deployment. Candidate checks expose resolved, still reproducible, blocked or inconclusive outcomes, with shared GUI/MCP history, original and candidate evidence and usage. An asynchronous coding-agent workflow adds lightweight progress and expected-versus-actual reports with reproduction paths, diagnostics and evidence references for investigating and fixing the app. Versioned testing focus can steer an active exploration through the GUI, API or MCP, with acknowledgement at its next planning decision and a complete event history. **Still to build:** external observe/act control, public community sharing, human membership management and full tool payload auditing, live-model quality validation, subscription authentication, virtual-machine or per-tenant browser isolation, external identity-provider handoff, a built-in recheck scheduler, workspace spend budgets, hand-written test cases and a chat-style session view. See [where the spec stands](./docs/product/architecture.md#where-this-stands-31-october-2026).
-
-Start the local services from this directory:
-
-```sh
-bash scripts/start-local.sh
+```
+  Workspace UI ─┐
+  Back office ──┤                       ┌─► PostgreSQL   (source of truth)
+  MCP / HTTP ───┼──► API (Rust/Axum) ───┼─► S3 bucket    (screenshots, artifacts)
+  spekios CLI ──┘    + model gateway    └─► ClickHouse   (event & log analytics)
+                          ▲
+                          │ model calls
+                          │
+                    Browser worker ──── job queue in PostgreSQL
+                          │
+                          ▼
+                    Browser sandbox (Chromium, no credentials) ──► the app under test
 ```
 
-To deploy that same stack on a host — workspace, operator console, API, browser workers, PostgreSQL, ClickHouse and the evidence bucket — run `just deploy`. The workspace stays on loopback until `SCOUT_PUBLISH` is set. `just deploy edge` publishes HTTPS after `SCOUT_PUBLIC_HOST` and `SCOUT_PUBLIC_ORIGIN` are set. See [deployment](./docs/platform/deployment.md).
+| Component | Path | What it does |
+| --- | --- | --- |
+| API | `apps/api` | Rust/Axum server, the single entry point. It serves the workspace UI, the `/v1` REST API, MCP at `/mcp`, agent sign-in and the model gateway (OpenAI, Anthropic, OpenRouter, Meta). |
+| Workspace | `apps/web`, `packages/web-ui` | Plain HTML/JS UI, embedded in the API binary. |
+| Back office | `apps/backoffice` | Operator console for jobs, model calls, events and live logs. It runs as a separate nginx container. |
+| Browser runtime | `packages/browser-runtime` | TypeScript/Playwright. The worker claims jobs and drives Chromium in isolated sandbox containers. All model calls go through the API. |
+| Image diff | `packages/image-diff` | Pixel-exact screenshot differences. |
+| CLI | `packages/cli` | `spekios` command for agents. |
+| Docs site | `apps/docs` | Public documentation (Astro), built and served on its own. |
+| Test apps | `apps/bug-lab` | Larchwood, a shop with 14 known bugs, for measuring what an exploration finds. |
+| Infra | `infra/` | Database schemas, Dockerfiles and the production deployment (Terraform + Ansible). |
 
-With just installed, use `just dev`, `just demo`, and `just runs`. This machine also has a verified copy at `.tools/bin/just`. Open **http://127.0.0.1:18080** for the customer workspace. The operator back office is a separate deployment at **http://127.0.0.1:18083** (`just backoffice`). Local development sign-in is disabled on this machine with `SCOUT_DEV_AUTH_BYPASS=true`. Set it to false in the private `.env` and run `just dev` to restore the token screen; source defaults and authentication fixtures retain normal token access. The API does not yet restrict operations endpoints to the operator token; see [the workspace guide](./docs/platform/workspace.md). The browser worker starts with the ordinary Compose stack.
+Everything runs under Docker Compose (`compose.yaml`). Commands are in the `justfile`.
 
-The user workspace now follows a submitted job from its queue state into its run, keeps pre-launch failures visible, and provides setup guidance, scoped run/review filters, action-budget summaries and native-pixel screenshot/mask/frame inspection with side-by-side Before/After comparison and previous/next action navigation. Refresh preserves text composition, selection, disclosures and relevant scroll positions. The back office adds readiness and delivery snapshots, queue filters, per-run model request/attempt filters, nullable usage, event search and a live **Logs** tab that tails every container's output, including each model call's provider, status, duration and tokens ([service logs](./docs/platform/logs.md)). Service outbox counters are not direct health probes; Connections now saves nonsecret exploration defaults as append-only revisions without a restart. New jobs freeze the effective revision; admitted jobs and their retries keep their original settings. Provider keys and allowed origins remain in `.env`. See [the GUI guide](./docs/platform/workspace.md) for scope and limits.
+Internal identifiers still use the old name `scout`, for example `scout_*` MCP tools and `SCOUT_*` settings.
 
-Engineering notes are grouped in [docs/](./docs/README.md). The published user guide stays in [apps/docs](./apps/docs/README.md).
+## Install and run locally
 
-- [Product](./docs/product/architecture.md) — architecture, requirements, and the exploratory QA reference
-- [Exploration](./docs/exploration/overview.md) — planner, browser actions, reproduction, cancellation, and sign-in
-- [Larchwood](./docs/exploration/bug-lab.md) — a shop with 14 known bugs: explore it, then `just bug-lab-score RUN_ID` shows what was found, missed or wrongly flagged
-- [Runtime and evidence](./docs/runtime/browser.md) — browser workers, training data, and report export
-- [Platform](./docs/platform/infrastructure.md) — local services, models, the gateway, deployment, and the workspace
-- [Agents](./docs/agents/interface.md) — MCP and HTTP control
-- [API](./apps/api/README.md), [browser recorder](./packages/browser-runtime/README.md), and [pixel differences](./packages/image-diff/README.md)
-- [Screenshot manifest](./artifacts/reference-screenshots/manifest.json) and [recorded demo results](./artifacts/runtime-demo/results.json)
+You need:
 
-Use `just models`, `just model-call request.json`, `just model-request REQUEST_UUID`, and `just usage` for the gateway. `just model-test` uses fake providers and restores normal mode afterward. Live providers require optional API keys in `.env`; no account was connected or billed during fixture verification.
+- Docker with Compose v2
+- Node.js 22+
+- [`just`](https://just.systems)
 
-Use `just explorer-test` to verify exploration and reproduction with simulated models and real browser/storage services. With a configured provider, use `just explore URL` for any public https site or an explicitly allowed private app. Target sites run in the `browser-sandbox` container, which holds no Spekios credentials and restarts after every run; `just isolation-test` checks that boundary. No brief is required. Use `just reproduce ACTION_UUID` to recheck a suspected bug in a fresh browser; repeated commands reuse the saved attempt without new model calls. Local volumes preserve evidence across container recreation; they are not an off-machine backup.
+Rust is only needed for the API tests and the MCP stdio bridge.
 
-Open a run and choose **Export report** to download readable Markdown, the existing JSON snapshot, or a portable evidence ZIP with verified PNGs/artifacts and a SHA-256 manifest. Missing evidence stays explicit; related replay evidence is exported separately. `just export-report RUN_UUID` uses the same implementation from the terminal. These downloads do not approve training use or make model calls. See [portable reports](./docs/runtime/reports.md).
+```sh
+just dev
+```
 
-The URL form also offers **Automatically recheck suspected bugs**, off by default. After an opted-in queued exploration completes, the worker reserves up to two eligible cases and twelve additional replay actions in total, including each prerequisite path. Rechecks use the original provider, execution mode, viewport and saved sign-in context. Reservations are permanent; cancelled or interrupted checks are not automatically retried. **Stop automatic checks** remains available after the parent exploration finishes. Results still require human review. See [automatic reproduction](./docs/exploration/automatic-reproduction.md) for configuration, deferrals, evidence and `just auto-reproduction-test`.
+This creates a private `.env` with random credentials, builds and starts the stack, and applies the database schemas.
 
-The explorer now ranks reachable unexplored branches using model intent scores, exact screenshot changes within controls, novelty and return cost. It records the discovery tree, returns through assessed routes, replans stale screens, and exposes its choices in the Flow tab. Choose a desktop/tablet/mobile profile in the URL form or use `just explore-matrix URL` for three separate runs. Scores are uncalibrated estimates; complete app coverage is not claimed.
+Then open:
 
-Explorations observe controls anywhere on the page, scrolling a lower control into view before acting, have no action, time, token or cost limit unless a user sets one (per user, with project and model overrides), and stop when nothing new is left. Every state and transition goes into an app map carried between runs, which can be compared run to run. Each run shares its actions between new territory spread across the app's areas, deep journeys, and re-walks of map transitions that compare outcomes with earlier runs (50/30/20 by default, adaptive, set per user), and reports depth and coverage per level ([strategy](./docs/exploration/planner.md#sharing-actions-between-strategies)). Unchanged screens reuse an earlier run's ranking instead of a new planning call, and an optional cheaper model handles navigation, with the main model reassessing anything not clean ([model cost](./docs/exploration/planner.md#fewer-and-cheaper-model-calls)). With app memory (on by default), later runs of the same app, viewport and sign-in state skip controls earlier runs already tried, favor controls that are new and can reopen pages earlier runs did not finish. Memory is a derived PostgreSQL projection keyed by page URL and control identity; **Settings → App memory** lists and forgets it, and replays never use it. See [memory across runs](./docs/exploration/planner.md#memory-across-runs).
+| | URL |
+| --- | --- |
+| Workspace and API | http://127.0.0.1:18080 |
+| Back office | http://127.0.0.1:18083 |
 
-Native text/search entry, dropdown selection, checkbox/radio changes and document scrolling now share that loop and preserve their parameters during fresh replay. The queued worker now supports [private manual app login and encrypted session reuse](./docs/exploration/private-login.md). The loop also supports bounded action completion, sampled screenshot timelines, network/console diagnostics, and search or explicitly permitted test-form submissions. External identity providers and custom widgets remain future work.
+Both ask for a token. Paste `SCOUT_API_TOKEN` from `.env`. For local development only, you can skip the workspace token screen: set `SCOUT_DEV_AUTH_BYPASS=true` in `.env`, then run `just reload-env`.
 
-An active exploration also offers **Testing focus**. Replace its focus from the dashboard or through `scout_steer_run`, then follow `scout_get_steering` for pending/applied/superseded/not_applied acknowledgement. Instructions apply to the next planning decision after the current action is assessed. They preserve existing limits, evidence and recorded replay paths. Empty focus restores normal exploration. See [testing focus](./apps/docs/src/content/docs/guides/testing-focus.md); `just steering-test` exercises browser behavior, API/MCP retries, history and Unicode bounds without paid models.
+### Add a model
 
-Use `just web-test` for the workspace, shared transport and back-office `*.test.mjs` suites; 157 JavaScript tests currently pass, alongside 66 Rust API and bridge tests. These exercise rendering and simulated DOM events without launching a browser. `just web-contract-test` also runs `scripts/verify-gui-contract.mjs` against persisted summaries, actual model-attempt records and served assets; the current contract checks passed across 50 runs and 192 recorded attempts. Use `just workspace-test` for authenticated API, job queue, real worker, evidence retrieval and interruption recovery. Use `just settings-test` to verify saved-default durability, concurrent revisions and admission snapshots with the browser worker stopped; it makes no model calls and restores the previous preferences. Workspace, back-office, editable-defaults, comparison and evidence-drawer interactions were visually checked at narrow and desktop breakpoints after enabling local development access. Broader browser/layout coverage and live-model QA quality remain unverified.
+Explorations need a model provider. Use either:
 
-Open **Issues & fixes** at [the issue dashboard](http://127.0.0.1:18080/issues) to follow a permanent finding and submit a candidate URL. Use `just fix-verification-test` to verify the full issue → coding agent → candidate check journey with simulated providers and real Chromium/storage.
+- **An API key in the workspace:** add it under **Settings**.
+- **A provider key in `.env`:** set `OPENROUTER_API_KEY` (the default is a free OpenRouter model), `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `META_API_KEY`, then run `just reload-env`.
+
+See `.env.example` for every setting.
+
+### Run your first exploration
+
+Paste a URL in the workspace and start testing. Any http(s) address works, and `localhost` URLs are reached through Docker Desktop's `host.docker.internal`.
+
+To try it on a shop with known bugs:
+
+```sh
+just bug-lab                  # starts Larchwood
+# explore http://larchwood:8084 from the workspace, then:
+just bug-lab-score RUN_ID     # what was found, missed or wrongly flagged
+```
+
+### Connect a coding agent
+
+- **Remote agent app:** open **Connect your agent** in the workspace and add the MCP URL it shows. You approve the connection in your browser.
+- **Local stdio bridge:** run `just mcp-build`, then `just mcp-config`.
+- **Agent CLI:** see [packages/cli](./packages/cli/README.md).
+- **Workflow skill:** `python3 scripts/install-scout-skill.py --client claude` installs a small workflow skill (use `--client codex` for Codex).
+
+## Common commands
+
+| Command | What it does |
+| --- | --- |
+| `just dev` | Start or update the local stack |
+| `just stop` | Stop it, keeping data volumes |
+| `just status` | Container status |
+| `just logs` | Recent API logs (all services: back office **Logs** tab) |
+| `just reload` | Rebuild the workspace and back office after a UI change |
+| `just reload-env` | Restart the API after editing `.env` |
+| `just explore URL` | Run an exploration from the terminal |
+| `just runs` | List recent runs |
+| `just export-report RUN_ID` | Export a run as Markdown, JSON or an evidence ZIP |
+| `just docs-up` | Serve the docs site at http://127.0.0.1:18090 |
+
+### Tests
+
+| Command | What it tests |
+| --- | --- |
+| `just web-test` | Workspace and back-office UI |
+| `just api-test` | Rust API (needs Rust) |
+| `just runtime-test` | Browser runtime |
+| `just docs-test` | Docs site |
+
+Feature suites such as `just explorer-test`, `just fix-verification-test` and `just isolation-test` run against the live local stack with simulated models.
+
+## Deploy
+
+`just deploy` runs the same stack on one host. Services stay on loopback unless `SCOUT_PUBLISH` is set.
+
+`just deploy edge` adds a Caddy HTTPS edge. Set `SCOUT_PUBLIC_HOST` and `SCOUT_PUBLIC_ORIGIN` first.
+
+Production runs on Hetzner behind Cloudflare and is always deployed from `origin/main`. See [infra/deploy](./infra/deploy/README.md) and [deployment](./docs/platform/deployment.md).
+
+## Optional integrations
+
+- **PostHog:** import recorded user journeys from PostHog Cloud and replay them as test flows. See the [PostHog guide](./docs/platform/posthog.md) and the [demo shop](./apps/posthog-demo/README.md).
+- **Spekios sign-in:** hosted Google, Apple and email login for the workspace. See [SPEKIOS_AUTH.md](./SPEKIOS_AUTH.md).
+
+## Documentation
+
+- **[User guide](./apps/docs/README.md):** the published docs site. It covers getting started, guides, agents and the API.
+- **[Engineering notes](./docs/README.md):** architecture, the exploration planner, runtime, evidence and platform details.
+- **[AGENTS.md](./AGENTS.md):** rules for coding agents working in this repo.

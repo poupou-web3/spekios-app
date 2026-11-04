@@ -9,7 +9,7 @@ Open **Issues & fixes** in your workspace. Select an issue to read its expected 
 
 **Seen in runs** shows each matching occurrence with its time, expected/observed result and a link to the run/action. **Related findings** links manually recorded duplicates and other failures on the same interface; those suggestions are not automatically treated as the same bug. Human decisions and original evidence remain available across reruns.
 
-Enter a permitted **candidate deployment URL**, optionally label the deployment and select a saved app session. **Verify fix** queues a durable check. You can leave the page and return later. The candidate history shows each outcome, before/after evidence, reported tokens and cost separately from the original exploration.
+Enter an http or https **Candidate deployment URL**, optionally label the deployment and select a saved app session. **Verify fix** queues a durable check. You can leave the page and return later. The candidate history shows each outcome, before/after evidence, reported tokens and cost separately from the original exploration.
 
 For a protected deployment, sign in during an exploration of that candidate and save the app session. Return to the issue, refresh saved sessions and start a new check. Sessions are bound to their origin and execution mode. An old account session cannot silently cross to a different deployment origin.
 
@@ -50,7 +50,7 @@ A completed browser job alone is insufficient. No new suspicion is insufficient.
 
 ## Preconditions and deployment mapping
 
-Spekios inherits the original viewport, action parameters and expected result. It maps the original entry URL to your explicit candidate entry URL and other recorded same-origin routes to the candidate origin. External routes remain subject to the existing allowlist. New native control IDs are bound only after matching the recorded page text, control states, route, viewport and authenticated/public context. Clock and date labels, and scroll within 8 pixels, still match. A changed control or meaningful page context stops dispatch and remains inconclusive. Appearance alone may change; every new screenshot and difference mask is stored independently. Fresh reproduction of a suspect uses this same comparison.
+Spekios inherits the original viewport, action parameters and expected result. It maps the original entry URL to your explicit candidate entry URL and other recorded same-origin routes to the candidate origin. Other routes follow the same navigation and resource rules as exploration. New native control IDs are bound only after matching the recorded page text, control states, route, viewport and authenticated/public context. Clock and date labels, and scroll within 8 pixels, still match. A changed control or meaningful page context stops dispatch and remains inconclusive. Appearance alone may change; every new screenshot and difference mask is stored independently. Fresh reproduction of a suspect uses this same comparison.
 
 This initial implementation is deliberately conservative about content and data changes. It does not invent a replacement journey when the original preconditions cannot be reached. Both live and simulated provider modes are supported, but a simulated source cannot be silently verified using a live provider or vice versa.
 
