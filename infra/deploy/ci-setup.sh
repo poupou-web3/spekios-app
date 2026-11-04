@@ -89,6 +89,10 @@ printf '%s' "$client_id" | secret CF_ACCESS_CLIENT_ID
 printf '%s' "$client_secret" | secret CF_ACCESS_CLIENT_SECRET
 secret ORIGIN_PEM <"$deploy/.secrets/origin.pem"
 secret ORIGIN_KEY <"$deploy/.secrets/origin.key"
+if [[ -f "$deploy/.secrets/posthog-origin.pem" && -f "$deploy/.secrets/posthog-origin.key" ]]; then
+  secret POSTHOG_ORIGIN_PEM <"$deploy/.secrets/posthog-origin.pem"
+  secret POSTHOG_ORIGIN_KEY <"$deploy/.secrets/posthog-origin.key"
+fi
 secret AOP_CA_PEM <"$deploy/.secrets/aop-ca.pem"
 if [[ -f $secrets_yml ]]; then
   secret ANSIBLE_SECRETS_YML <"$secrets_yml"

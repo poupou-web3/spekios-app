@@ -5,6 +5,8 @@ import {api,get} from './api.js';
 import {bootstrapSession,login,refresh,render,route,selectTab,tabHash} from './app.js';
 import {TABS,root,state} from './state.js';
 import {cancelWork} from './views/jobs.js';
+import {freshLogs,loadLogs,olderLogs,pollLogs} from './views/logs.js';
+let logSearch=0;
 root.addEventListener('submit',async e=>{
   e.preventDefault();
   if(e.target.id==='demo-settings-form'){
@@ -35,13 +37,28 @@ function captureInput(target){
   if(field)state[field]=target.value;
   return !!field;
 }
-root.addEventListener('input',e=>{if(captureInput(e.target))render();});
+root.addEventListener('input',e=>{
+  // Searching reloads the newest matching lines once typing pauses.
+  if(e.target.id==='log-search'){state.logs.q=e.target.value;clearTimeout(logSearch);logSearch=setTimeout(()=>void loadLogs(),350);return;}
+  if(captureInput(e.target))render();
+});
 root.addEventListener('change',e=>{
   if(e.target.id==='ops-run'){state.runId=e.target.value||null;location.hash=tabHash();return;}
+  if(e.target.id==='log-level'){state.logs.level=e.target.value;void loadLogs();return;}
+  if(e.target.id==='log-run-only'){state.logs.runOnly=e.target.checked;void loadLogs();return;}
   const field={'job-filter':'jobFilter','job-mode':'jobMode','model-provider':'modelProvider','model-status':'modelStatus','model-purpose':'modelPurpose'}[e.target.id];
   if(field){state[field]=e.target.value;render();}
 });
-root.addEventListener('toggle',e=>{if(e.target.dataset.event){if(e.target.open)state.expanded.add(e.target.dataset.event);else state.expanded.delete(e.target.dataset.event);}},true);
+root.addEventListener('toggle',e=>{
+  if(e.target.dataset.event){if(e.target.open)state.expanded.add(e.target.dataset.event);else state.expanded.delete(e.target.dataset.event);}
+  if(e.target.dataset.log){if(e.target.open)state.logs.expanded.add(e.target.dataset.log);else state.logs.expanded.delete(e.target.dataset.log);}
+},true);
+// Scrolling up in the log list stops following the tail; returning to the bottom resumes it.
+root.addEventListener('scroll',e=>{
+  const list=e.target;if(!list?.classList?.contains('log-list'))return;
+  const bottom=list.scrollHeight-list.scrollTop-list.clientHeight<24;
+  if(bottom!==state.logs.follow){state.logs.follow=bottom;if(bottom)state.logs.unseen=0;render();}
+},true);
 root.addEventListener('click',async e=>{
   const el=e.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action;
@@ -49,7 +66,13 @@ root.addEventListener('click',async e=>{
   if(el.tagName==='A')e.preventDefault();
   if(action==='ops-tab')selectTab(el.dataset.value);
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Back office refreshed.');}
-  if(action==='logout'){state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.error='';sessionStorage.removeItem('scout.backoffice-token');login();}
+  if(action==='log-live'){state.logs.live=!state.logs.live;render();if(state.logs.live)void pollLogs();}
+  if(action==='log-service'){const name=el.dataset.service;if(state.logs.exclude.has(name))state.logs.exclude.delete(name);else state.logs.exclude.add(name);void loadLogs();}
+  if(action==='log-older')void olderLogs();
+  if(action==='log-latest'){state.logs.follow=true;state.logs.unseen=0;render();}
+  if(action==='log-clear'){Object.assign(state.logs,{rows:[],ids:new Set(),expanded:new Set(),hasOlder:false,unseen:0,follow:true,cleared:new Date().toISOString()});render();}
+  if(action==='log-run'){const run=el.dataset.run;state.logs.runOnly=true;if(run===state.runId)void loadLogs();else location.hash='#/logs/'+run;}
+  if(action==='logout'){state.logs=freshLogs({generation:state.logs.generation});state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.error='';sessionStorage.removeItem('scout.backoffice-token');login();}
   if(action==='cancel-run'||action==='cancel-job')await cancelWork(action==='cancel-run'?'run':'job',el.dataset.id);
   if(action==='job-error'){state.drawer={title:'Browser job',raw:state.jobs.find(j=>j.job_id===el.dataset.id)};render();}
   if(action==='job-lineage'){const job=state.jobs.find(j=>j.job_id===el.dataset.id);state.drawer={title:'Automatic reproduction lineage',raw:{parent_job_id:job?.parent_job_id,source_action_id:job?.automatic_source_action_id,child_job_id:job?.job_id,note:'The parent job is outside the recent queue view. Inspect the child run to follow its source action.'}};render();}
@@ -72,6 +95,7 @@ document.addEventListener('keydown',e=>{
 });
 window.addEventListener('hashchange',route);
 setInterval(()=>{if(state.connected&&!document.hidden&&!state.drawer&&!state.submitting)void refresh();},5000);
+setInterval(()=>{if(state.connected&&state.opsTab==='logs'&&!document.hidden)void pollLogs();},1500);
 bindThemeSwitch(root);
 if(document.readyState==='complete')void bootstrapSession();
 else window.addEventListener('DOMContentLoaded',()=>void bootstrapSession(),{once:true});

@@ -66,7 +66,7 @@ impl Vault {
                 .map_err(|_| "invalid_provider_vault_key")?,
         )))
     }
-    fn seal(&self, secret: &str, binding: &str) -> Result<Vec<u8>> {
+    pub(crate) fn seal(&self, secret: &str, binding: &str) -> Result<Vec<u8>> {
         let mut nonce = [0u8; 12];
         SystemRandom::new()
             .fill(&mut nonce)

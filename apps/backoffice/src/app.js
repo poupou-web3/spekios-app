@@ -5,6 +5,7 @@ import {themeSwitch} from '/assets/ui/theme.js';
 import {get} from './api.js';
 import {TABS,root,state} from './state.js';
 import {drawer} from './views/drawer.js';
+import {loadLogs} from './views/logs.js';
 import {operations} from './views/operations.js';
 let refreshing = false, renderIdentity = '', drawerOpener = null;
 export function login(){
@@ -21,13 +22,15 @@ export function render(){
   const focusKey=focused?.dataset?.action?{...focused.dataset}:null,identity=[state.opsTab,state.runId].join(':');
   const preserved=identity===renderIdentity;
   const details=preserved?Array.from(root.querySelectorAll('details[data-disclosure]')).map(n=>[n.dataset.disclosure,n.open]):[];
-  const scroll=preserved?Array.from(root.querySelectorAll('.event-list,.table-wrap,.drawer')).map(n=>[n.scrollTop,n.scrollLeft]):[];
+  const scroll=preserved?Array.from(root.querySelectorAll('.event-list,.log-list,.table-wrap,.drawer')).map(n=>[n.scrollTop,n.scrollLeft]):[];
   const hadDrawer=!!root.querySelector?.('.drawer');
   if(state.drawer&&!hadDrawer)drawerOpener={id:focusId,key:focusKey};
   root.innerHTML=shell(operations());
   renderIdentity=identity;
   for(const node of root.querySelectorAll('details[data-disclosure]')){const saved=details.find(([key])=>key===node.dataset.disclosure);if(saved)node.open=saved[1];}
-  Array.from(root.querySelectorAll('.event-list,.table-wrap,.drawer')).forEach((node,i)=>{if(scroll[i]){node.scrollTop=scroll[i][0];node.scrollLeft=scroll[i][1];}});
+  Array.from(root.querySelectorAll('.event-list,.log-list,.table-wrap,.drawer')).forEach((node,i)=>{if(scroll[i]){node.scrollTop=scroll[i][0];node.scrollLeft=scroll[i][1];}});
+  // Following the tail keeps the newest line in view, like a terminal.
+  if(state.opsTab==='logs'&&state.logs.follow){const list=root.querySelector('.log-list');if(list)list.scrollTop=list.scrollHeight;}
   const input=focusId?document.getElementById(focusId):focusKey?Array.from(root.querySelectorAll('[data-action]')).find(n=>Object.keys(focusKey).every(key=>n.dataset[key]===focusKey[key])):null;
   if(input){input.focus({preventScroll:true});if(typeof selection[0]==='number'&&input.setSelectionRange)try{input.setSelectionRange(...selection);}catch{}}
   if(state.drawer&&!hadDrawer)root.querySelector?.('.drawer button')?.focus();
@@ -52,13 +55,16 @@ export async function refresh(){
 export async function route(){
   const [tab,id]=location.hash.replace(/^#\/?/,'').split('/');
   state.opsTab=TABS.includes(tab)?tab:'overview';
-  const runId=/^[\da-f-]{36}$/.test(id||'')?id:null;
-  if(runId!==state.runId){state.runId=runId;state.report=null;state.reportEtag='';state.expanded.clear();}
-  state.drawer=null;render();await refresh();
+  const runId=/^[\da-f-]{36}$/.test(id||'')?id:null,runChanged=runId!==state.runId;
+  if(runChanged){state.runId=runId;state.report=null;state.reportEtag='';state.expanded.clear();}
+  state.drawer=null;
+  // #/logs/<run> opens the tail filtered to that run.
+  if(state.opsTab==='logs'){if(runId)state.logs.runOnly=true;if(!state.logs.started||runChanged&&state.logs.runOnly)void loadLogs();}
+  render();await refresh();
 }
 // Tabs update the address without a reload so a refresh or shared link keeps the view.
 export function tabHash(tab=state.opsTab){return '#/'+tab+(state.runId?'/'+state.runId:'');}
-export function selectTab(tab){state.opsTab=TABS.includes(tab)?tab:'overview';globalThis.history?.replaceState?.(null,'',tabHash());render();}
+export function selectTab(tab){state.opsTab=TABS.includes(tab)?tab:'overview';globalThis.history?.replaceState?.(null,'',tabHash());render();if(state.opsTab==='logs'&&!state.logs.started)void loadLogs();}
 export async function bootstrapSession(){
   try{
     const response=await fetch('/v1/auth-mode',{cache:'no-store',redirect:'error',signal:AbortSignal.timeout(5000)});

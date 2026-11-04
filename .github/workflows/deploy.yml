@@ -68,6 +68,8 @@ jobs:
           SCOUT_DEMO_FIXED_HOST: ${{ vars.SCOUT_DEMO_FIXED_HOST }}
           SCOUT_DEMO_FAULTY_HOST: ${{ vars.SCOUT_DEMO_FAULTY_HOST }}
           DEMO_ORIGIN_PEM: ${{ secrets.DEMO_ORIGIN_PEM }}
+          POSTHOG_ORIGIN_PEM: ${{ secrets.POSTHOG_ORIGIN_PEM }}
+          POSTHOG_ORIGIN_KEY: ${{ secrets.POSTHOG_ORIGIN_KEY }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           ORIGIN_PEM: ${{ secrets.ORIGIN_PEM }}

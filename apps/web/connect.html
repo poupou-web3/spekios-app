@@ -34,7 +34,8 @@
         <div class="connection-step-label"><span>01</span><p class="eyebrow">CHOOSE YOUR AGENT</p></div>
         <h2 id="setup-title">Where do you want to use Spekios?</h2><p class="small muted">Use an agent app that supports MCP connections and browser sign-in.</p>
         <div class="connection-clients" role="group" aria-label="Your agent app">
-          <button class="connection-client" id="client-desktop" aria-pressed="true"><strong>Codex / ChatGPT desktop</strong><span>Connect an app on your computer</span></button>
+          <button class="connection-client" id="client-muse" aria-pressed="true"><strong>Muse Code (Meta)</strong><span>Connect Meta’s coding agent in your terminal</span></button>
+          <button class="connection-client" id="client-desktop" aria-pressed="false"><strong>Codex / ChatGPT desktop</strong><span>Connect an app on your computer</span></button>
           <button class="connection-client" id="client-claude" aria-pressed="false"><strong>Claude</strong><span>Connect through your Claude account</span></button>
           <button class="connection-client" id="client-other" aria-pressed="false"><strong>Another agent</strong><span>Use a compatible MCP app</span></button>
         </div>
@@ -43,7 +44,7 @@
         <label for="mcp-url" class="small">Spekios connection URL</label><div class="connection-copy-row"><input id="mcp-url" readonly aria-describedby="url-help"><button id="copy-url" class="button" disabled>Copy URL</button></div>
         <p id="url-help" class="small muted">This address contains no secret. Your agent opens a browser for approval.</p>
         <ol id="client-steps" class="connection-instructions"></ol>
-        <a id="client-help" class="connection-doc-link" href="https://learn.chatgpt.com/docs/extend/mcp?surface=app" target="_blank" rel="noopener noreferrer">Agent app instructions ↗</a>
+        <a id="client-help" class="connection-doc-link" href="https://dev.meta.ai/docs/muse-code/extending#mcp" target="_blank" rel="noopener noreferrer">Agent app instructions ↗</a>
         <div class="connection-step-label"><span>03</span><p class="eyebrow">APPROVE & START TESTING</p></div>
         <p class="small">Review the workspace and permissions when your agent opens Spekios. Then give it a URL to test.</p>
         <label for="test-url" class="small">Your app URL <span class="muted">(optional)</span></label><input id="test-url" type="url" placeholder="https://your-app.com" maxlength="2048">

@@ -23,10 +23,10 @@ export function shell(content){
   const workspacePage=settings||page==='landing';
   const sidebar=workspacePage?workspaceSidebar({websites:workspaceWebsites(),page:settings?'settings':'projects',activity:activityButton(),bottom})
     :websiteSidebar({websites:workspaceWebsites(),origin:state.websiteOrigin,page,runId:state.runId,runs:websiteRuns(),newUrl:state.websiteUrl,error:state.websiteLaunchError,submitting:state.submitting,activity:activityButton(),bottom});
-  const site=selectedWebsite(),heading=page==='tests'?'Tests':'Overview';
+  const site=selectedWebsite(),heading=page==='settings'?'Project settings':page==='tests'?'Tests':'Overview';
   const breadcrumb=settings?`<a href="/settings">Settings</a>${icon('chevron')}<span>${esc(settingsSectionTitle())}</span>`
     :page==='landing'?'<span>Projects</span>'
-    :`<a href="${workspaceHref()}">Projects</a>${icon('chevron')}<a href="${websiteHref(state.websiteOrigin)}">${esc(site?websiteLabel(site.origin):'Project')}</a>${icon('chevron')}<span>${current?esc(name(current)):heading}</span>`;
+    :`<a href="${workspaceHref()}">Projects</a>${icon('chevron')}<a href="${websiteHref(state.websiteOrigin)}">${esc(site?websiteLabel(site.origin):websiteLabel(state.websiteOrigin))}</a>${icon('chevron')}<span>${current?esc(name(current)):heading}</span>`;
   return `<div class="app website-app">${sidebar}<main class="main" id="main-content" tabindex="-1"><header class="topbar"><div class="breadcrumb">${icon('grid')}${breadcrumb}</div><div class="topbar-right"><span>${state.error?'Refresh interrupted':state.lastUpdatedAt?'Updated '+esc(date(state.lastUpdatedAt)):'Recorded evidence'}</span><button class="button icon" data-action="refresh" aria-label="Refresh workspace">${icon('refresh')}</button>${state.developmentAccess?'<span class="pill dev-access-badge">DEV</span>':''}${accountMenu(worker)}</div></header><div class="content${home&&page==='overview'?' content-landing website-overview':home&&page==='landing'?' content-landing website-overview workspace-landing-page':''}">${content}</div></main><footer class="website-mobile-nav">${mobileNav(activityButton(true))}</footer>${drawer()}</div>`;
 }
 // The account menu, with this workspace's live status.

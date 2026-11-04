@@ -1,0 +1,12 @@
+# Public demo still runs in its own Compose project. Only the HTTPS edge joins
+# this network; the demo never joins the product or storage networks.
+services:
+  demo:
+    ports: !reset []
+    networks:
+      default:
+        aliases: [posthog-demo-site]
+    restart: unless-stopped
+networks:
+  default:
+    name: spekios-posthog-demo-site_frontend

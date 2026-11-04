@@ -50,10 +50,11 @@ test('account and project key references save independently without any provider
   assert.equal(sent.api_key,undefined);assert.equal(sent.project_models[0].api_key,undefined);
   assert.match(ui.configurationError({...d.values,provider_key_id:'sk-plaintext-is-not-a-reference'}),/Add API key form/);
 });
-test('defaults validate the same supported models, limits and free-only restriction as the API',()=>{
+test('defaults validate the same supported models and limits as the API; paid OpenRouter models need no switch',()=>{
   const ui=workspace(),values=ui.configurationValues();assert.equal(ui.configurationError(values),'');
-  for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:10001},{max_minutes:0},{max_minutes:10081},{max_tokens:999},{max_cost_usd:0},{stop_after_idle_actions:4},{max_auto_reproductions:4},{max_auto_replay_actions:101},{viewport_profile:'watch'},{provider:'other'},{model:'paid/model'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
+  for(const patch of [{model:'x\n'},{model:'<script>'},{model:'x'.repeat(201)},{max_actions:0},{max_actions:2.5},{max_actions:10001},{max_minutes:0},{max_minutes:10081},{max_tokens:999},{max_cost_usd:0},{stop_after_idle_actions:4},{max_auto_reproductions:4},{max_auto_replay_actions:101},{viewport_profile:'watch'},{provider:'other'}])assert.ok(ui.configurationError({...values,...patch}),JSON.stringify(patch));
   assert.equal(ui.configurationError({...values,model:'vendor/model:free'}),'');
+  assert.equal(ui.configurationError({...values,model:'meta/muse-spark-1.3'}),'','Any OpenRouter model can be the default.');
   assert.equal(ui.configurationError({...values,max_actions:50,max_auto_replay_actions:100}),'');
   assert.equal(ui.configurationError({...values,max_actions:null,max_minutes:null,max_tokens:null,max_cost_usd:null,stop_after_idle_actions:null}),'','Every limit can be empty: no limit.');
   assert.equal(ui.configurationError({...values,max_actions:10000,max_minutes:10080,max_tokens:1000000000,max_cost_usd:2.5}),'');
@@ -130,7 +131,7 @@ test('dirty drafts survive polling while clean defaults advance and stale respon
 test('saving makes no inference and leaves admitted jobs unchanged',async()=>{
   const calls=[],ui=workspace(async(path,options)=>{calls.push({path,options});return response({revision:4,settings:{...defaults,maxActions:8}});});
   ui.state.jobs=[{job_id:'frozen',settings:{...defaults}}];const jobs=JSON.stringify(ui.state.jobs);ui.updateConfiguration('max_actions',8);await ui.saveConfiguration();
-  const body=JSON.parse(calls[0].options.body);assert.equal(body.expected_revision,3);assert.equal(body.max_actions,8);assert.equal(body.free_only,true);assert.equal(Object.hasOwn(body,'allowedOrigins'),false);
+  const body=JSON.parse(calls[0].options.body);assert.equal(body.expected_revision,3);assert.equal(body.max_actions,8);assert.equal(body.free_only,false,'Saving clears the old OpenRouter free-only restriction.');assert.equal(Object.hasOwn(body,'allowedOrigins'),false);
   assert.ok(calls.every(c=>c.path==='/v1/exploration-settings'));assert.equal(JSON.stringify(ui.state.jobs),jobs);assert.equal(ui.state.settingsRevision,4);assert.equal(ui.configurationDraft().dirty,false);assert.match(ui.configurationView(),/Saved revision 4/);
 });
 test('ambiguous save retries retain identity even after polling sees a newer revision',async()=>{
@@ -219,7 +220,8 @@ test('ranking reuse and a navigation model are saved defaults; one model stays t
   let sent;const ui=workspace(async(url,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults,navigationModel:{provider:'openrouter',model:'vendor/lite:free'}}},201);});
   const values=ui.configurationValues();assert.equal(values.reuse_rankings,true);assert.deepEqual(plain(values.navigation_model),{provider:'',model:''});
   const html=ui.configurationView('models');assert.match(html,/Cost controls/);assert.match(html,/<option value="" selected>Same as exploration model<\/option>/);assert.match(html,/data-configuration-field="navigation_choice"/);
-  for(const navigation_model of [{provider:'other',model:'x'},{provider:'openai',model:'a b'},{provider:'openrouter',model:'paid/model'}])
+  assert.doesNotMatch(html,/Restrict OpenRouter|>FREE</,'The workspace does not advertise free OpenRouter routes.');
+  for(const navigation_model of [{provider:'other',model:'x'},{provider:'openai',model:'a b'}])
     assert.ok(ui.configurationError({...values,navigation_model}),JSON.stringify(navigation_model));
   assert.equal(ui.configurationError({...values,free_only:false,navigation_model:{provider:'anthropic',model:'small'}}),'');
   ui.updateConfiguration('navigation.provider','openrouter');ui.updateConfiguration('navigation.model',' vendor/lite:free ');ui.updateConfiguration('reuse_rankings',false);
@@ -292,7 +294,7 @@ test('a listed model is added with its name and standard price, including OpenRo
   assert.deepEqual(sent.saved_models.find(m=>m.model==='deepseek/deepseek-v4.1-flash-1017'),{provider:'openrouter',model:'deepseek/deepseek-v4.1-flash-1017',label:'DeepSeek V4.1 Flash 1017',input_usd_per_million:0.15,output_usd_per_million:0.6});
 });
 
-test('each project can have its own model, picked from the saved list and sent with free-only kept unless a paid OpenRouter model is chosen',async()=>{
+test('each project can have its own model, picked from the saved list; a paid OpenRouter choice is sent with free-only off',async()=>{
   let sent;const ui=workspace(async(path,options)=>{sent=JSON.parse(options.body);return response({revision:4,settings:{...defaults}},201);});
   const project='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222';
   ui.state.settings={...defaults,freeOnly:false,savedModels:[{provider:'anthropic',model:'claude-sonnet-5-5',label:'Sonnet'},{provider:'openrouter',model:'vendor/paid'}],
@@ -327,5 +329,15 @@ test('each project can have its own model, picked from the saved list and sent w
   ],'A paid OpenRouter choice turns free-only off; inherit omits the navigation model.');
   const restricted=workspace();restricted.state.settings={...defaults,savedModels:[{provider:'openrouter',model:'vendor/paid'}]};
   const r=restricted.configurationDraft();r.values.project_models.push({project_id:other,label:'',choice:'openrouter|vendor/paid',navigation:'inherit'});
-  assert.match(restricted.configurationError(r.values),/free-only is on/);
+  assert.equal(restricted.configurationError(r.values),'','No free-only restriction blocks a paid OpenRouter project model.');
+});
+
+test('model menus and lists put Meta first, then OpenRouter',()=>{
+  const ui=workspace();
+  ui.applyConfiguration({revision:4,settings:{...defaults,provider:'anthropic',model:'claude-sonnet-5-5',savedModels:[{provider:'anthropic',model:'claude-sonnet-5-5'},{provider:'openrouter',model:'meta/muse-spark-1.3'},{provider:'meta',model:'muse-spark-1.3'}]}});
+  const html=ui.configurationView('models');
+  assert.match(html,/id="new-model-provider"[^>]*><option value="meta"[^>]*>Meta AI[^<]*<\/option><option value="openrouter"/);
+  assert.match(html,/id="configuration-exploration_model"[^>]*>(?:(?!<\/select>)[\s\S])*optgroup label="Meta AI[\s\S]*optgroup label="OpenRouter[\s\S]*optgroup label="Anthropic/);
+  assert.match(html,/class="model-list">[\s\S]*muse-spark-1\.3[\s\S]*meta\/muse-spark-1\.3[\s\S]*claude-sonnet-5-5/,'Your models: Meta, then OpenRouter, then the rest.');
+  assert.match(html,/id="saved-2-input_usd_per_million"[\s\S]*id="saved-1-input_usd_per_million"[\s\S]*id="saved-0-input_usd_per_million"/,'Each row keeps its own index.');
 });

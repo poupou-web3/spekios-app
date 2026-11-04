@@ -38,11 +38,13 @@ For the bundled controlled app, run `just fixture` and submit `http://exploratio
 
 ## Operator back office
 
-Open **http://127.0.0.1:18083** (`just backoffice`). It is the service provider's console, built from `apps/backoffice` and the shared kit and served by its own container (`infra/backoffice`). Publish it only on a private network or VPN. Sign in with `SCOUT_API_TOKEN`, or open it directly with local development access. Views are addressable as `#/overview`, `#/jobs`, `#/models/<run>`, `#/events/<run>` and `#/connections`. Runs are inspected inside the back office; it does not link into the customer workspace.
+Open **http://127.0.0.1:18083** (`just backoffice`). It is the service provider's console, built from `apps/backoffice` and the shared kit and served by its own container (`infra/backoffice`). Publish it only on a private network or VPN. Sign in with `SCOUT_API_TOKEN`, or open it directly with local development access. Views are addressable as `#/overview`, `#/jobs`, `#/models/<run>`, `#/events/<run>`, `#/logs[/<run>]` and `#/connections`. Runs are inspected inside the back office; it does not link into the customer workspace.
 
 The overview separates worker availability, model-gateway readiness, evidence delivery and event delivery, with attention signals that link to the relevant view. It shows run counts, worker heartbeats, pending screenshot/artifact/model payload uploads, and runtime/model events awaiting ClickHouse delivery. Readiness describes the local dispatcher and configured connections. PostgreSQL supplies durable upload/export counters; these snapshots do not directly probe bucket, provider or ClickHouse health. A previous export acknowledgement is not a current service-health test.
 
 Browser jobs expose search, execution-status and live/simulated-mode filters across the latest 50 returned jobs, with worker assignment, launch/duration details, errors, cancellation and result links. Automatic reproduction jobs are labeled and link to their parent exploration when it is in the recent queue view; otherwise the lineage drawer preserves the parent job ID.
+
+**Logs** tails every container's stdout and stderr from ClickHouse, live, with level, service, text and run filters; Scout's own lines include each HTTP request and every model call with its provider, model, status, duration and tokens. Only the operator token can read them. See [service logs](./logs.md).
 
 Select a run to inspect model requests with provider, state, purpose and search filters. Model activity separates stable logical request IDs from actual provider attempts; recorded attempts and their nullable usage come from the run report, rather than being inferred from request state. The drawer exposes frozen input, response text, attempt details, stored payload keys and event history. Event search applies to the selected run's ordered execution events. These filters do not change whole-run usage totals.
 
@@ -63,7 +65,6 @@ Open **Settings** in the workspace. Supported fields are:
 | Limits | Optional maximum actions (1–10,000), minutes (1–10,080), reported tokens and reported cost; empty means no limit. Stop after 50 consecutive actions with nothing new, unless turned off |
 | Limit overrides | Different limits for a project, a model or a model within a project; the most specific matching override wins |
 | Default viewport | Desktop, tablet or mobile |
-| Restrict OpenRouter to free model IDs | Requires `openrouter/free` or a model ending in `:free`; direct-provider calls, including Meta AI, use their own API billing |
 | Automatic checks by default | Optional boolean; each URL launch can explicitly override it |
 | Maximum automatic cases | Integer from 1 to 3 |
 | Total additional replay actions | Integer from 1 to 100 across complete selected paths |

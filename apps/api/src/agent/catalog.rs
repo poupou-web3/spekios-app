@@ -28,8 +28,8 @@ pub fn tools() -> Vec<Tool> {
     // A run's own model. Omitted: the project's model, else the saved default.
     let model = || {
         json!({"type":"object","description":"This run's model instead of the project's or the default. free_only (default true) keeps OpenRouter on free model IDs. navigation_model: omit to inherit, null for none.",
-            "properties":{"provider":choice(&["openai","anthropic","openrouter","meta"]),"model":{"type":"string","minLength":1,"maxLength":200},"provider_key_id":{"type":"string","description":"Saved provider key UUID or demo; omit to use the configured default. Never send an API secret.","anyOf":[{"const":"demo"},{"format":"uuid"}]},"free_only":{"type":"boolean"},
-                "navigation_model":{"type":["object","null"],"properties":{"provider":choice(&["openai","anthropic","openrouter","meta"]),"model":{"type":"string","minLength":1,"maxLength":200}},"required":["provider","model"],"additionalProperties":false}},
+            "properties":{"provider":choice(&["meta","openrouter","openai","anthropic"]),"model":{"type":"string","minLength":1,"maxLength":200},"provider_key_id":{"type":"string","description":"Saved provider key UUID or demo; omit to use the configured default. Never send an API secret.","anyOf":[{"const":"demo"},{"format":"uuid"}]},"free_only":{"type":"boolean"},
+                "navigation_model":{"type":["object","null"],"properties":{"provider":choice(&["meta","openrouter","openai","anthropic"]),"model":{"type":"string","minLength":1,"maxLength":200}},"required":["provider","model"],"additionalProperties":false}},
             "required":["provider","model"],"additionalProperties":false})
     };
     let history_schema = || {

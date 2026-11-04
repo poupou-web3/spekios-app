@@ -6,6 +6,7 @@ import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { workspaceId, userId, isUuid, type Capture, type Observation } from './contracts.js';
+import { eventFields, eventLevel, log } from './log.js';
 
 export const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const jsonBytes = (data: unknown) => Buffer.from(JSON.stringify(data, null, 2) + '\n');
@@ -87,6 +88,7 @@ export class Store {
     const { rows } = await this.query('UPDATE runtime_runs SET event_seq=event_seq+1 WHERE run_id=$1 RETURNING event_seq', [runId]);
     await this.query('INSERT INTO runtime_events(event_id,run_id,seq,event_type,action_id,payload) VALUES($1,$2,$3,$4,$5,$6)',
       [randomUUID(), runId, rows[0].event_seq, type, actionId, JSON.stringify(payload)]);
+    log(eventLevel(type), type, { ...eventFields(payload), run_id: runId, action_id: actionId, seq: Number(rows[0].event_seq) });
   }
   async get(key: string) {
     const object = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));

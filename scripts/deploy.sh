@@ -107,19 +107,48 @@ if [[ "$bypass" == "true" && "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
   exit 1
 fi
 
+posthog_demo=$(read_env SCOUT_POSTHOG_DEMO_SITE)
+if [[ "$posthog_demo" == true ]]; then
+  [[ "$edge" == 1 && "${edge_tls:-}" == origin ]] || { echo 'The PostHog demo requires the Origin HTTPS edge.' >&2; exit 1; }
+  posthog_cert_dir=$(read_env SCOUT_POSTHOG_DEMO_CERT_DIR)
+  posthog_env_file=$(read_env SCOUT_POSTHOG_DEMO_ENV_FILE)
+  [[ -n "$posthog_cert_dir" && -f "$posthog_cert_dir/origin.pem" && -f "$posthog_cert_dir/origin.key" && -n "$posthog_env_file" && -f "$posthog_env_file" ]] || { echo 'The separate PostHog demo certificate and environment file must be installed first.' >&2; exit 1; }
+  export SCOUT_POSTHOG_DEMO_CERT_DIR="$posthog_cert_dir"
+  COMPOSE_FILE="$COMPOSE_FILE:compose.posthog-demo-edge.yaml"
+fi
+
+# The log collector reads container output through a proxy that runs as the
+# Docker socket's group. Docker Desktop's socket is group 0, the default.
+if [[ -z "${SCOUT_DOCKER_GID:-}" && "$(uname -s)" == Linux ]]; then
+  socket="${SCOUT_DOCKER_SOCKET:-/var/run/docker.sock}"
+  if [[ -S "$socket" ]]; then
+    SCOUT_DOCKER_GID=$(stat -c %g "$socket")
+    export SCOUT_DOCKER_GID
+  fi
+fi
+
 echo "Starting PostgreSQL, ClickHouse and evidence storage."
 docker compose up -d --build --wait postgres evidence clickhouse
 
 bash scripts/apply-schemas.sh
 
-echo "Starting the workspace, operator console, API and browser workers."
+if [[ "$posthog_demo" == true ]]; then
+  docker compose -p spekios-posthog-demo-site --env-file "$posthog_env_file" \
+    -f apps/posthog-demo/compose.yaml -f apps/posthog-demo/compose.public.yaml \
+    up -d --build --wait demo
+  # Validate all TLS routes and keys without publishing ports or changing the running edge.
+  docker compose --profile edge run --rm --no-deps --entrypoint caddy edge \
+    validate --config /etc/caddy/Caddyfile --adapter caddyfile
+fi
+
+echo "Starting the workspace, operator console, API, browser workers and log collector."
 echo "The first build compiles the API and the browser image."
 if [[ "$edge" == 1 ]]; then
   docker compose --profile edge up -d --build --wait \
-    api backoffice browser-worker browser-sandbox edge
+    api backoffice browser-worker posthog-worker browser-sandbox log-socket log-collector edge
 else
   docker compose up -d --build --wait \
-    api backoffice browser-worker browser-sandbox
+    api backoffice browser-worker posthog-worker browser-sandbox log-socket log-collector
 fi
 
 workspace_port="${SCOUT_WORKSPACE_PORT:-18080}"

@@ -160,6 +160,14 @@ outcomes-test:
 web-test:
     node --test apps/web/test/*.test.mjs packages/web-ui/test/*.test.mjs apps/backoffice/test/*.test.mjs
 
+# Disposable database + protocol fixture + real SDK/Chromium; no product data.
+posthog-test:
+    bash scripts/test-posthog.sh
+
+# Isolated HTTPS/AOP fixture; no server or Cloudflare mutations.
+posthog-edge-test:
+    bash scripts/test-posthog-edge.sh
+
 # Durable editable defaults, admission snapshots and retries without inference.
 settings-test:
     bash scripts/test-exploration-settings.sh
@@ -193,6 +201,10 @@ stop:
 
 logs:
     docker compose logs --tail=100 api
+
+# Restart the log collector after editing infra/logs/vector.yaml (the back office Logs tab).
+reload-logs:
+    docker compose up -d --force-recreate --wait --wait-timeout 60 log-socket log-collector
 
 build-recorder:
     docker compose build recorder
