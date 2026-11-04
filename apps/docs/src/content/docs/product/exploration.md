@@ -8,11 +8,11 @@
   }
 }
 ---
-Scout explores a bounded graph of observed browser states. It asks what a user is likely to do next, combines that inference with recorded evidence and selects a supported action. The scores rank candidates; they are not calibrated probabilities.
+Spekios explores a bounded graph of observed browser states. It asks what a user is likely to do next, combines that inference with recorded evidence and selects a supported action. The scores rank candidates; they are not calibrated probabilities.
 
 ## Observe and rank
 
-The recorder collects native controls across the whole page, including field values, checked state, dropdown options and document scroll affordances. Controls further down the page are included and marked as outside the visible area. When one is chosen, Scout scrolls it into view before taking the before screenshot. If it then turns out to be covered or unusable, Scout skips it without acting. The model proposes a control, typed action, likely user goal and expected result.
+The recorder collects native controls across the whole page, including field values, checked state, dropdown options and document scroll affordances. Controls further down the page are included and marked as outside the visible area. When one is chosen, Spekios scrolls it into view before taking the before screenshot. If it then turns out to be covered or unusable, Spekios skips it without acting. The model proposes a control, typed action, likely user goal and expected result.
 
 The planner combines model intent, novelty, changed pixels within controls and the cost of returning to a branch. A newly revealed or changed clickable control can become a candidate on the next observation.
 
@@ -26,7 +26,7 @@ Before dispatch, a fresh observation must match the planning state. The worker r
 
 ## Return to unexplored branches
 
-The frontier records reachable actions that have not yet been explored. Scout can follow a recorded return route or reopen the entry URL, assess those return actions and continue from a different branch.
+The frontier records reachable actions that have not yet been explored. Spekios can follow a recorded return route or reopen the entry URL, assess those return actions and continue from a different branch.
 
 Returning consumes the same action budget. It does not restore server-side app data. An authentication-context change discards old return plans and starts from the entry URL in the new context.
 

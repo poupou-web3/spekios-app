@@ -34,7 +34,7 @@ The recorder observes at most 120 controls across the whole document, reserving 
 
 The model receives bounded projections of those observations. Control and option IDs/values needed for selection remain exact; omitted controls/options and shortened URLs are marked. A model may select only controls/options actually supplied in its planning prompt. The command is then reconstructed from the full recorded control. Requests are fitted below the gateway's 64 KiB UTF-8 prompt limit by shortening page text, control lists and history together; the chosen `context_scale` is part of the request. Full stored evidence is not rewritten to fit the prompt.
 
-These controls apply to every admitted target: public https sites and allowed origins. Unapproved form submission, Enter/Tab shortcuts, account creation, payments, file uploads, custom dropdowns/contenteditable widgets, nested/horizontal scrolling, iframes, dialogs and downloads remain unsupported. Input/change handlers in the target app may react immediately. Isolation from Scout itself comes from the browser sandbox container, not from this contract.
+These controls apply to every admitted target: public https sites and allowed origins. Unapproved form submission, Enter/Tab shortcuts, account creation, payments, file uploads, custom dropdowns/contenteditable widgets, nested/horizontal scrolling, iframes, dialogs and downloads remain unsupported. Input/change handlers in the target app may react immediately. Isolation from Spekios itself comes from the browser sandbox container, not from this contract.
 
 The queued worker separately supports [private human login and saved app sessions](./private-login.md). Its human-only input controls do not expand the model tool surface.
 

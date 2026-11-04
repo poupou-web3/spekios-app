@@ -1,4 +1,4 @@
-# ScoutQA documentation
+# Spekios documentation
 
 Independent, self-hostable documentation built with Astro 7 and Starlight. It provides 37 original guides and 24 generated tool pages across product, getting started, workspace, agents, API and operations sections. Public content is curated separately from the repository’s internal plans in [docs/](../../docs/README.md).
 
@@ -10,7 +10,7 @@ From the repository root:
 docker compose -f compose.docs.yaml up -d --build --wait
 ~~~
 
-Open http://127.0.0.1:18090. This service has no dependency on Scout’s API, databases, evidence or model credentials. It uses a read-only, unprivileged static Nginx container with pinned base-image digests. The build includes documentation tests.
+Open http://127.0.0.1:18090. This service has no dependency on Spekios’s API, databases, evidence or model credentials. It uses a read-only, unprivileged static Nginx container with pinned base-image digests. The build includes documentation tests.
 
 For your own public domain, set DOCS_SITE_URL before building. Add DOCS_BASE_PATH for a subpath, for example /scout/. The server mounts files at that prefix. The origin must be HTTP(S), with no path/credentials/query/hash; the path is a separate setting.
 
@@ -57,7 +57,7 @@ The prepare script generates these from the same pages and the committed Rust ca
 - Every page’s index.md, advertised by an HTML Markdown alternate.
 - llms.txt, llms-full.txt and docs-index.json.
 - openapi.json (OpenAPI 3.1), mcp-tools.json and twenty-four tool-reference pages.
-- A three-file ScoutQA skill, downloadable ZIP, SHA-256 checksum and package manifest.
+- A three-file Spekios skill, downloadable ZIP, SHA-256 checksum and package manifest.
 - robots.txt. Astro builds the sitemap and Pagefind index.
 
 Generated public files and tool pages are ignored by Git and recreated during dev/build/check. The reviewed Rust catalog is committed at src/data/mcp-tools.json.
@@ -108,4 +108,4 @@ Write about implemented behavior; mark missing features and live-model quality l
 
 The SEO/GEO foundation is useful static content, internal links, canonical URLs, unique metadata, matching TechArticle/BreadcrumbList structured data, sitemap/robots and accessible machine exports. No ranking, AI citation or geographic reach is guaranteed.
 
-The Astro and Starlight tooling is MIT licensed. This documentation setup does not assign a new license to Scout’s product code.
+The Astro and Starlight tooling is MIT licensed. This documentation setup does not assign a new license to Spekios’s product code.

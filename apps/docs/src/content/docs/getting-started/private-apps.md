@@ -1,7 +1,7 @@
 ---
 {
   "title": "Sign in to a private app",
-  "description": "Use Scout’s human-only login handoff and optional encrypted saved sessions without recording passwords or private login frames as QA evidence.",
+  "description": "Use Spekios’s human-only login handoff and optional encrypted saved sessions without recording passwords or private login frames as QA evidence.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 4
@@ -28,15 +28,15 @@ A saved session can be explicitly selected for the matching app origin and execu
 4. Choose **I’m signed in · continue testing**.
 5. Optionally save the app session for reuse for up to 24 hours.
 
-Scout reloads the requested entry URL and checks the same-origin result, recognized login state and a sign-out control or changed app session state. This does not prove a particular account role or every protected permission.
+Spekios reloads the requested entry URL and checks the same-origin result, recognized login state and a sign-out control or changed app session state. This does not prove a particular account role or every protected permission.
 
-Choose **Skip sign-in for this run** on any waiting prompt to continue with public pages and suppress further sign-in requests for that run. Scout avoids the control that reached the login gate and reopens an observed public page to explore other branches. If the entry page requires login and no public page has been observed, the run reports blocked access.
+Choose **Skip sign-in for this run** on any waiting prompt to continue with public pages and suppress further sign-in requests for that run. Spekios avoids the control that reached the login gate and reopens an observed public page to explore other branches. If the entry page requires login and no public page has been observed, the run reports blocked access.
 
-## Let Scout create a test account
+## Let Spekios create a test account
 
-Choose **Try creating an account** on a waiting sign-in prompt. When you signed in through the connected Lovable/Spekios account, its verified email is filled in automatically. Review that address or replace it with a dedicated test email, choose an account name, then start account creation. Local development and accounts without a verified linked email can supply a test email manually. Scout generates a strong password, follows a same-origin signup link, fills supported native registration fields and submits each form once. Required terms checkboxes are accepted as part of that registration; optional marketing checkboxes are left alone.
+Choose **Try creating an account** on a waiting sign-in prompt. When you signed in through the connected Lovable/Spekios account, its verified email is filled in automatically. Review that address or replace it with a dedicated test email, choose an account name, then start account creation. Local development and accounts without a verified linked email can supply a test email manually. Spekios generates a strong password, follows a same-origin signup link, fills supported native registration fields and submits each form once. Required terms checkboxes are accepted as part of that registration; optional marketing checkboxes are left alone.
 
-The account is created on the target app. Scout continues exploration only after reopening the entry page and observing authenticated access. Email or phone verification, CAPTCHA, external identity providers and unsupported forms return to private browser control so you can finish the step yourself. There is no connected mailbox service in this version.
+The account is created on the target app. Spekios continues exploration only after reopening the entry page and observing authenticated access. Email or phone verification, CAPTCHA, external identity providers and unsupported forms return to private browser control so you can finish the step yourself. There is no connected mailbox service in this version.
 
 Generated credentials stay outside recorded screenshots, run reports and model requests during signup. An encrypted local copy is retained in the auth vault; **Download account details** lets you save a private copy before closing the dialog. You can also choose to save the resulting app session for 24 hours. Account creation itself is not recorded as an automated product test.
 

@@ -672,7 +672,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Inspect Scout readiness, configured provider availability, operator scope and defaults. No model call.",
+      "description": "Inspect Spekios readiness, configured provider availability, operator scope and defaults. No model call.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},

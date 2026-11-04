@@ -1,7 +1,7 @@
 ---
 {
   "title": "Create and cancel browser jobs",
-  "description": "Submit URL exploration or suspect reproduction to ScoutQA with idempotent UUIDs, frozen settings and durable cancellation.",
+  "description": "Submit URL exploration or suspect reproduction to Spekios with idempotent UUIDs, frozen settings and durable cancellation.",
   "reviewed": "2026-10-29",
   "sidebar": {
     "order": 3

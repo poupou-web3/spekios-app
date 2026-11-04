@@ -67,7 +67,7 @@ transforms:
       run_id = ""
       request_id = ""
 
-      # Scout services print one JSON object per line: {"level":..,"msg":..,...}.
+      # Spekios services print one JSON object per line: {"level":..,"msg":..,...}.
       parsed, err = parse_json(raw, max_depth: 4)
       if err == null && is_object(parsed) {
         fields = object!(parsed)

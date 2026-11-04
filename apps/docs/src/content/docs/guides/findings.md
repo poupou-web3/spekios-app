@@ -1,7 +1,7 @@
 ---
 {
   "title": "Review and reproduce a finding",
-  "description": "Inspect a Scout suspicion, independently replay its recorded path and record an evidence-backed human confirmation or dismissal.",
+  "description": "Inspect a Spekios suspicion, independently replay its recorded path and record an evidence-backed human confirmation or dismissal.",
   "reviewed": "2026-10-31",
   "sidebar": {
     "order": 2
@@ -18,7 +18,7 @@ The report may also show normal changes, diagnostic signals, inconclusive checks
 
 ## Request fresh reproduction
 
-Choose reproduction for a completed suspect. Scout starts a fresh browser, restores the original saved sign-in context when available and follows the recorded prerequisite path to the selected action.
+Choose reproduction for a completed suspect. Spekios starts a fresh browser, restores the original saved sign-in context when available and follows the recorded prerequisite path to the selected action.
 
 The replay preserves the original typed parameters, viewport and expected result. Changed preconditions leave an inconclusive result; the worker does not invent replacement inputs.
 
@@ -34,7 +34,7 @@ The tool/API agent interface can read review status. It cannot submit a human re
 
 ## Decide what it is
 
-On the issues page, triage each issue as a **bug**, **intended behavior**, a **duplicate** or **needs review**. Triage decides what Scout does next: bugs are rechecked after deploys, and later runs that reach the same page and control are labelled with the decision. Agents can triage too, but cannot replace a person's decision. See [triage and rechecks](../triage/).
+On the issues page, triage each issue as a **bug**, **intended behavior**, a **duplicate** or **needs review**. Triage decides what Spekios does next: bugs are rechecked after deploys, and later runs that reach the same page and control are labelled with the decision. Agents can triage too, but cannot replace a person's decision. See [triage and rechecks](../triage/).
 
 A human review labels one action's evidence; triage decides what the issue is. Both are kept.
 

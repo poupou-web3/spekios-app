@@ -1,7 +1,7 @@
 ---
 {
   "title": "Call agent tools over HTTP",
-  "description": "Discover ScoutQA’s shared MCP schemas and invoke tools over authenticated JSON HTTP with consistent result envelopes and domain errors.",
+  "description": "Discover Spekios’s shared MCP schemas and invoke tools over authenticated JSON HTTP with consistent result envelopes and domain errors.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 6

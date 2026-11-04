@@ -85,7 +85,7 @@ pub async fn resource_metadata(State(state): State<AppState>, headers: HeaderMap
     let Some(origin) = origin(&state, &headers) else {
         return invalid("invalid_server_origin");
     };
-    Json(json!({"resource":format!("{origin}/mcp"),"authorization_servers":[origin],"scopes_supported":AGENT_SCOPES,"bearer_methods_supported":["header"],"resource_name":"ScoutQA"})).into_response()
+    Json(json!({"resource":format!("{origin}/mcp"),"authorization_servers":[origin],"scopes_supported":AGENT_SCOPES,"bearer_methods_supported":["header"],"resource_name":"Spekios"})).into_response()
 }
 pub async fn server_metadata(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(origin) = origin(&state, &headers) else {

@@ -1,7 +1,7 @@
 ---
 {
   "title": "Progress, reports and event cursors",
-  "description": "Poll lightweight ScoutQA progress, page consistent expected-versus-actual reports and consume durable run events.",
+  "description": "Poll lightweight Spekios progress, page consistent expected-versus-actual reports and consume durable run events.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 4

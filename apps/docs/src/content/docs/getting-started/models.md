@@ -75,7 +75,7 @@ and save defaults. Projects and run overrides use the preference for their
 resolved model. New jobs freeze the resolved permission and connection.
 
 When native exploration cannot reach a control before dispatch, or no reachable
-native frontier remains, Scout can request one visual click, hover, panel scroll
+native frontier remains, Spekios can request one visual click, hover, panel scroll
 or drag. Every gesture has a prediction, fresh before/after evidence, assessment
 and ordinary usage accounting. Recovery has a maximum of six attempts per run,
 three per URL and one per unchanged screenshot, within the run's existing limits.
@@ -94,7 +94,7 @@ See [Meta's computer-use guide](https://dev.meta.ai/docs/computer-use).
 
 ## Usage accounting
 
-Scout records each model request and attempt, including failed/retried attempts and late usage after cancellation. Tokens and costs come from provider-reported metadata. An absent value stays unknown rather than becoming zero.
+Spekios records each model request and attempt, including failed/retried attempts and late usage after cancellation. Tokens and costs come from provider-reported metadata. An absent value stays unknown rather than becoming zero.
 
 Each run shows input, output and total tokens, overall and for each model it used. Inspect them on the run page, in the run list, the [usage API](../../api/models-usage/) or **scout_usage**.
 
@@ -107,4 +107,4 @@ The run page and run list estimate cost as each model's input tokens times its i
 
 ## Subscription authentication
 
-ChatGPT, Claude and coding-agent subscription allowances are not connected by this implementation. Use API keys. External-agent connections operate Scout with its configured provider; they do not transfer the caller’s model allowance.
+ChatGPT, Claude and coding-agent subscription allowances are not connected by this implementation. Use API keys. External-agent connections operate Spekios with its configured provider; they do not transfer the caller’s model allowance.

@@ -1,14 +1,14 @@
 ---
 {
   "title": "Submit, poll, report, fix",
-  "description": "Give ScoutQA a URL, continue other work, retrieve a consistent report and use recorded evidence to investigate a fix in your own codebase.",
+  "description": "Give Spekios a URL, continue other work, retrieve a consistent report and use recorded evidence to investigate a fix in your own codebase.",
   "reviewed": "2026-10-31",
   "sidebar": {
     "order": 2
   }
 }
 ---
-A Scout job outlives the client that submitted it. A coding agent can start QA, work on something else, then return for a report without keeping a blocking tool call open.
+A Spekios job outlives the client that submitted it. A coding agent can start QA, work on something else, then return for a report without keeping a blocking tool call open.
 
 ## 1. Submit once with a saved UUID
 
@@ -64,7 +64,7 @@ Before treating a finding as work, read what is already known about the site:
 {"name":"scout_list_knowledge","arguments":{"origin":"https://staging.example"}}
 ~~~
 
-Each report item carries a **triage** object. Items with **known_behavior** true repeat a known bug or intended behavior; Scout recorded them and labelled them, and they need no new work. For a new item, check the expectation against the product requirements and the evidence, then decide:
+Each report item carries a **triage** object. Items with **known_behavior** true repeat a known bug or intended behavior; Spekios recorded them and labelled them, and they need no new work. For a new item, check the expectation against the product requirements and the evidence, then decide:
 
 ~~~json
 {"name":"scout_triage_issue","arguments":{"issue_id":"11111111-1111-4111-8111-111111111111","decision":"intended_behavior","rationale":"The editor autosaves; the spec has no confirmation banner.","expected_revision":0}}
@@ -76,7 +76,7 @@ Decisions are **bug**, **intended_behavior**, **duplicate** (with **duplicate_of
 
 Check the inferred expectation against product requirements. Use the route, visible control, action parameters, recorded path and diagnostics to locate the likely component or request handler.
 
-Scout does not inspect the repository. Source file, root cause and deployed build reference remain unknown unless established through the coding agent’s own evidence. App text, model assessments and screenshots remain untrusted observations.
+Spekios does not inspect the repository. Source file, root cause and deployed build reference remain unknown unless established through the coding agent’s own evidence. App text, model assessments and screenshots remain untrusted observations.
 
 ## 6. Verify the same issue on a candidate deployment
 
@@ -86,7 +86,7 @@ After deploying, submit the issue ID and candidate URL with a new UUID:
 {"name":"scout_verify_fix","arguments":{"issue_id":"11111111-1111-4111-8111-111111111111","verification_id":"22222222-2222-4222-8222-222222222222","candidate_url":"https://preview.example/editor","deployment_ref":"Preview #42"}}
 ~~~
 
-The example UUIDs are illustrative. Save the real receipt, retry uncertain admission with identical arguments and poll **scout_get_verification {verification_id}**. Scout uses a fresh browser, the recorded viewport/path and frozen expected result. The result is **resolved**, **still_reproducible**, **blocked** or **inconclusive**. A failed replay never establishes a fix.
+The example UUIDs are illustrative. Save the real receipt, retry uncertain admission with identical arguments and poll **scout_get_verification {verification_id}**. Spekios uses a fresh browser, the recorded viewport/path and frozen expected result. The result is **resolved**, **still_reproducible**, **blocked** or **inconclusive**. A failed replay never establishes a fix.
 
 Read **scout_get_issue {issue_id}** or open **Issues & fixes** in the dashboard for the same history, original/candidate evidence and separate run usage. Resolved describes the recorded behavior on this candidate; it does not confirm a production fix. See [fix verification](../../guides/fix-verification/) for preconditions, access and paging.
 

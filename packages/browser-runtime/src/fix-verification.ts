@@ -80,7 +80,7 @@ export function verificationOutcome(report:Record<string,any>,replay:Replay,evid
   const target=report.actions.at(-1);
   let outcome:'resolved'|'still_reproducible'|'blocked'|'inconclusive'='inconclusive';
   let reason='The recorded behavior was not fully checked. An incomplete or failed replay does not establish a fix.';
-  if(report.run.lifecycle==='blocked'){outcome='blocked';reason='Access or policy prevented verification. Sign in to this candidate through Scout, save its session, then retry with a new verification ID.';}
+  if(report.run.lifecycle==='blocked'){outcome='blocked';reason='Access or policy prevented verification. Sign in to this candidate through Spekios, save its session, then retry with a new verification ID.';}
   else if(report.run.lifecycle==='completed'&&!report.run.cancel_id&&evidenceVerified&&recordedPathCompleted(report,replay)){
     const check=target?.assessment?.fix_check;
     if(check?.preconditions_met===true&&check.expectation_met===true&&check.same_failure_observed===false&&target.assessment.verdict==='no_issue_observed'){

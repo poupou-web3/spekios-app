@@ -413,7 +413,7 @@ pub struct KnowledgeFilters {
     pub limit: Option<i64>,
 }
 /// Known behavior: issues triaged as bugs or intended behavior, with the
-/// duplicates and Scout's later matches rolled up into each one.
+/// duplicates and Spekios's later matches rolled up into each one.
 pub async fn knowledge(
     ScopedState(state): ScopedState,
     Query(filters): Query<KnowledgeFilters>,

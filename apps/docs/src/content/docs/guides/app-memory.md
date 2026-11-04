@@ -1,7 +1,7 @@
 ---
 {
   "title": "Explore deeper across runs",
-  "description": "How ScoutQA remembers which pages and controls earlier runs explored, skips repeats, reopens unfinished pages and lets you forget an app's memory.",
+  "description": "How Spekios remembers which pages and controls earlier runs explored, skips repeats, reopens unfinished pages and lets you forget an app's memory.",
   "reviewed": "2026-10-31",
   "sidebar": {"order": 6}
 }
@@ -26,7 +26,7 @@ Memory is kept separately for each app origin, screen size (desktop, tablet, mob
 
 Screenshots, field values and credentials are not stored in memory.
 
-Scout reopens a remembered page only within the app's own origin. It never reopens addresses that look like sign-out, payment, deletion or other risky actions, or addresses with tokens, codes, keys, sessions or signatures in the query.
+Spekios reopens a remembered page only within the app's own origin. It never reopens addresses that look like sign-out, payment, deletion or other risky actions, or addresses with tokens, codes, keys, sessions or signatures in the query.
 
 Reproductions, automatic rechecks and fix verification follow their recorded path exactly. They never use or change memory.
 

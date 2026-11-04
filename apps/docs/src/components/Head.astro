@@ -9,7 +9,7 @@ const is404 = entry.id === '404';
 const schema = {
   '@context': 'https://schema.org',
   '@graph': [
-    { '@type': 'WebSite', '@id': settings.absolute() + '#website', name: 'ScoutQA documentation', url: settings.absolute(), inLanguage: 'en' },
+    { '@type': 'WebSite', '@id': settings.absolute() + '#website', name: 'Spekios documentation', url: settings.absolute(), inLanguage: 'en' },
     {
       '@type': 'TechArticle', '@id': canonical + '#article', headline: entry.data.hero?.title || entry.data.title,
       description: entry.data.description, url: canonical, inLanguage: 'en',
@@ -30,6 +30,6 @@ const schema = {
 {!is404 && <>
   <link rel="alternate" type="text/markdown" href={markdown} title={entry.data.title + ' (Markdown)'} />
   <link rel="describedby" type="text/plain" href={settings.absolute('llms.txt')} />
-  <meta property="og:site_name" content="ScoutQA documentation" />
+  <meta property="og:site_name" content="Spekios documentation" />
   <script type="application/ld+json" set:html={JSON.stringify(schema).replace(/</g, '\\u003c')} />
 </>}

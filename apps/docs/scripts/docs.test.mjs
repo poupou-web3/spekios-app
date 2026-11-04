@@ -120,7 +120,7 @@ test('Markdown exports and both LLM indexes contain usable complete documentatio
   const full = await readFile(path.join(dist, 'llms-full.txt'), 'utf8');
   const llms = await readFile(path.join(dist, 'llms.txt'), 'utf8');
   assert.equal((llms.match(/^# /gm) || []).length, 1);
-  assert.ok(llms.startsWith('# ScoutQA\n\n> '));
+  assert.ok(llms.startsWith('# Spekios\n\n> '));
   for (const doc of index.documents) {
     const markdown = await readFile(localFile(doc.markdown_url), 'utf8');
     assert.ok(markdown.startsWith('# ' + doc.title + '\n'));

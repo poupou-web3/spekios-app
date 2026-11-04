@@ -1,4 +1,4 @@
-# Building the Scout QA agent
+# Building the Spekios agent
 
 Research date: 14 October 2026; revised to the user's requirements on 15 October and checked for consistency on 21 October 2026. This document defines the application design. The first local storage/observability infrastructure is tracked separately in [Local infrastructure](../platform/infrastructure.md); it must not be confused with a completed browser-testing application.
 
@@ -6,12 +6,12 @@ Research date: 14 October 2026; revised to the user's requirements on 15 October
 
 This section is the current state. Everything below it is the design; dated implementation notes are in the [change log](#change-log) at the end.
 
-**The goal holds.** From a URL, Scout's agent decides what is wrong, records everything with evidence, makes it available to people and reports back to the agent or CI job that asked. Every part of the spec is judged against that loop.
+**The goal holds.** From a URL, Spekios's agent decides what is wrong, records everything with evidence, makes it available to people and reports back to the agent or CI job that asked. Every part of the spec is judged against that loop.
 
 Built:
 
 - **Explore:** URL-only exploration with a scored [frontier planner](../exploration/planner.md), an [app map](../../apps/docs/src/content/docs/guides/app-memory.md#the-app-map) of states and transitions carried between runs and compared run to run, memory across runs, document-wide controls, viewport profiles, [private sign-in](../exploration/private-login.md) and [testing focus](../../apps/docs/src/content/docs/guides/testing-focus.md).
-- **Decide:** a prediction before every action and an assessment after it; [fresh-browser reproduction](../exploration/reproduction.md) and [automatic rechecks](../exploration/automatic-reproduction.md); [triage](../exploration/triage.md) of every issue as bug, intended behavior, duplicate or needs review, by people, agents or Scout itself.
+- **Decide:** a prediction before every action and an assessment after it; [fresh-browser reproduction](../exploration/reproduction.md) and [automatic rechecks](../exploration/automatic-reproduction.md); [triage](../exploration/triage.md) of every issue as bug, intended behavior, duplicate or needs review, by people, agents or Spekios itself.
 - **Record:** append-only actions, captures, assessments, issues, triage, verifications and [human reviews](../exploration/finding-reviews.md), with evidence in the bucket and events in ClickHouse.
 - **Make available:** the workspace, the issues page, the back office, [run reports and exports](../runtime/reports.md).
 - **Report back:** 32 MCP/HTTP tools, coding-agent reports that separate new findings from known behavior, [fix verification](../../apps/docs/src/content/docs/guides/fix-verification.md) and [deployment rechecks](../exploration/triage.md#recheck-after-a-deploy) with a CI script.

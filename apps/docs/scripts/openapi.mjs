@@ -45,7 +45,7 @@ export function openapi(catalog) {
   });
   add('/oauth/authorize','get','authorizeOAuthClient','OAuth','Validate a client request and open explicit browser consent',{
     security:[],parameters:[...['response_type','client_id','redirect_uri','resource','code_challenge','code_challenge_method'].map(name=>({...query(name,string,'Required OAuth parameter; only code / S256 and the canonical /mcp resource are supported.'),required:true})),query('scope',string,'Space-separated runs:read, runs:write and usage:read.'),query('state',string,'Client correlation value, echoed unchanged.')],
-    responses:{'303':{description:'Navigate to Scout browser approval. No access token is issued.',headers:{Location:{schema:string}}},...errors,'429':response('Too many pending authorizations.')},
+    responses:{'303':{description:'Navigate to Spekios browser approval. No access token is issued.',headers:{Location:{schema:string}}},...errors,'429':response('Too many pending authorizations.')},
   });
   add('/v1/oauth/authorizations/{id}','get','reviewOAuthAuthorization','OAuth','Manager-only pending authorization details',{parameters:[pathParameter('id')]});
   add('/v1/oauth/authorizations/{id}/decision','post','decideOAuthAuthorization','OAuth','Explicitly approve or deny and return the validated browser callback',{
@@ -122,7 +122,7 @@ export function openapi(catalog) {
     parameters:[pathParameter('issue_id')],
     requestBody:body(strict({decision:choice('bug','intended_behavior','duplicate','needs_review'),rationale:{type:'string',minLength:1,maxLength:2000,description:'Why, grounded in evidence or product requirements.'},duplicate_of:{...uuid,description:'Required for duplicate only: the issue this one repeats. A chain resolves to its canonical issue.'},expected_revision:{type:'integer',minimum:0,description:'The triage revision you read (0 when untriaged). A newer decision returns 409.'}},['decision','rationale'])),
     responses:{'201':response('Decision recorded as a new append-only revision.'),'200':response('An identical current decision already existed.'),'409':response('triage_revision_conflict, or human_decision_present when an agent tries to replace a person\'s decision.'),...errors},
-    description:'Requires runs:write. Requests from agent credentials or agent tools are recorded as agent decisions and cannot replace a decision made by a person. Later suspects with the same page, control, viewport and sign-in state are triaged the same way by Scout and labelled, never dropped. Evidence and model assessments are unchanged.',
+    description:'Requires runs:write. Requests from agent credentials or agent tools are recorded as agent decisions and cannot replace a decision made by a person. Later suspects with the same page, control, viewport and sign-in state are triaged the same way by Spekios and labelled, never dropped. Evidence and model assessments are unchanged.',
   });
   add('/v1/knowledge','get','listKnownBehavior','Issues','List known bugs and intended behavior for an origin',{
     parameters:[query('origin',{type:'string',maxLength:2048},'Site origin, e.g. https://staging.example. Omit for every origin.'),query('offset',bounded(0,100000,0),'Page offset.'),query('limit',bounded(1,50,20),'Maximum entries.')],
@@ -257,7 +257,7 @@ export function openapi(catalog) {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'ScoutQA local integration API', version: '0.2.0',
+      title: 'Spekios local integration API', version: '0.2.0',
       summary: 'Durable URL-first QA jobs and evidence-backed feedback for people and coding agents.',
       description: 'Source-reviewed local developer preview. This document covers the integration routes listed here; private human-login control, human review mutation and MCP JSON-RPC transport are documented separately. Extensible stored projections are intentionally not exhaustive generated-client models. Request bodies are capped at 64 KiB. Commands can change data on the target site and consume provider usage. API-key model access only; no subscription allowance transfer.',
     },

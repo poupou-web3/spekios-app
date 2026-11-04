@@ -1,6 +1,6 @@
 # Agent control interface
 
-The priority is an interface through which another agent can operate Scout and inspect its results. The GUI remains a view of the same durable state.
+The priority is an interface through which another agent can operate Spekios and inspect its results. The GUI remains a view of the same durable state.
 
 **28 October 2026:** the first increment is implemented and verified through HTTP MCP, plain HTTP and a real Rust stdio subprocess. A simulated-provider workflow exercised exploration, evidence reads, reproduction and cancellation against the real browser/storage stack. Normal services were restored; normal-mode reads added no inference or browser actions. See [connection instructions and limits](./interface.md). The following increments remain open.
 
@@ -38,12 +38,12 @@ Versioned active-run steering is implemented through GUI, HTTP and MCP, with ack
 ## Following increments
 
 1. **Steering — implemented:** revision-checked focus changes, stable command IDs, agent attribution, bounded history and durable pending/applied/superseded/not_applied states. The next planning decision includes the active focus; cached branch rankings yield to fresh scores. Current actions and replay paths retain their frozen expectations. GUI, progress, reports, HTTP and MCP expose acknowledgement. ClickHouse receives runtime events.
-2. **External browser driver:** observe/act/assess commands so a connected agent can supply its own model decisions. Require fresh observation IDs, frozen expectations, scoped typed actions and the existing complete evidence chain. This is separate from starting Scout's autonomous explorer.
+2. **External browser driver:** observe/act/assess commands so a connected agent can supply its own model decisions. Require fresh observation IDs, frozen expectations, scoped typed actions and the existing complete evidence chain. This is separate from starting Spekios's autonomous explorer.
 3. **Agent identity and audit:** per-agent credentials/scopes, revocation, caller attribution, tool-call input/output records and ClickHouse delivery. The first increment retains the existing single local developer token and durable command/evidence records; it does not claim a complete MCP-read audit trail.
 4. **Push and subscriptions:** durable event cursors first, then live subscriptions/notifications with reconnect behavior. A disconnect must not silently cancel a durable browser job.
 5. **Hosted access:** workspace membership, remote authentication, network isolation, quotas and a reviewed public deployment configuration.
 
-Agents may inspect human reviews but cannot submit a machine decision as a human confirmation through these tools. Private app sign-in remains a user handoff. Starting or reproducing a run uses the configured Scout provider and can consume its model allowance; exposing tools is not subscription authentication.
+Agents may inspect human reviews but cannot submit a machine decision as a human confirmation through these tools. Private app sign-in remains a user handoff. Starting or reproducing a run uses the configured Spekios provider and can consume its model allowance; exposing tools is not subscription authentication.
 
 
 ## Browser pairing and private workspace identity — 29 October 2026

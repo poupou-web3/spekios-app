@@ -1,14 +1,14 @@
 ---
 {
   "title": "Runs, actions and evidence",
-  "description": "Learn Scout’s core data model: jobs, runs, states, actions, captures, artifacts, findings and independent reproductions.",
+  "description": "Learn Spekios’s core data model: jobs, runs, states, actions, captures, artifacts, findings and independent reproductions.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 2
   }
 }
 ---
-Scout keeps commands, browser observations and review decisions as distinct records. Their IDs let a person or agent trace a report back to the action and bytes that support it.
+Spekios keeps commands, browser observations and review decisions as distinct records. Their IDs let a person or agent trace a report back to the action and bytes that support it.
 
 | Record | Meaning |
 | --- | --- |

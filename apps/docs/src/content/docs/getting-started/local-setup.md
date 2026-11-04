@@ -1,14 +1,14 @@
 ---
 {
-  "title": "Run Scout locally",
-  "description": "Start ScoutQA’s Rust API, Chromium worker, PostgreSQL, ClickHouse and private screenshot storage with Docker Compose.",
+  "title": "Run Spekios locally",
+  "description": "Start Spekios’s Rust API, Chromium worker, PostgreSQL, ClickHouse and private screenshot storage with Docker Compose.",
   "reviewed": "2026-10-31",
   "sidebar": {
     "order": 1
   }
 }
 ---
-Run the local stack from a checkout of the Scout repository. The stack includes the web workspace, API, browser worker and storage. You do not need a hosted documentation or QA account.
+Run the local stack from a checkout of the Spekios repository. The stack includes the web workspace, API, browser worker and storage. You do not need a hosted documentation or QA account.
 
 ## Prerequisites
 

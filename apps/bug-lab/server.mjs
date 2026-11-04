@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Larchwood: a small shop that ships with known bugs, for measuring what a
-// Scout exploration finds. No dependencies; needs Node 22 or later.
+// Spekios exploration finds. No dependencies; needs Node 22 or later.
 //
 //   node apps/bug-lab/server.mjs                     all bugs on, port 4100
 //   node apps/bug-lab/server.mjs --fixed             the same shop, every bug fixed
@@ -44,7 +44,7 @@ for (const shop of shops) {
   console.log(`Larchwood (${label}) on ${shop.url}`);
 }
 if (options.host === '127.0.0.1' || options.host === 'localhost') {
-  console.log(`Scout's browser runs in Docker. Give it http://host.docker.internal:${port}` +
+  console.log(`Spekios's browser runs in Docker. Give it http://host.docker.internal:${port}` +
     `${options.pair ? ` (fixed: http://host.docker.internal:${port + 1})` : ''}.`);
 }
 

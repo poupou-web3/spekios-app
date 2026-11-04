@@ -1,9 +1,9 @@
-# Configure the host and deploy Scout.
+# Configure the host and deploy Spekios.
 #   ansible-playbook site.yml                 # everything
 #   ansible-playbook site.yml --tags app      # ship a new release only
 #   ansible-playbook site.yml -e scout_ref=<sha>  # roll back to an older commit on origin/main
 #   ansible-playbook site.yml --tags tunnel   # cloudflared and the GitHub deploy key (just cloud-ci-setup)
-- name: Scout host
+- name: Spekios host
   hosts: scout
   become: true
   gather_facts: false

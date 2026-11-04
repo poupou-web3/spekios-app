@@ -1,4 +1,4 @@
-/* Design tokens for every Scout page.
+/* Design tokens for every Spekios page.
    Each value is defined once as light-dark(light, dark). The resolved side follows
    color-scheme: the operating system by default, or data-theme="light|dark" on <html>
    when the person picks a theme (see theme.js). The page CSP allows no remote assets. */

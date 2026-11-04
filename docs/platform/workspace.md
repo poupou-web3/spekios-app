@@ -44,7 +44,7 @@ The overview separates worker availability, model-gateway readiness, evidence de
 
 Browser jobs expose search, execution-status and live/simulated-mode filters across the latest 50 returned jobs, with worker assignment, launch/duration details, errors, cancellation and result links. Automatic reproduction jobs are labeled and link to their parent exploration when it is in the recent queue view; otherwise the lineage drawer preserves the parent job ID.
 
-**Logs** tails every container's stdout and stderr from ClickHouse, live, with level, service, text and run filters; Scout's own lines include each HTTP request and every model call with its provider, model, status, duration and tokens. Only the operator token can read them. See [service logs](./logs.md).
+**Logs** tails every container's stdout and stderr from ClickHouse, live, with level, service, text and run filters; Spekios's own lines include each HTTP request and every model call with its provider, model, status, duration and tokens. Only the operator token can read them. See [service logs](./logs.md).
 
 Select a run to inspect model requests with provider, state, purpose and search filters. Model activity separates stable logical request IDs from actual provider attempts; recorded attempts and their nullable usage come from the run report, rather than being inferred from request state. The drawer exposes frozen input, response text, attempt details, stored payload keys and event history. Event search applies to the selected run's ordered execution events. These filters do not change whole-run usage totals.
 

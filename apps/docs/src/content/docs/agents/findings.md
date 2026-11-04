@@ -1,7 +1,7 @@
 ---
 {
   "title": "Read a coding-agent report",
-  "description": "Interpret Scout report categories, frozen expectations, actual outcomes, reproduction paths, evidence references, uncertainty and repair objectives.",
+  "description": "Interpret Spekios report categories, frozen expectations, actual outcomes, reproduction paths, evidence references, uncertainty and repair objectives.",
   "reviewed": "2026-11-03",
   "sidebar": {
     "order": 3

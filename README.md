@@ -1,14 +1,14 @@
-# Scout QA
+# Spekios
 
 **PostHog journeys:** the Cloud connector shows analytics per website, discovers recorded journeys and validates generated flows in a test browser. The [setup guide](./docs/platform/posthog.md) and [standalone demo shop](./apps/posthog-demo/README.md) keep Cloud demo monitoring separate from the product. No website is instrumented or deployed automatically.
 
 **Spekios sign-in:** [Google, Apple and email/password login through the Lovable wrapper](./SPEKIOS_AUTH.md), including localhost setup and the secure handoff contract.
 
-**Documentation:** [Product, agent and API guides](./apps/docs/README.md). Start the independent, self-hosted documentation with `docker compose -f compose.docs.yaml up -d --build --wait`, then open [ScoutQA docs](http://127.0.0.1:18090). It includes plain Markdown, LLM indexes, OpenAPI and generated MCP tool references.
+**Documentation:** [Product, agent and API guides](./apps/docs/README.md). Start the independent, self-hosted documentation with `docker compose -f compose.docs.yaml up -d --build --wait`, then open [Spekios docs](http://127.0.0.1:18090). It includes plain Markdown, LLM indexes, OpenAPI and generated MCP tool references.
 
-**For users and their agents:** Open **Connect your agent** in the workspace, add the displayed MCP URL in a compatible agent app and approve in your browser. No checkout or `just` command is needed for this connection. [User connection guide](./apps/docs/src/content/docs/agents/connect.md). Cloud connectors require a publicly reachable HTTPS Scout deployment; the default stack remains local.
+**For users and their agents:** Open **Connect your agent** in the workspace, add the displayed MCP URL in a compatible agent app and approve in your browser. No checkout or `just` command is needed for this connection. [User connection guide](./apps/docs/src/content/docs/agents/connect.md). Cloud connectors require a publicly reachable HTTPS Spekios deployment; the default stack remains local.
 
-**Agent skill:** Run `python3 scripts/install-scout-skill.py --client codex` (or `--client claude`) to install a small Scout workflow without an SDK. [Installation and usage](./apps/docs/src/content/docs/agents/skill.md) also covers project scope, custom skill directories and the downloadable ZIP. Configure MCP separately.
+**Agent skill:** Run `python3 scripts/install-scout-skill.py --client codex` (or `--client claude`) to install a small Spekios workflow without an SDK. [Installation and usage](./apps/docs/src/content/docs/agents/skill.md) also covers project scope, custom skill directories and the downloadable ZIP. Configure MCP separately.
 
 A local exploratory QA system. The product design starts with a URL, infers likely user flows, records every action, and checks the result against an expectation established before acting.
 
@@ -39,7 +39,7 @@ Engineering notes are grouped in [docs/](./docs/README.md). The published user g
 
 Use `just models`, `just model-call request.json`, `just model-request REQUEST_UUID`, and `just usage` for the gateway. `just model-test` uses fake providers and restores normal mode afterward. Live providers require optional API keys in `.env`; no account was connected or billed during fixture verification.
 
-Use `just explorer-test` to verify exploration and reproduction with simulated models and real browser/storage services. With a configured provider, use `just explore URL` for any public https site or an explicitly allowed private app. Target sites run in the `browser-sandbox` container, which holds no Scout credentials and restarts after every run; `just isolation-test` checks that boundary. No brief is required. Use `just reproduce ACTION_UUID` to recheck a suspected bug in a fresh browser; repeated commands reuse the saved attempt without new model calls. Local volumes preserve evidence across container recreation; they are not an off-machine backup.
+Use `just explorer-test` to verify exploration and reproduction with simulated models and real browser/storage services. With a configured provider, use `just explore URL` for any public https site or an explicitly allowed private app. Target sites run in the `browser-sandbox` container, which holds no Spekios credentials and restarts after every run; `just isolation-test` checks that boundary. No brief is required. Use `just reproduce ACTION_UUID` to recheck a suspected bug in a fresh browser; repeated commands reuse the saved attempt without new model calls. Local volumes preserve evidence across container recreation; they are not an off-machine backup.
 
 Open a run and choose **Export report** to download readable Markdown, the existing JSON snapshot, or a portable evidence ZIP with verified PNGs/artifacts and a SHA-256 manifest. Missing evidence stays explicit; related replay evidence is exported separately. `just export-report RUN_UUID` uses the same implementation from the terminal. These downloads do not approve training use or make model calls. See [portable reports](./docs/runtime/reports.md).
 

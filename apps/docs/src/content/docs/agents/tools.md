@@ -1,7 +1,7 @@
 ---
 {
   "title": "MCP and HTTP tool reference",
-  "description": "Browse the thirty-four ScoutQA tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
+  "description": "Browse the thirty-four Spekios tools with exact Rust-generated input schemas, required fields, side effects and links to the agent workflow.",
   "reviewed": "2026-11-01",
   "sidebar": {
     "order": 5

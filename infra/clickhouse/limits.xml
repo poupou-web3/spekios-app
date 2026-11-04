@@ -9,7 +9,7 @@
   <background_distributed_schedule_pool_size>2</background_distributed_schedule_pool_size>
   <merge_tree>
     <!-- Wide internal metric-log rows exceeded the local memory budget during
-         merges and starved Scout inserts. Retain all rows with smaller blocks. -->
+         merges and starved Spekios inserts. Retain all rows with smaller blocks. -->
     <merge_max_block_size>128</merge_max_block_size>
     <merge_max_block_size_bytes>1048576</merge_max_block_size_bytes>
     <!-- Small but very wide metric-log parts also need column-wise merging;
