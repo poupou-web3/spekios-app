@@ -43,10 +43,7 @@ Its only exposed port is loopback 18186. Analytics and recording storage are man
 
 ### Recording and toolbar
 
-Choose **Start recorded visit**, browse a product, pick a size, add it to your
-bag, place the fictional order, and choose **Finish visit**. Recording and event
-capture are opt-in for each visit, including ordinary interaction autocapture
-when toolbar support is enabled. Fictional interactions also emit generic
+Open the demo and browse a product, pick a size, add it to your bag and place the fictional order. Event capture and session recording start automatically on page load; there are no start/finish controls. Page views, ordinary interaction autocapture and session snapshots are sent automatically. A page-hide beacon marks a visit complete when the visitor leaves; PostHog also settles inactive recordings. Fictional interactions also emit generic
 `spekios_action` events based on stable selectors and `spekios_checkpoint`
 observations. No workflow is hand-authored or sent directly to Spekios by the shop.
 Input capture is masked; only the explicitly designated fictional size choice
