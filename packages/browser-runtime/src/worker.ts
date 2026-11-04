@@ -8,17 +8,19 @@ import { AccessHandoff } from './access-handoff.js';
 import { AutomaticReproductionScheduler, type GatewayStatus } from './automatic-reproduction.js';
 import { browserEndpoint, browserSlots } from './browser-sandbox.js';
 import { abandonJob, claimJob, dispatchedCount, jobLock, memberScopes, recoverAbandoned, resumeBudget, runIdList } from './job-queue.js';
+import { enableProcessLog, log } from './log.js';
 
 // Target sites never run beside the credentials and saved logins this worker holds.
 if (!browserEndpoint()) throw new Error('The browser worker needs SCOUT_BROWSER_ENDPOINT so target sites run in the browser sandbox.');
 const slots = browserSlots();
+enableProcessLog();
 const store = await new Store().open();
 const lease = await store.pool.connect();
 const workerId = randomUUID();
 const access = new AccessHandoff(store);
 const shutdown = new AbortController();
 let stopping = false, heartbeat: ReturnType<typeof setInterval> | undefined;
-const stop = () => { stopping = true; shutdown.abort(); };
+const stop = () => { if (!stopping) log('info', 'worker_stopping', { worker_id: workerId }); stopping = true; shutdown.abort(); };
 process.on('SIGTERM', stop);
 process.on('SIGINT', stop);
 
@@ -41,7 +43,13 @@ function navigationClient(settings: Record<string, any>, gateway: GatewayStatus)
 }
 
 async function run(session: Store, job: Record<string, any>, gateway: GatewayStatus) {
-  const key = jobLock(job.job_id);
+  const key = jobLock(job.job_id), started = Date.now();
+  const done = async (fallback: string) => {
+    const row = (await session.query('SELECT status,run_id FROM browser_jobs WHERE job_id=$1', [job.job_id]).catch(() => ({ rows: [] }))).rows[0];
+    const status = row?.status ?? fallback;
+    log(['failed', 'interrupted', 'blocked'].includes(status) ? 'warning' : 'info', 'job_finished', { job_id: job.job_id, run_id: row?.run_id, status, elapsed_ms: Date.now() - started });
+  };
+  log('info', 'job_started', { job_id: job.job_id, kind: job.request?.kind, execution_mode: gateway.executionMode, provider: job.settings?.provider, model: job.settings?.model, worker_id: workerId });
   try {
     await session.withScope({ workspaceId: job.workspace_id, userId: job.user_id, agentId: job.agent_id, projectId: job.project_id, taskId: job.task_id }, async () => {
       if (!await new AutomaticReproductionScheduler(session).beforeDispatch(job, gateway)) return;
@@ -88,9 +96,10 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
         const lifecycle = result.report.run.lifecycle;
         await session.query("UPDATE browser_jobs SET status=CASE WHEN cancel_id IS NOT NULL THEN 'cancelled' ELSE $2 END,run_id=$3,error=$4,finished_at=now() WHERE job_id=$1 AND worker_id=$5 AND status='running'",
           [job.job_id, ['blocked', 'cancelled'].includes(lifecycle) ? lifecycle : lifecycle === 'completed' && !failure ? 'completed' : 'failed', result.run_id, failure, workerId]);
-      } catch {
+      } catch (error) {
         // Detailed execution errors already live on the run. Avoid logging
         // arbitrary target/provider text or credentials to process output.
+        log('error', 'job_execution_failed', { job_id: job.job_id, error_class: error instanceof Error ? error.name : 'unknown' });
         if (stopping) { await abandonJob(session, job.job_id); return; }
         const linked = (await session.query('SELECT run_id FROM browser_jobs WHERE job_id=$1', [job.job_id])).rows[0];
         if (linked.run_id) await session.recover(linked.run_id);
@@ -99,13 +108,14 @@ async function run(session: Store, job: Record<string, any>, gateway: GatewaySta
       }
       try { await session.flush(); } catch { /* The idle pass retries the durable outbox. */ }
     });
-  } finally { await session.unlock(key); }
+  } finally { await done('unknown').catch(() => {}); await session.unlock(key); }
 }
 
 try {
   await access.listen();
   await access.vault.purge();
   await lease.query('INSERT INTO browser_workers(worker_id,workspace_id,status,slots) VALUES($1,$2,\'online\',$3)', [workerId, workspaceId, slots]);
+  log('info', 'worker_started', { worker_id: workerId, slots });
   heartbeat = setInterval(() => {
     void lease.query('UPDATE browser_workers SET heartbeat_at=now() WHERE worker_id=$1', [workerId]).catch(() => stop());
   }, 5000);

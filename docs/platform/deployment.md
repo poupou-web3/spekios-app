@@ -46,7 +46,7 @@ The API has a persistent `gateway-spool` volume for response journals. Provider 
 
 ## Deploy on one machine
 
-`just deploy` starts the customer workspace and its API, the operator console, the browser worker and sandboxes, PostgreSQL, ClickHouse, and the private evidence bucket. It does not start the one-shot recorder or the exploration fixture. Database host ports stay on loopback. The operator console stays on loopback. The workspace bind address defaults to loopback too.
+`just deploy` starts the customer workspace and its API, the operator console, the browser worker and sandboxes, PostgreSQL, ClickHouse, the private evidence bucket, and the log collector with its read-only Docker API proxy ([service logs](./logs.md)). On Linux it sets `SCOUT_DOCKER_GID` to the Docker socket's group so the proxy can read it. It does not start the one-shot recorder or the exploration fixture. Database host ports stay on loopback. The operator console stays on loopback. The workspace bind address defaults to loopback too.
 
 ```sh
 just deploy

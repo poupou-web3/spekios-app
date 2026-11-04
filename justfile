@@ -202,6 +202,10 @@ stop:
 logs:
     docker compose logs --tail=100 api
 
+# Restart the log collector after editing infra/logs/vector.yaml (the back office Logs tab).
+reload-logs:
+    docker compose up -d --force-recreate --wait --wait-timeout 60 log-socket log-collector
+
 build-recorder:
     docker compose build recorder
 

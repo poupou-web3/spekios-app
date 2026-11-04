@@ -1,0 +1,269 @@
+# Ships every scout-qa container's stdout and stderr to ClickHouse (scout.service_logs),
+# where the back office Logs tab reads them. See docs/platform/logs.md.
+#
+# Docker access goes through the log-socket proxy, which only answers the read-only
+# calls this source makes. Lines written while the collector is down are not
+# backfilled; `docker compose logs` still has them.
+data_dir: /var/lib/vector
+
+# Vector does not interpolate environment variables. This backend hands it the
+# ClickHouse password from the environment as SECRET[env.clickhouse_password],
+# refusing anything outside the characters scripts/setup-local.mjs allows.
+secret:
+  env:
+    type: exec
+    timeout: 5
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/dev/null
+        case "$CLICKHOUSE_PASSWORD" in
+          ''|*[!A-Za-z0-9_-]*) printf '{"clickhouse_password":{"value":null,"error":"CLICKHOUSE_PASSWORD must use letters, digits, _ or -"}}' ;;
+          *) printf '{"clickhouse_password":{"value":"%s","error":null}}' "$CLICKHOUSE_PASSWORD" ;;
+        esac
+
+api:
+  enabled: true
+  address: 127.0.0.1:8686
+
+sources:
+  containers:
+    type: docker_logs
+    docker_host: http://log-socket:2375
+    include_labels:
+      - com.docker.compose.project=scout-qa
+    # Indented, blank and closing-bracket lines continue the line above, so a stack
+    # trace or an object dump stays one entry instead of hundreds.
+    multiline:
+      mode: continue_through
+      start_pattern: '^\S'
+      condition_pattern: '^([\s})\]]|$)'
+      timeout_ms: 300
+
+transforms:
+  service_logs:
+    type: remap
+    inputs: [containers]
+    source: |
+      raw = string(.message) ?? ""
+      if strip_whitespace(raw) == "" { abort }
+      raw = truncate(raw, 16384)
+      labels = object(.label) ?? {}
+      service = string(labels."com.docker.compose.service") ?? "unknown"
+      replica = string(.container_name) ?? service
+      replica = replace(replica, r'^/?scout-qa-', "")
+      stream = string(.stream) ?? "stdout"
+      stamp = timestamp(.timestamp) ?? now()
+      ts = format_timestamp!(stamp, format: "%Y-%m-%d %H:%M:%S%.9f", timezone: "UTC")
+      # The same line read twice (Vector re-attaches when a container is
+      # replaced) gets the same ID, so the table and the viewer drop the copy.
+      digest = sha2((string(.container_id) ?? replica) + "\n" + stream + "\n" + ts + "\n" + raw, variant: "SHA-256")
+      log_id = slice!(digest, 0, 8) + "-" + slice!(digest, 8, 12) + "-" + slice!(digest, 12, 16) + "-" + slice!(digest, 16, 20) + "-" + slice!(digest, 20, 32)
+
+      level = ""
+      message = raw
+      fields = {}
+      run_id = ""
+      request_id = ""
+
+      # Scout services print one JSON object per line: {"level":..,"msg":..,...}.
+      parsed, err = parse_json(raw, max_depth: 4)
+      if err == null && is_object(parsed) {
+        fields = object!(parsed)
+        level = downcase(string(fields.level) ?? string(fields.severity) ?? "")
+        message = string(fields.msg) ?? string(fields.message) ?? raw
+        run_id = string(fields.run_id) ?? ""
+        request_id = string(fields.request_id) ?? ""
+        fields = remove!(fields, ["level"])
+        fields = remove!(fields, ["severity"])
+        fields = remove!(fields, ["msg"])
+        fields = remove!(fields, ["message"])
+      }
+
+      # Other images print text. Known formats first, then keywords.
+      if level == "" {
+        access, err = parse_regex(raw, r'^\S+ \S+ \S+ \[[^\]]+\] "(?P<method>[A-Z]+) [^"]*" (?P<status>\d{3}) ')
+        postgres, pg_err = parse_regex(raw, r'^\d{4}-\d\d-\d\d [\d:.]+ \S+ \[\d+\] (?P<level>[A-Z]+)\d?:')
+        glog, glog_err = parse_regex(raw, r'^(?P<level>[IWEF])\d{4} \d\d:\d\d:\d\d')
+        if err == null {
+          status = to_int(access.status) ?? 0
+          level = if status >= 500 { "error" } else if status >= 400 { "warning" } else if includes(["GET", "HEAD"], access.method) { "debug" } else { "info" }
+        } else if pg_err == null {
+          pg = string(postgres.level) ?? ""
+          level = if starts_with(pg, "DEBUG") { "debug" } else if pg == "WARNING" { "warning" } else if includes(["ERROR", "FATAL", "PANIC"], pg) { "error" } else { "info" }
+        } else if glog_err == null {
+          g = string(glog.level) ?? "I"
+          level = if g == "W" { "warning" } else if includes(["E", "F"], g) { "error" } else { "info" }
+        } else if match(raw, r'(?i)\b(panic|panicked|fatal|error|exception|unhandled)\b') {
+          level = "error"
+        } else if match(raw, r'(?i)\bwarn(ing)?\b') {
+          level = "warning"
+        }
+      }
+
+      level = if match(level, r'^(trace|debug)') { "debug" } else if starts_with(level, "warn") { "warning" } else if match(level, r'^(err|fatal|crit|panic|alert|emerg)') { "error" } else { "info" }
+      if !match(run_id, r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { run_id = "" }
+      if !match(request_id, r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { request_id = "" }
+      fields_text = ""
+      if length(fields) > 0 { fields_text = truncate(encode_json(fields), 16384) }
+
+      . = {
+        "log_id": log_id,
+        "ts": ts,
+        "service": service,
+        "replica": replica,
+        "stream": stream,
+        "level": level,
+        "message": truncate(message, 16384),
+        "fields": fields_text,
+        "run_id": run_id,
+        "request_id": request_id
+      }
+
+sinks:
+  clickhouse:
+    type: clickhouse
+    inputs: [service_logs]
+    endpoint: http://clickhouse:8123
+    database: scout
+    table: service_logs
+    skip_unknown_fields: true
+    auth:
+      strategy: basic
+      user: scout
+      password: SECRET[env.clickhouse_password]
+    # One insert at a time keeps ingested_at increasing for the live tail.
+    request:
+      concurrency: 1
+    batch:
+      timeout_secs: 1
+      max_events: 2000
+    buffer:
+      type: memory
+      max_events: 20000
+      when_full: block
+
+tests:
+  - name: scout json lines keep their level, message and identifiers
+    inputs:
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "{\"level\":\"info\",\"msg\":\"model_call_finished\",\"provider\":\"meta\",\"http_status\":200,\"run_id\":\"0b6f4c53-6d3d-4a0e-9a59-3c7f5f0f6a11\",\"request_id\":\"not-a-uuid\"}"
+          .stream = "stdout"
+          .container_name = "/scout-qa-api-1"
+          .label = {"com.docker.compose.service": "api"}
+          .timestamp = t'2026-11-04T10:12:03.123456789Z'
+    outputs:
+      - extract_from: service_logs
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.service, "api")
+              assert_eq!(.replica, "api-1")
+              assert_eq!(.level, "info")
+              assert_eq!(.message, "model_call_finished")
+              assert_eq!(.ts, "2026-11-04 10:12:03.123456789")
+              assert_eq!(.run_id, "0b6f4c53-6d3d-4a0e-9a59-3c7f5f0f6a11")
+              assert_eq!(.request_id, "")
+              f = object!(parse_json!(.fields))
+              assert_eq!(f.provider, "meta")
+              assert_eq!(f.http_status, 200)
+              assert!(!exists(f.level) && !exists(f.msg))
+              assert!(match(string!(.log_id), r'^[0-9a-f-]{36}$'))
+
+  - name: a line read twice keeps its ID and a different line does not
+    inputs:
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "scout-api listening on 0.0.0.0:8080"
+          .stream = "stdout"
+          .container_id = "ac6d516dc588"
+          .container_name = "scout-qa-api-1"
+          .label = {"com.docker.compose.service": "api"}
+          .timestamp = t'2026-11-04T10:35:17.725798043Z'
+    outputs:
+      - extract_from: service_logs
+        conditions:
+          - type: vrl
+            source: |
+              digest = sha2("ac6d516dc588\nstdout\n2026-11-04 10:35:17.725798043\nscout-api listening on 0.0.0.0:8080", variant: "SHA-256")
+              assert_eq!(replace(string!(.log_id), "-", ""), slice!(digest, 0, 32))
+              other = sha2("ac6d516dc588\nstdout\n2026-11-04 10:35:17.725798043\nsomething else", variant: "SHA-256")
+              assert!(slice!(other, 0, 32) != replace(string!(.log_id), "-", ""))
+
+  - name: access log status sets the level and successful reads are debug
+    inputs:
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "172.23.0.1 - - [04/Nov/2026:08:48:06 +0000] \"GET /v1/runs HTTP/1.1\" 200 548 \"-\" \"Mozilla/5.0\" \"-\""
+          .stream = "stdout"
+          .container_name = "scout-qa-backoffice-1"
+          .label = {"com.docker.compose.service": "backoffice"}
+          .timestamp = now()
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "172.23.0.1 - - [04/Nov/2026:08:48:06 +0000] \"POST /v1/admin/demo HTTP/1.1\" 502 0 \"-\" \"Mozilla/5.0\" \"-\""
+          .stream = "stdout"
+          .container_name = "scout-qa-backoffice-1"
+          .label = {"com.docker.compose.service": "backoffice"}
+          .timestamp = now()
+    outputs:
+      - extract_from: service_logs
+        conditions:
+          - type: vrl
+            source: |
+              expected = if contains(string!(.message), "\"POST ") { "error" } else { "debug" }
+              assert_eq!(.level, expected)
+              assert_eq!(.fields, "")
+              assert_eq!(.service, "backoffice")
+
+  - name: postgres, seaweedfs and plain text levels
+    inputs:
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "2026-11-04 09:44:55.809 UTC [26] ERROR:  relation \"missing\" does not exist"
+          .stream = "stderr"
+          .container_name = "scout-qa-postgres-1"
+          .label = {"com.docker.compose.service": "postgres"}
+          .timestamp = now()
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "W1104 09:59:12.465191 masterclient.go:346 slow volume"
+          .stream = "stderr"
+          .container_name = "scout-qa-evidence-1"
+          .label = {"com.docker.compose.service": "evidence"}
+          .timestamp = now()
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "Error: connect ECONNREFUSED 172.23.0.4:5432\n    at TCPConnectWrap.afterConnect"
+          .stream = "stderr"
+          .container_name = "scout-qa-browser-worker-1"
+          .label = {"com.docker.compose.service": "browser-worker"}
+          .timestamp = now()
+    outputs:
+      - extract_from: service_logs
+        conditions:
+          - type: vrl
+            source: |
+              expected = {"postgres": "error", "evidence": "warning", "browser-worker": "error"}
+              assert_eq!(.level, get!(expected, [.service]))
+
+  - name: blank lines are dropped
+    no_outputs_from: [service_logs]
+    inputs:
+      - insert_at: service_logs
+        type: vrl
+        source: |
+          .message = "   "
+          .stream = "stdout"
+          .container_name = "scout-qa-api-1"
+          .label = {"com.docker.compose.service": "api"}
+          .timestamp = now()

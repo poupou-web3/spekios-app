@@ -1,0 +1,23 @@
+# Copy to terraform.tfvars (gitignored) and adjust.
+# Tokens are NOT set here: export HCLOUD_TOKEN and CLOUDFLARE_API_TOKEN instead.
+
+# Your public address(es) for SSH. Find yours with: curl -4 https://ifconfig.me
+# Open to every address: key-only SSH as "deploy"; see README "What is reachable".
+admin_cidrs = ["0.0.0.0/0", "::/0"]
+
+# Who may open https://bo.spekios.com (Cloudflare Access sends a one-time PIN).
+# No list: any email can pass Access; the operator token still guards the console.
+backoffice_allowed_emails = []
+
+# ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+# image               = "debian-13"
+# server_type         = "cx43"   # 8 vCPU / 16 GB; cx53 = 16 vCPU / 32 GB
+# location            = "nbg1"   # nbg1, fsn1 or hel1
+# server_backups      = true
+# cloudflare_zone     = "spekios.com"
+# app_subdomain       = "app"
+# manage_ssl_rule     = true      # false if the zone already has a Configuration Rules ruleset
+
+# CX43 (cost-optimized) is sold out; CPX = AMD "Regular Performance", in stock in Nuremberg.
+server_type = "cpx42"
+location    = "nbg1"
