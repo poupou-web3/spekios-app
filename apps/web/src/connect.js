@@ -9,7 +9,7 @@ const status=$('#connection-status');
 let connectionWebsitePage=null;
 let token=sessionStorage.getItem('scout.workspace-token')||'',development=false,spekios=false,identity=null,busy=false;
 let approvalTarget=null,reviewVersion=0,pendingFragment=false;
-let setupInfo=null,selectedClient='desktop',refreshTimer;
+let setupInfo=null,selectedClient='muse',refreshTimer;
 let initial='',authorizationId=sessionStorage.getItem('scout.pending-authorization')||'';
 function consumeFragment(){
   const fragment=new URLSearchParams(location.hash.slice(1));
@@ -21,7 +21,11 @@ function consumeFragment(){
 consumeFragment();
 const message=value=>{status.textContent=value;};
 const labels={'runs:read':'Read runs, reports and recorded screenshots','runs:write':'Start tests, recheck findings and stop runs','usage:read':'Read workspace token and cost totals'};
+// A step is text, or text with a snippet to paste (built from this workspace's connection URL).
+// Muse Code reads remote MCP servers from its settings file and signs in through the browser (OAuth 2.1).
+const museSettings=url=>JSON.stringify({schema_version:1,mcp_servers:{spekios:{transport:'streamable_http',url}}},null,2);
 const clients={
+  muse:{steps:[url=>({text:'Add Spekios to ~/.config/muse/settings.json. If the file already exists, add the spekios entry under mcp_servers and keep your other settings.',code:museSettings(url||'<Spekios connection URL>')}),'Run muse mcp login spekios. Your browser opens Spekios to approve the connection.','Start muse and run /mcp to check that Spekios and its tools are listed.'],help:'https://dev.meta.ai/docs/muse-code/extending#mcp'},
   desktop:{steps:['Open your agent app’s settings and find MCP servers.','Add a Streamable HTTP server named Spekios and paste the connection URL above.','Save the server, reconnect if needed, then select Authenticate to open Spekios’s approval page.'],help:'https://learn.chatgpt.com/docs/extend/mcp?surface=app'},
   claude:{steps:['In Claude, open Customize → Connectors → Add custom connector.','Name it Spekios and paste the connection URL above. Choose browser sign-in.','If asked for an OAuth client, choose Register automatically. Connect and approve the request in Spekios.'],help:'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp'},
   other:{steps:['Open your agent app’s integrations or MCP settings and add an HTTP server.','Paste the connection URL above. Choose browser authorization / OAuth.','Connect, then review and approve the request in Spekios. The client must support dynamic client registration and PKCE.'],help:'https://modelcontextprotocol.io/docs/learn/client-concepts'}
@@ -59,7 +63,10 @@ async function list(){
 function selectClient(client){
   selectedClient=client;
   for(const key of Object.keys(clients))$('#client-'+key).setAttribute('aria-pressed',String(key===client));
-  $('#client-steps').replaceChildren(...clients[client].steps.map(step=>element('li',step)));
+  $('#client-steps').replaceChildren(...clients[client].steps.map(entry=>{
+    const step=typeof entry==='function'?entry(setupInfo?.mcp_url):entry;if(typeof step==='string')return element('li',step);
+    const item=element('li',step.text),pre=element('pre',undefined,'connection-snippet');pre.append(element('code',step.code));item.append(pre);return item;
+  }));
   $('#client-help').href=clients[client].help;
   const local=setupInfo&&!setupInfo.cloud_reachable;
   $('#network-notice').hidden=!local;
@@ -140,5 +147,5 @@ for(const [id,approve] of [['approve',true],['deny',false]])$('#'+id).addEventLi
     message(approve?'Allowed. Your connector will finish connecting.':'Connection cancelled.');await list();
   }catch(e){if(target===approvalTarget){message(e.message);$('#approve').disabled=false;$('#deny').disabled=false;}}finally{busy=false;if(pendingFragment){pendingFragment=false;await fragmentChanged();}}
 });
-selectClient('desktop');renderPrompt();await loadSetup();
+selectClient('muse');renderPrompt();await loadSetup();
 try{const auth=await (await fetch('/v1/auth-mode',{redirect:'error'})).json();development=auth.mode==='local_development';spekios=auth.mode==='spekios';if(development||spekios)token='';if(token||development||spekios)await ready();else $('#manager-login').hidden=false;}catch(e){message(e.message);$('#manager-login').hidden=false;}

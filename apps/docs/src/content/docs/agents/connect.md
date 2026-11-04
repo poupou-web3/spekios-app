@@ -26,6 +26,21 @@ The workspace page shows **Approved · waiting for first use** until an authenti
 
 ## Choose a client
 
+### Muse Code (Meta)
+
+Muse Code, Meta’s terminal coding agent, reads MCP servers from **~/.config/muse/settings.json**. Add Scout under `mcp_servers` (keep your other settings; the file needs `"schema_version": 1`):
+
+```json
+{
+  "schema_version": 1,
+  "mcp_servers": {
+    "spekios": { "transport": "streamable_http", "url": "https://app.spekios.com/mcp" }
+  }
+}
+```
+
+Use the connection URL from the setup page. Then run `muse mcp login spekios`: your browser opens Scout’s approval page, and Muse Code stores and refreshes the credential. In a `muse` session, `/mcp` lists the connected servers and their tools. Muse Code registers itself automatically (dynamic client registration), which Scout supports. Because Muse Code runs on your computer, it can also connect to a Scout server at **localhost**. See [Meta’s MCP instructions for Muse Code](https://dev.meta.ai/docs/muse-code/extending#mcp).
+
 ### Codex and ChatGPT desktop
 
 Open the app’s **Settings → MCP servers → Add server**, choose **Streamable HTTP**, name it **Scout** and paste the connection URL. Save and restart/reconnect as the app requires, then select **Authenticate**. Codex clients share MCP configuration for the same host. See the [official OpenAI MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=app).
