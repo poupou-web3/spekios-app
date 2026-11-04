@@ -117,6 +117,17 @@ test('a cut-off model plan is explained in the exported report',()=>{
   assert.match(markdown,/000000000070/);
   assert.doesNotMatch(markdown,/inspect its request ID/);
 });
+test('demo interruptions export the saved results and technical reason without claiming completion',()=>{
+  const report=fixture(),requestId=id(70);
+  report.run.lifecycle='failed';report.run.error=`Model request ${requestId} did not complete (demo_token_count_unavailable).`;
+  report.model_requests=[{request_id:requestId,state:'failed',error:'demo_token_count_unavailable',provider:'meta',model:'muse-spark-1.3-contributor'}];
+  report.model_calls=[];
+  const markdown=reportMarkdown(report,options);
+  assert.match(markdown,/Exploration interrupted/);assert.match(markdown,/exploration is incomplete/);
+  assert.match(markdown,/stopped before the model call was sent/);
+  assert.match(markdown,/demo\\_token\\_count\\_unavailable/);
+  assert.match(markdown,/Lifecycle:\*\* failed/,'Export retains the stored operational state.');
+});
 test('zero, unknown and partial usage never invent reported totals or successful coverage',()=>{
   const report=fixture();let summary=reportSummary(report),markdown=reportMarkdown(report,options);assert.equal(summary.usage.attempts,0);assert.equal(summary.usage.inputTokens,null);assert.match(markdown,/No provider attempts are recorded/);assert.match(markdown,/Input tokens \| Unknown/);assert.match(markdown,/Fixture data:\*\* Yes/);
   report.model_usage={attempts:2,known_input_tokens:0,known_output_tokens:9,incomplete_usage_attempts:1,pending_requests:1,provider_reported_cost_usd:'0',unpriced_attempts:1};summary=reportSummary(report);assert.equal(summary.usage.inputTokens,0);assert.equal(summary.usage.totalTokens,9,'Older reports without a total add input and output.');assert.equal(summary.usage.costUsd,'0');assert.equal(summary.usage.tokensComplete,false);markdown=reportMarkdown(report,options);assert.match(markdown,/At least 0/);assert.match(markdown,/Total tokens \| At least 9/);report.model_usage.known_total_tokens=9;assert.equal(reportSummary(report).usage.totalTokens,9);assert.match(markdown,/known subtotal/);

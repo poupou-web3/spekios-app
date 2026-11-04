@@ -41,6 +41,7 @@ type GResult<T> = Result<T, &'static str>;
 const MAX_RESPONSE: usize = 2 * 1024 * 1024;
 const MAX_IMAGE: u64 = 4 * 1024 * 1024;
 const LOCK_ID: i64 = 736_268_194_001;
+mod token_count;
 pub fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -759,7 +760,7 @@ impl Gateway {
                     return Ok(true);
                 }
             }
-            match self.count_demo_input(&key, &bytes).await {
+            match token_count::count(&self.http, spec.request_id, &key, &bytes).await {
                 Ok(tokens) => tokens,
                 Err(code) => {
                     self.fail_before_dispatch(spec.request_id, code).await?;
@@ -1090,41 +1091,6 @@ impl Gateway {
             .filter(|line| !line.is_empty())
             .map(|line| serde_json::from_str(line).map_err(|_| "clickhouse_unexpected_response"))
             .collect()
-    }
-
-    async fn count_demo_input(&self, key: &str, body: &[u8]) -> GResult<i64> {
-        // Meta's non-generating count endpoint accepts the same Responses body,
-        // including media, instructions, reasoning and server prompt scaffolding.
-        let mut response = self
-            .http
-            .post("https://api.meta.ai/v1/responses/input_tokens")
-            .bearer_auth(key)
-            .header("content-type", "application/json")
-            .body(body.to_vec())
-            .timeout(Duration::from_secs(10))
-            .send()
-            .await
-            .map_err(|_| "demo_token_count_unavailable")?;
-        if !response.status().is_success() {
-            return Err("demo_token_count_unavailable");
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| "demo_token_count_unavailable")?
-        {
-            if bytes.len() + chunk.len() > 16_384 {
-                return Err("demo_token_count_unavailable");
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        let value: Value =
-            serde_json::from_slice(&bytes).map_err(|_| "demo_token_count_unavailable")?;
-        value["input_tokens"]
-            .as_i64()
-            .filter(|n| (0..=1_048_576).contains(n))
-            .ok_or("demo_token_count_unavailable")
     }
 
     async fn settle(&self, result: &CallResult) -> GResult<()> {

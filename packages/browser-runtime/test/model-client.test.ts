@@ -40,3 +40,19 @@ test('demo exhaustion explains personal key setup and never changes the funding 
     assert(requests.every(r=>r.provider_key_id==='demo'&&r.model==='muse-spark-1.3-contributor'));
   }finally{await new Promise<void>(r=>server.close(()=>r()));}
 });
+
+test('a demo request stays with one logical request while preparation is retried',async()=>{
+  let submissions=0,polls=0;
+  const server=createServer(async(req,res)=>{
+    res.setHeader('content-type','application/json');
+    if(req.method==='POST'){submissions++;for await(const _ of req){}res.writeHead(202);res.end('{}');return;}
+    polls++;
+    res.end(JSON.stringify(polls<3?{request:{state:'preparing'},calls:[]}:{request:{state:'completed'},calls:[{call_id:randomUUID(),output_text:'{"ok":true}'}]}));
+  });
+  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address();assert(address&&typeof address!=='string');
+  try{
+    const client=new ModelClient({provider:'meta',model:'muse-spark-1.3-contributor',freeOnly:false,providerKeyId:'demo'},`http://127.0.0.1:${address.port}`,'disposable-test-operator-credential-0123456789');
+    assert.deepEqual((await client.complete(randomUUID(),randomUUID(),null,[],'System',{})).value,{ok:true});
+    assert.equal(submissions,1);assert.equal(polls,3);
+  }finally{await new Promise<void>(r=>server.close(()=>r()));}
+});

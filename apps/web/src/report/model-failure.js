@@ -24,6 +24,13 @@ export function modelRequestFailure(report) {
   const code = typeof failed.error === 'string' && failed.error ? failed.error : typeof call?.error === 'string' && call.error ? call.error : failed.state;
   const provider = PROVIDERS[failed.provider] || (typeof failed.provider === 'string' ? failed.provider : '');
   const model = provider && typeof failed.model === 'string' && failed.model ? `${provider} (${failed.model})` : provider || (typeof failed.model === 'string' ? failed.model : '');
+  if(code==='demo_token_count_unavailable')return {
+    title:'Exploration interrupted',
+    detail:'Demo AI is temporarily unavailable. Recorded actions and findings are saved; the exploration is incomplete.',
+    technicalDetail:`${purpose}${model?` with ${model}`:''} stopped before the model call was sent because its token-count check was unavailable (${code}).`,
+    recoverable:true,
+    requestId:failed.request_id,
+  };
   const output = Number(call?.output_tokens);
   const reasoning = Number(call?.reasoning_tokens);
   const cutOff = code === 'incomplete_or_unsupported_output' && Number.isFinite(output) && output > 0 && Number.isFinite(reasoning) && reasoning > 0 && reasoning * 2 >= output;
@@ -33,7 +40,11 @@ export function modelRequestFailure(report) {
     ? `stopped because the answer was incomplete (${code}). Reasoning used ${count(reasoning)} of ${count(output)} output tokens, so the visible JSON was cut off before it finished.`
     : code === 'incomplete_or_unsupported_output'
       ? `stopped because the provider returned an incomplete answer (${code}).`
-      : `failed (${code}).`;
+      : code === 'demo_token_count_rejected'
+        ? 'stopped because the demo service rejected its usage check. An administrator needs to check the provider configuration.'
+        : code === 'demo_token_count_invalid'
+          ? 'stopped because the demo service returned an invalid usage count. An administrator needs to check the provider response.'
+          : `failed (${code}).`;
   return {
     title,
     detail: `${where} ${cause} Actions already recorded stay as they are.`,
