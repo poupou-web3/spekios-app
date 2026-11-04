@@ -13,7 +13,7 @@ function setup({identity={principal_kind:'workspace_manager',workspace_id:'works
     return await intercept?.(path,options,body)??{ok:true,status:200,json:async()=>body};
   }};
   vm.createContext(context);
-  const source=appSource('connect.js').split("\nselectClient('desktop');renderPrompt();await loadSetup();")[0];
+  const source=appSource('connect.js').split("\nselectClient('muse');renderPrompt();await loadSetup();")[0];
   vm.runInContext(source+'\nglobalThis.testing={ready,list,loadSetup,selectClient,renderPrompt,prompt};',context);
   return {nodes,get,requests,copied,navigations,events,storage,location:context.location,ui:context.testing,replaced:()=>replaced};
 }
@@ -69,7 +69,12 @@ test('user setup copies a public URL without credentials or checkout commands',a
   assert.deepEqual(ui.copied,['http://127.0.0.1:18080/mcp']);
   const html=readFileSync(new URL('../connect.html',import.meta.url),'utf8');
   assert.doesNotMatch(html,/just mcp|target\/release|SCOUT_API_TOKEN/);
-  assert.equal(ui.get('#client-desktop').attributes['aria-pressed'],'true');
+  assert.equal(ui.get('#client-muse').attributes['aria-pressed'],'true','Muse Code (Meta) is listed first and selected.');
+  assert.equal(ui.get('#client-desktop').attributes['aria-pressed'],'false');
+  const first=ui.get('#client-steps').children[0];
+  assert.deepEqual(JSON.parse(first.children[0].children[0].textContent),{schema_version:1,mcp_servers:{spekios:{transport:'streamable_http',url:'http://127.0.0.1:18080/mcp'}}},'The settings snippet uses this workspace’s connection URL.');
+  assert.match(ui.get('#client-steps').children[1].textContent,/muse mcp login spekios/);
+  assert.ok(html.indexOf('id="client-muse"')<html.indexOf('id="client-desktop"'));
 });
 test('cloud connectors are told when a local server is unreachable',async()=>{
   const ui=setup();await ui.ui.loadSetup();ui.ui.selectClient('claude');
