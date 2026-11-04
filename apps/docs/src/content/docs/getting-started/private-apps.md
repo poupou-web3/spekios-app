@@ -2,7 +2,7 @@
 {
   "title": "Sign in to a private app",
   "description": "Use Spekios’s human-only login handoff and optional encrypted saved sessions without recording passwords or private login frames as QA evidence.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 4
   }
@@ -15,14 +15,14 @@ Use the workspace’s private login handoff when an app requires an account. A p
 | Mode | Behavior |
 | --- | --- |
 | Ask when sign-in is detected | Offer private login when a recognized sign-in option or login gate appears. |
-| Sign in before exploration | Ask for a human handoff before automated exploration. Useful when detection is insufficient. |
+| Sign in before testing | Ask for a human handoff before automated exploration. Useful when detection is insufficient. |
 | Public pages only | Continue without a saved session; a required login remains blocked. |
 
-A saved session can be explicitly selected for the matching app origin and execution mode. Public mode cannot use one.
+Choose the mode under **Sign-in** in the launch options (**Change** under the URL field). A saved session can be selected there for the matching app origin and execution mode. Public mode cannot use one.
 
 ## Complete the private handoff
 
-1. Choose **Open private login**.
+1. Open **Activity** and choose **Open private login** on the sign-in request.
 2. Use the displayed browser frame and human controls to click fields, enter text, navigate native fields or supply a verification code.
 3. Finish signing in.
 4. Choose **I’m signed in · continue testing**.
@@ -50,7 +50,7 @@ Normal screenshots resume after login and can contain app-displayed personal dat
 
 Saved cookies, local storage and supported IndexedDB state are encrypted in a separate local vault. Session reuse ends after 24 hours, revocation or earlier app-side expiry.
 
-Remove saved sessions from the workspace under **Settings → Saved app sessions**. Revocation prevents future loading; a browser that already loaded a session may remain signed in until it closes.
+Remove saved sessions from the workspace under **Settings → Memory & sessions → Saved app sessions**. Revocation prevents future loading; a browser that already loaded a session may remain signed in until it closes.
 
 The worker pauses during the handoff. Requests expire after ten minutes, with at most three handoffs per run. Interruption does not replay private human inputs.
 

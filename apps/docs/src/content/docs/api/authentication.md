@@ -2,11 +2,11 @@
 {
   "title": "Authentication and access scope",
   "description": "Authenticate Spekios REST and MCP with workspace-bound agent credentials, understand manager and operator access, and protect local connection secrets.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 2}
 }
 ---
-Protected REST and MCP requests use **Authorization: Bearer** with an issued credential. OAuth credentials are restricted to **/mcp**; native connector credentials can use the REST API. [Browser pairing](../../agents/connect/) connects a local agent without sharing the operator token. **GET /v1/identity** returns its workspace, identity and permissions without exposing its secret.
+Protected REST and MCP requests use **Authorization: Bearer** with an issued credential; the web workspace can also use a signed-in browser session for REST. OAuth credentials are restricted to **/mcp**; native connector credentials can use the REST API. [Browser pairing](../../agents/connect/) connects a local agent without sharing the operator token. **GET /v1/identity** returns its workspace, identity and permissions without exposing its secret.
 
 ## Browser OAuth for MCP clients
 
@@ -41,9 +41,11 @@ Agents receive a subset of **runs:read**, **runs:write** and **usage:read**. Wor
 
 A workspace manager reviews **GET /v1/agent-connections/{code}** and explicitly approves or denies through **POST /v1/agent-connections/{code}/decision**. **POST /v1/agent-connections/token** exchanges the device code and verifier after approval. Pending polls use HTTP 202, excessive polling 429, denied requests 403, and consumed grants 409. A token is returned once; an uncertain final exchange needs a new pairing. This native pairing protocol is separate from the standard MCP OAuth endpoints above.
 
-## Managers and the trusted local operator
+## People, managers and the operator
 
-Managers approve/revoke agents and use the human workspace. The operator can provision a private workspace with **POST /v1/workspaces**, receiving its manager credential once. Human signup, membership invitations, account recovery and subscription payments remain future work.
+People manage their workspace in the browser. When a server is configured for Spekios account sign-in (as the hosted app is), **/login** hands off to the Spekios account service and returns with a host-only, HTTP-only session cookie that lasts twelve hours. The signed-in account owner is the manager of their workspace: they approve and revoke agents, change settings and review findings. Workspace membership invitations are not supported.
+
+On a self-hosted server, the operator can also provision a private workspace with **POST /v1/workspaces**, receiving its thirty-day manager credential once.
 
 The existing **SCOUT_API_TOKEN** from the ignored checkout environment remains privileged operator/worker access. It is not an ordinary agent credential. Provider keys belong only in the server environment.
 
@@ -51,6 +53,6 @@ The existing **SCOUT_API_TOKEN** from the ignored checkout environment remains p
 
 **SCOUT_DEV_AUTH_BYPASS=true** explicitly opens the local developer GUI and ordinary protected routes only for accepted loopback/same-origin requests. It is off in source defaults. A bad presented credential is never replaced by bypass access. MCP always requires an explicit credential.
 
-**GET /healthz** reports process health. **GET /v1/auth-mode** tells the local GUI whether sign-in is needed. In bearer-token mode the workspace asks for an email and password. **POST /v1/workspace-login** accepts email `admin` and the **SCOUT_API_TOKEN** value as the password; the browser then keeps that password as its bearer credential for the tab. The response contains no secret. **GET /readyz** is protected. Public pairing endpoints issue no access before manager approval. No CORS access is enabled.
+**GET /healthz** reports process health. **GET /v1/auth-mode** tells the GUI which sign-in applies: **spekios** (account sign-in), **local_development** (bypass) or **bearer_token**. In bearer-token mode the workspace asks for an email and password. **POST /v1/workspace-login** accepts email `admin` and the **SCOUT_API_TOKEN** value as the password; the browser then keeps that password as its bearer credential for the tab. The response contains no secret. **GET /readyz** is protected. Public pairing endpoints issue no access before manager approval. No CORS access is enabled.
 
-For remote browser approval behind TLS, configure **SCOUT_PUBLIC_ORIGIN** as the exact HTTPS origin and preserve Host at the reverse proxy. Forwarded headers do not add trusted origins; this setting disables the anonymous development bypass. The Compose deployment binds the API to loopback. Workspace isolation is an application access boundary; TLS, human identity, restricted network egress, browser sandboxing and resource isolation still need a reviewed deployment before exposing shared hosting publicly.
+For remote browser approval behind TLS, configure **SCOUT_PUBLIC_ORIGIN** as the exact HTTPS origin and preserve Host at the reverse proxy. Forwarded headers do not add trusted origins. A public origin or Spekios account sign-in disables the anonymous development bypass. The Compose deployment binds the API to loopback. Workspace isolation is an application access boundary; TLS, human identity, restricted network egress, browser sandboxing and resource isolation still need a reviewed deployment before exposing shared hosting publicly.

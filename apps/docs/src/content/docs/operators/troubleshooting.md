@@ -2,7 +2,7 @@
 {
   "title": "Troubleshoot a local run",
   "description": "Diagnose Spekios startup, target connectivity, provider availability, sign-in blockers, report conflicts, evidence failures and interrupted work.",
-  "reviewed": "2026-10-30",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 4
   }
@@ -23,23 +23,27 @@ The workspace is served at **http://127.0.0.1:18080**. Confirm token mode and lo
 
 ## The API is healthy but exploration will not start
 
-Check provider availability, selected model, the target’s exact allowed origin and queue capacity. Model configuration is separate from process health.
+Check provider availability, the selected model and API key, demo credit and queue capacity. The line under the URL field names what is missing. Model configuration is separate from process health.
 
 A missing provider or full queue can reject admission before a run exists. Read the job/progress response rather than looking only at recent runs.
 
 ## The browser cannot open my host app
 
-The browser runs inside Docker, in the browser sandbox container. **localhost** refers to that container. Use a hostname reachable from Docker, such as **host.docker.internal**, make sure the app is listening on the intended interface and allow that exact scheme/host/port.
+The browser runs inside Docker, in the browser sandbox container, where **localhost** is that container. Spekios rewrites a loopback URL to **host.docker.internal**, which Docker Desktop provides; on other hosts, make sure that name resolves for containers. Make sure the app listens on an interface the container can reach, not only 127.0.0.1.
 
-Do not loosen the allowlist to arbitrary targets to solve a hostname mismatch.
+If the page loads but its API calls fail, the app probably calls another local or private origin. Add that exact origin to **SCOUT_ALLOWED_ORIGINS** and restart the services.
 
 ## Runs fail with “The browser sandbox is unavailable”
 
 Check **docker compose ps browser-sandbox** and its logs. The worker waits up to 90 seconds for the sandbox, which restarts after every run. If Chromium cannot start its own sandbox on your host, some Linux hosts restrict unprivileged user namespaces. Set **SCOUT_CHROMIUM_SANDBOX=false** in the private .env and run **docker compose up -d browser-sandbox**. The container isolation still applies.
 
+## The back office returns 502
+
+After recreating only the **api** container, restart the back office with **docker compose restart backoffice**. Its proxy resolves the API address once at startup.
+
 ## The run is waiting for a person
 
-Open the workspace’s private login handoff or choose public-only when offered. Unsupported external OAuth can remain blocked. Agent tools expose blocker metadata, not private control frames.
+Open **Activity** in the workspace and choose **Open private login**, or **Skip sign-in for this run**. Unsupported external OAuth can remain blocked. Agent tools expose blocker metadata, not private control frames.
 
 ## The report changed during pagination
 
@@ -55,6 +59,6 @@ Inspect **execution_issues**. Manifest publication or event delivery can fail af
 
 ## The process restarted
 
-Recorded work remains inspectable. Interrupted actions and private inputs are not automatically replayed. Start fresh work intentionally with a new job UUID after checking the target state.
+Recorded work remains inspectable and the job is marked interrupted. Interrupted actions and private inputs are not automatically replayed. After checking the target state, choose **Continue exploration** or **Run again**, or submit a new job UUID from an agent.
 
 For deterministic integration checks, the repository provides **just agent-test**, **just explorer-test** and related fixture suites. These use simulated providers; some restart local services. Avoid running them over active work.

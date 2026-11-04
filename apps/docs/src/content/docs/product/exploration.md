@@ -2,7 +2,7 @@
 {
   "title": "How exploration chooses a path",
   "description": "Understand likely-action ranking, changed-control discovery, the recorded state graph and automatic returns to unexplored branches.",
-  "reviewed": "2026-10-30",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 3
   }
@@ -28,11 +28,11 @@ Before dispatch, a fresh observation must match the planning state. The worker r
 
 The frontier records reachable actions that have not yet been explored. Spekios can follow a recorded return route or reopen the entry URL, assess those return actions and continue from a different branch.
 
-Returning consumes the same action budget. It does not restore server-side app data. An authentication-context change discards old return plans and starts from the entry URL in the new context.
+Return steps count toward an action limit. They do not restore server-side app data. An authentication-context change discards old return plans and starts from the entry URL in the new context.
 
 ## Share the run between breadth, depth and re-walks
 
-Each run [shares its actions](../../guides/exploration-strategy/) between new territory spread across the app's areas, deep journeys that follow one path while it reaches new screens, and re-walking paths earlier runs recorded to compare where they lead now. The default split is 50/30/20 and adapts to what each strategy finds. The **Flow** tab shows depth reached and coverage at each level.
+Each run [shares its actions](../../guides/exploration-strategy/) between new territory spread across the app's areas, deep journeys that follow one path while it reaches new screens, and re-walking paths earlier runs recorded to compare where they lead now. The default split is 50/30/20 and adapts to what each strategy finds. The **Flow map** tab shows depth reached and coverage at each level.
 
 ## Learn from earlier runs
 
@@ -46,6 +46,6 @@ A zero-pixel difference still receives a check. One changed pixel is retained. N
 
 ## Coverage limits
 
-Explorations have no action, time, token or cost limit by default; each user can [set limits](../../guides/exploration-limits/), with overrides per project or model. A run stops when nothing reachable is left to try, after 50 consecutive actions that find nothing new, or at a configured limit. Every state and transition goes into the [app map](../../guides/app-memory/#the-app-map), which later runs continue from. Up to 120 controls per page are observed, and model inputs are bounded. Unsupported widgets, access boundaries, continuously changing pages and exhausted budgets leave explicit coverage gaps.
+Explorations have no action, time, token or cost limit by default; each user can [set limits](../../guides/exploration-limits/), with overrides per project or model. A run stops when nothing reachable is left to try, after 50 consecutive actions that find nothing new (configurable), or at a configured limit. Every state and transition goes into the [app map](../../guides/app-memory/#the-app-map), which later runs continue from. Up to 120 controls per page are observed, and model inputs are bounded. Unsupported widgets, access boundaries, continuously changing pages and reached limits leave explicit coverage gaps.
 
 [Responsive coverage](../../guides/responsive/) uses separate desktop, tablet and mobile Chromium runs. It does not imply native-device or complete-app coverage.

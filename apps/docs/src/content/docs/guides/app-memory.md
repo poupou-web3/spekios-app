@@ -2,16 +2,16 @@
 {
   "title": "Explore deeper across runs",
   "description": "How Spekios remembers which pages and controls earlier runs explored, skips repeats, reopens unfinished pages and lets you forget an app's memory.",
-  "reviewed": "2026-10-31",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 6}
 }
 ---
-Each exploration has a bounded action budget. With **app memory** on, the next run of the same app continues from what earlier runs learned. It doesn't repeat the same opening journey.
+With **app memory** on, the next run of the same app continues from what earlier runs learned. It doesn't repeat the same opening journey.
 
 ## What a later run does differently
 
 - **Skips what was already tried.** Controls that earlier runs clicked, filled or selected rank lower. Controls that appear on a known page for the first time rank higher, so new or changed UI is explored early.
-- **Reopens unfinished pages.** A page that an earlier run reached but did not finish can be opened directly, as one navigation, instead of replaying the clicks that led there. The Flow tab shows this as **Reopening a page from earlier runs**, and the action timeline as **Open remembered page**.
+- **Reopens unfinished pages.** A page that an earlier run reached but did not finish can be opened directly, as one navigation, instead of replaying the clicks that led there. The **Flow map** tab shows this as **Reopening a page from earlier runs**, and the action timeline as **Open remembered page**.
 - **Tells the model what happened before.** The planning request lists earlier attempts on the current page and their last results. They are marked as untrusted hints. They never decide whether behavior is correct.
 
 Every action still has a fresh prediction, before and after screenshots and an assessment. Memory only changes which action is chosen next.
@@ -36,7 +36,7 @@ Memory also keeps a map of the app, carried between runs: every screen state an 
 
 The map is updated after every action. For each state it records how deep it is from the entry page, how many runs reached it, each transition with its verdicts, and the controls no run has tried there yet.
 
-- **Settings → App memory** shows each app's map size and depth.
+- **Settings → Memory & sessions** shows each remembered app's map size and depth.
 - **GET /v1/app-memory/{scope_id}/map** and **scout_get_app_map** return the states by depth with their transitions and untried controls.
 - **GET /v1/runs/{run_id}/map-diff** and **scout_compare_run** compare a run with the earlier runs of the same app. You get the states and transitions seen for the first time, and the states the previous run reached but this one did not. It also lists controls that now lead somewhere else, and verdicts that changed on the same transition: a **regression** is a transition that had no issue before and is suspect now.
 
@@ -56,7 +56,7 @@ The run heading shows which applies: **Fresh exploration**, **First remembered r
 
 ## Forget an app
 
-**Settings → App memory** lists each remembered app, screen size and sign-in state. It shows the number of runs, pages, and tried and untried controls. **Forget** deletes that memory only. Recorded runs, screenshots, findings and issues stay.
+**Settings → Memory & sessions** lists each remembered app, screen size and sign-in state. It shows the number of runs, pages, and tried and untried controls. **Forget** deletes that memory only. Recorded runs, screenshots, findings and issues stay.
 
 A memory that a running test is still using can't be forgotten until the run ends.
 

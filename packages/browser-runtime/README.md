@@ -1,80 +1,56 @@
-# Recorded browser actions
+# Browser runtime
 
-Three entry points share the evidence recorder: `demo` runs deterministic `fixture_defined` cases; `explore URL` connects the Rust model gateway to bounded planning, predictions and assessments; `reproduce ACTION_UUID` replays a suspect explorer action's path in a fresh browser with separate evidence. All persist real Chromium evidence in the Compose stack. See [URL exploration](../../docs/exploration/overview.md) and [reproduction](../../docs/exploration/reproduction.md) for configuration, verification and limits. The sections below describe the deterministic recorder baseline.
+The TypeScript/Playwright side of Spekios: everything that drives a real Chromium against a target site and records evidence. One package and one image (`infra/recorder/Dockerfile`, `scout-qa-recorder:local`) provide several Compose services:
 
-The explorer now uses [frontier planning](../../docs/exploration/planner.md) to rank known paths, prioritize changed clickable controls, return to branches and replan stale screens. `explore-matrix URL` runs the three responsive viewport profiles at once, one browser slot each, with separate evidence and usage. These capabilities extend the explorer; the fixed recorder demo below is unchanged.
+| Entry point | Compose service | Role |
+| --- | --- | --- |
+| `src/worker.ts` | `browser-worker` | Claims browser jobs (explore, reproduce, verify fix) from PostgreSQL, runs up to `SCOUT_BROWSER_SLOTS` at once, holds saved sign-in sessions |
+| `src/browser-server.ts` | `browser-sandbox` (replicas = slots) | Runs Chromium for target sites with no Spekios credentials, volumes or storage network; one run per container, then restarts |
+| `src/posthog-worker.ts` | `posthog-worker` | Imports PostHog recordings and turns them into browser workflows |
+| `src/cli.ts` | `recorder` (`runtime` profile, one-shot) | Commands below |
+| `src/fixture-cli.ts` | `exploration-fixture` | A controlled test app on port 8082 |
 
-## Run locally
+How it connects: the worker reads and writes PostgreSQL directly (job queue, runs, actions, events, outboxes), writes screenshots and derivatives to the S3-compatible `qa-evidence` bucket, exports events to ClickHouse from a durable outbox, and sends every model request through the API's gateway (`SCOUT_API_URL`, `/v1/model-requests`). It drives Chromium in `browser-sandbox` over `SCOUT_BROWSER_ENDPOINT` and refuses to start without it. Screenshot comparison uses [`packages/image-diff`](../image-diff/README.md).
 
-From the repository root, with Docker and Node.js 22 or newer:
+Main modules: `explorer.ts` (exploration loop), `frontier-planner.ts` and `exploration-strategy.ts` (what to try next), `interaction-contract.ts` / `browser-interactions.ts` (typed actions), `recorder.ts` and `store.ts` (evidence and persistence), `reproduction.ts`, `automatic-reproduction.ts`, `fix-verification.ts`, `access-*.ts` and `auth-session.ts` (private sign-in), `app-memory.ts`, `steering.ts`, `computer-use.ts`.
+
+## Commands
+
+From the repository root, with the stack up (`just up`):
 
 ```sh
-bash scripts/start-local.sh
-docker compose build recorder
-docker compose run --rm --no-deps recorder demo
+just build-recorder          # build the image
+just demo                    # three fixed fixture flows: working, broken and one-pixel change
+just explore URL             # one exploration
+just explore-matrix URL      # desktop, tablet and mobile at once
+just reproduce ACTION_ID     # replay a suspect action in a fresh browser
+just recover RUN_ID          # retry interrupted uploads and republish the manifest
+just flush                   # export pending events to ClickHouse
+docker compose run --rm --no-deps recorder show RUN_ID
+docker compose run -T --rm --no-deps recorder capture CAPTURE_ID > new-file.png
 ```
 
-The demo runs three separate flows: a working Save button, a broken Save button, and a one-pixel change. It prints run/action/prediction/capture IDs, the changed-pixel count, each assessment, and a private bucket manifest key. It exits unsuccessfully if execution, manifest storage, or telemetry export fails. A completed run can contain a `suspect` assessment: execution completion and product correctness are separate facts.
+The workspace and API normally queue explorations for `browser-worker` instead; the `recorder` commands are for development. `explore` and `reproduce` use the model configured by `SCOUT_EXPLORER_*` and allowed origins from `SCOUT_ALLOWED_ORIGINS`.
 
-The `recorder` service is a one-shot container behind the `runtime` Compose profile. Ordinary stack startup runs the Rust API and three storage services. Each recorder uses one Chromium instance, up to ten actions, an 800×600 viewport, and device scale 1. Its container has a 1 GiB memory limit, two CPUs, a read-only root filesystem, temporary browser storage, and a persistent evidence spool. The first image download includes the browsers and can take several minutes.
+## Evidence
 
-## What an action records
-
-1. A unique action ID and prediction ID, with the expected result committed before dispatch.
-2. A unique before-capture ID, original lossless PNG, and page observation.
-3. Dispatch state and bounded tool error, when present.
-4. A unique after-capture ID, PNG, and observation, including after a tool timeout when the page remains available.
-5. An exact pixel mask, absolute channel delta, comparison ID, and derivative artifact references.
-6. An assessment with expected and observed values: `no_issue_observed`, `suspect`, or `inconclusive`.
-
-A one-value change in one channel of one pixel survives the comparison. An empty difference mask still receives an assessment; a broken button is not passed because nothing changed. These deterministic checks only evaluate the specific frozen fixture expectation. They do not certify that a page has no other bugs. All assessments have `confirmed_bug: false`; the fresh-browser reproduction command applies to model-driven explorer suspects and still requires review.
-
-Screenshots and DOM observations are sampled sequentially, not atomically. Separate timestamps record that boundary. Page text is a bounded 8,000-character preview with an explicit truncation flag. An observation failure preserves any successfully captured image and prevents a passing assessment. Before-capture failure prevents dispatch; after-capture failure stops further actions and records an evidence gap.
-
-Video recording is disabled. This increment records viewport screenshots and action evidence; complete network/console traces, full DOM snapshots, streaming replay, and continuous intermediate frames remain later work.
-
-## Evidence, IDs, and recovery
-
-Every capture occurrence has its own UUID, even when its PNG is identical to another capture. SHA256-addressed blobs deduplicate identical encoded bytes within the local workspace. Capture records include run/action/phase relationships, observation timestamps, checksums, and `training_status: excluded_fixture`. Fixture records and the supplied design references are excluded from future training exports by default.
-
-Private bucket `qa-evidence`:
+Every action records a prediction before dispatch, before and after screenshots (lossless PNG) with page observations, a pixel comparison and an assessment (`no_issue_observed`, `suspect` or `inconclusive`). Nothing is marked a confirmed bug automatically. Bucket layout:
 
 ```text
 workspace/<workspace_id>/captures/<capture_id>.json
 workspace/<workspace_id>/blobs/sha256/<sha256>.png
-workspace/<workspace_id>/blobs/sha256/<sha256>.json
 ```
 
-Uploads use conditional creation and verified readback. The run manifest contains ordered actions, predictions, assessments, capture records, events, derivative references, and any exploration graph/model-call lineage. PostgreSQL owns execution state and the upload journal; ClickHouse receives ordered events from a durable outbox in batches of at most 100. Query `scout.runtime_events_current` for logical event counts, since raw deliveries can repeat. Fixture demos without model requests report `not_connected`; explorer manifests include token totals, missing usage, pending requests and payload references.
+Bytes are spooled locally (`recorder-spool` volume) before upload so `recover` can finish interrupted uploads; interrupted actions are recorded as unknown outcomes and never repeated. The spool and bucket have no automatic expiry yet. In ClickHouse, query `scout.runtime_events_current` for logical event counts, since raw deliveries can repeat. Details: [browser runtime](../../docs/runtime/browser.md), [evidence](../../docs/runtime/evidence.md), [exploration](../../docs/exploration/overview.md), [planner](../../docs/exploration/planner.md), [reproduction](../../docs/exploration/reproduction.md).
 
-Inspect a run, retrieve an image by capture ID, or retry interrupted evidence/export work:
+Navigation stays on the entry site (its registered domain and subdomains). Private, loopback and link-local hosts are blocked unless listed in `SCOUT_ALLOWED_ORIGINS`. Popups, dialogs and downloads are outside the supported action contract.
+
+## Test
 
 ```sh
-docker compose run --rm --no-deps recorder show <run-uuid>
-docker compose run -T --rm --no-deps recorder capture <capture-uuid> > /tmp/capture.png
-docker compose run --rm --no-deps recorder recover <run-uuid>
-docker compose run --rm --no-deps recorder flush
+just runtime-test   # tsc --noEmit, then the tsx test suite in the recorder container
 ```
 
-Replace the angle-bracket placeholders with IDs printed by the demo. Use a fresh destination when redirecting an image; shell redirection can overwrite an existing file. Capture retrieval checks ownership, availability, size, and hash before emitting PNG bytes.
+Tests use real Chromium, PostgreSQL, the bucket and ClickHouse with simulated model providers; they need the stack running and keep their fixture evidence. Focused suites run through `scripts/test-explorer.sh`, for example `just explorer-test`, `just outcomes-test`, `just access-test` and `just steering-test`.
 
-The `scout-qa_recorder-spool` volume retains durable capture/derivative bytes and capture metadata for upload recovery. Each run holds its own Postgres advisory lock, so recovery waits until that run's connection is gone. Several runs can execute at once, up to `SCOUT_BROWSER_SLOTS`. Interrupted dispatched actions are marked as unknown outcomes and never automatically repeated. Interrupted jobs stay interrupted after a worker or server restart, even if no browser action was dispatched. Starting another run requires an explicit Continue exploration or Run again request. Recovery retries immutable uploads and republishes the manifest; it cannot manufacture a missing screenshot or convert an interrupted action into a successful assessment. Pending export acknowledgments survive a ClickHouse outage. The spool and bucket currently have no automatic expiry or garbage collection.
-
-## Verification
-
-```sh
-docker compose run --rm --no-deps --entrypoint npm recorder run check
-docker compose run --rm --no-deps --entrypoint npm recorder test
-```
-
-Integration tests use the real browser, PostgreSQL, bucket, and ClickHouse. They exercise working, broken, one-pixel, timeout, missing-capture, and failed-observation flows; byte-verified capture-ID retrieval; upload recovery; and replay without inflated logical event counts. The interruption test seeds a dispatched action in PostgreSQL and verifies recovery behavior; it is not a process-kill durability test. Tests retain their evidence with the fixture exclusion label.
-
-Verified on 21 October 2026: all 12 tests passed. The [saved demo](../../artifacts/runtime-demo/results.json) records a working button with 361 changed pixels, a broken button with zero changes and a suspect assessment, and a one-pixel change with channel delta 1. These are fixture results, not a model-quality benchmark.
-
-## Next boundary
-
-This is a single-user development harness with fixed local workspace/user IDs, not an authenticated API. The browser may load the entry origin plus public HTTPS subresources and public secure websockets, including sibling APIs, fonts and hosted backends. Top-level navigation stays on the entry site: the registered domain and its subdomains, so `v2.bubblemaps.io` and `intel.bubblemaps.io` are part of a `bubblemaps.io` run. Hosts that only share a public suffix, such as `github.io` or `co.uk`, stay separate. Private, loopback, link-local and credentialed hosts stay blocked; an allowlisted page may call another allowlisted origin, and a public page does not inherit that list. Explorations, reproductions and fix checks run Chromium in the `browser-sandbox` container through `SCOUT_BROWSER_ENDPOINT` ([browser-sandbox.ts](src/browser-sandbox.ts), [browser-server.ts](src/browser-server.ts)). It has no Spekios credentials, volumes or storage network, runs Chromium's own sandbox and serves one connection before restarting. Without an endpoint, Chromium launches locally: the demo recorder and in-process test fixtures use that, and the queued worker refuses to start. Popups, dialogs and downloads stay outside the supported action contract.
-
-The [Rust model gateway](../../docs/platform/model-gateway.md) now feeds model predictions and assessments to `explore URL`, with separate assessments for `reproduce ACTION_UUID`. Integration tests use local provider fixtures; live-model quality is unverified. Reviewed confirmation and a credential-free worker protocol remain next boundaries. The deterministic `demo` remains available for evidence-pipeline regression checks.
-
-Browser/package versions are pinned together using the [official Playwright container guidance](https://playwright.dev/docs/docker). Capture pauses CSS animations and the page clock, requests reduced motion, and hides the caret. The stored PNG is still the exact device pixels of that frame; [Playwright screenshot options](https://playwright.dev/docs/api/class-page#page-screenshot).
+`evaluation/` holds the [Larchwood visual-assessment evaluation](evaluation/README.md).

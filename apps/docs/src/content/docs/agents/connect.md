@@ -2,19 +2,19 @@
 {
   "title": "Connect your agent",
   "description": "Connect an agent app to Spekios with a server URL and browser approval. No repository, build command, developer connector or pasted secret is required for compatible HTTP MCP clients.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 2}
 }
 ---
 Open **Connect your agent** in your Spekios workspace. Choose your agent app, copy the connection URL into that app’s MCP settings, then approve the connection in your browser. You do not need the Spekios source code, **just**, an extension or CI/CD.
 
-Spekios’s twenty-six tools let your agent submit a URL, check progress, retrieve a report and find related tests later. You can follow the same runs and evidence in the Spekios workspace.
+Spekios’s thirty-four tools let your agent submit a URL, check progress, retrieve a report, triage findings, verify fixes and find related tests later. You can follow the same runs and evidence in the Spekios workspace.
 
 For a terminal agent, use the [standalone CLI](../cli/). It supports browser approval, project selection, JSON output and durable job retries without a repository checkout.
 
 ## Connect from an agent app
 
-1. Open **/connect** on your Spekios server. For this local installation, use **http://127.0.0.1:18080/connect**.
+1. Open **/connect** on your Spekios server: **https://app.spekios.com/connect** for the hosted app, or **http://127.0.0.1:18080/connect** for a local installation.
 2. Choose your app and copy the displayed **Spekios connection URL**. It contains no secret.
 3. Add Spekios as a **Streamable HTTP** MCP server in the agent app. Choose browser authorization when prompted.
 4. The app opens Spekios’s approval page. Check the app name, workspace, return address and requested permissions, then choose **Allow connection**.
@@ -49,15 +49,13 @@ This is a direct desktop MCP connection. ChatGPT web has its own plugin setup; i
 
 ### Claude account connectors
 
-Open **Customize → Connectors → Add custom connector**, enter **Spekios** and the connection URL, then connect with browser sign-in. If asked to choose an OAuth client, select **Register automatically**. Spekios supports dynamic client registration; published client metadata identity is not supported in this increment.
+Open **Customize → Connectors → Add custom connector**, enter **Spekios** and the connection URL, then connect with browser sign-in. If asked to choose an OAuth client, select **Register automatically**. Spekios supports dynamic client registration; client metadata documents are not supported.
 
 Claude’s account connectors connect from Anthropic’s cloud, including when configured in Claude Desktop. They cannot reach a Spekios server running only at **localhost**. Use a publicly reachable HTTPS Spekios deployment for this path. Native local MCP configurations are a separate option. See [Claude’s connector instructions and network requirements](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
 
 ### Another agent app
 
 Use a client supporting Streamable HTTP, protected-resource discovery, dynamic client registration, authorization code with PKCE S256 and resource indicators. The connection URL ends in **/mcp**. The setup page supplies it for the current server; there is no per-user token in this URL.
-
-The protocol lifecycle is verified against the local API and real storage. Vendor app installation and remote HTTPS interoperability are not certified by these integration checks.
 
 ## Give your agent a task
 
@@ -73,15 +71,15 @@ The setup page also generates this prompt with an optional URL. Install the [lig
 
 ## Access and expiry
 
-The human approves through existing Spekios workspace access. Local development can use the explicitly enabled development bypass. Human account signup, password recovery, membership invitations and hosted SSO remain separate work; browser MCP authorization does not implement them.
+The person approving must be signed in to the Spekios workspace. On the hosted app that is a Spekios account; a local installation uses its own sign-in or the explicitly enabled development bypass. Workspace membership invitations are not supported.
 
 Agents receive only requested **runs:read**, **runs:write** and **usage:read** permissions. They cannot approve peers, change workspace settings or submit human reviews. Read-only report requests make no model calls; starting tests or reproductions can change the controlled app and consume model usage.
 
-OAuth access tokens last at most one hour. Rotating refresh tokens preserve the same agent identity within a thirty-day connection; reconnect after that. Reusing a refresh token revokes that OAuth connection. OAuth access tokens are bound to this server’s **/mcp** audience and cannot authenticate ordinary REST routes. The native connector’s credentials remain available for existing REST integrations.
+OAuth access tokens last at most one hour. Rotating refresh tokens preserve the same agent identity within a thirty-day connection; reconnect after that. Reusing a refresh token revokes that OAuth connection. OAuth access tokens are bound to this server’s **/mcp** audience and cannot authenticate ordinary REST routes. Native connector and CLI credentials work for REST integrations.
 
-## Existing native development connector
+## Native development connector
 
-Developers working from a Spekios checkout can keep the original connector:
+Developers working from a Spekios checkout can also use the native stdio connector:
 
 ~~~sh
 just mcp-login
@@ -96,4 +94,4 @@ Use **--api-url**, **--credential-file** and **--no-browser** for explicit nativ
 
 An operator supplies the running Spekios service. Local app connections can use literal loopback HTTP. For remote clients, set **SCOUT_PUBLIC_ORIGIN** to the exact HTTPS origin and preserve Host through the TLS reverse proxy. Forwarded headers do not enroll a new origin; setting a public origin disables anonymous development access.
 
-The default Compose installation stays bound to loopback. This feature does not configure a public deployment or tunnel, human accounts, unrestricted browser egress or production worker isolation. Review [deployment security](../../operators/security/) before exposing a shared service. Read the [OAuth API contract](../../api/authentication/) for discovery and token endpoints.
+The default Compose installation stays bound to loopback. Connecting agents does not set up a public deployment, tunnel or TLS for you. Review [deployment security](../../operators/security/) before exposing a shared service. Read the [OAuth API contract](../../api/authentication/) for discovery and token endpoints.

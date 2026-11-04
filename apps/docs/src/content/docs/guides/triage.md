@@ -2,7 +2,7 @@
 {
   "title": "Triage findings and recheck a deploy",
   "description": "Decide whether a Spekios issue is a bug, intended behavior or a duplicate, let later runs recognize it, and recheck every open issue after a deploy from the workspace, an agent or CI.",
-  "reviewed": "2026-11-03",
+  "reviewed": "2026-11-04",
   "sidebar": {"order": 3}
 }
 ---
@@ -29,7 +29,7 @@ A later run can reach the same behavior by a different path. Spekios compares th
 
 A different or paraphrased failure on the same control remains a separate finding. **Related findings** shows possible matches and manually linked duplicates; a person or agent can review the evidence and link a duplicate explicitly. This avoids carrying an intended-behavior decision over to a new bug on the same button.
 
-Nothing is hidden. The evidence, the model's assessment and each occurrence are all recorded. The issue list shows open issues by default (new, needs review and bugs); choose **All issues** to see known behavior. Reports count findings by triage, and a coding-agent report gives no repair objective for intended behavior.
+Nothing is hidden. The evidence, the model's assessment and each occurrence are all recorded. The issue list shows open issues by default (new, needs review and bugs); choose **All issues, including known behavior** to see the rest. Reports count findings by triage, and a coding-agent report gives no repair objective for intended behavior.
 
 **scout_list_knowledge** and **GET /v1/knowledge** list known behavior for a site: each bug or intended behavior, who decided and why, its page and control, and how many duplicates and repeats it has.
 
@@ -37,7 +37,7 @@ Nothing is hidden. The evidence, the model's assessment and each occurrence are 
 
 A recheck verifies a deployment against every open issue found on a site, up to 25 at a time, newest first. Each issue gets its own fresh-browser fix verification on the new deployment, keeping its recorded entry path. Intended behavior and duplicates are not rechecked. Each check uses model calls and can change data on the deployment.
 
-In the workspace, use **Recheck a deployment** on the issues page. Give the deployment URL and, if the issues were found on another site, that site.
+In the workspace, use **Recheck a deployment** on **Issues & fixes**. Give the deployment URL and, if the issues were found on another site, that site.
 
 From an agent, call **scout_recheck_deployment** with a saved **recheck_id**, then poll **scout_get_recheck**. A retry with the same ID reuses every check already admitted.
 

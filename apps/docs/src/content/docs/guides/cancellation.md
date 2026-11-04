@@ -2,7 +2,7 @@
 {
   "title": "Stop work and preserve evidence",
   "description": "Understand explicit cancellation for Spekios jobs, active runs and automatic reproduction batches, including retained evidence and late provider usage.",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 5
   }
@@ -30,6 +30,6 @@ The gateway may receive a late provider result or usage record after cancellatio
 
 ## Process interruption
 
-Recovery records interruption and retained evidence. It does not automatically replay an uncertain click, form submission or private login input. Start a new job when you are ready to test again.
+Recovery records interruption and retained evidence. It does not automatically replay an uncertain click, form submission or private login input. Choose **Continue exploration** or **Run again**, or start a new job, when you are ready to test again.
 
 Stopping Compose preserves volumes. Removing volumes deletes data and is not a cancellation mechanism.

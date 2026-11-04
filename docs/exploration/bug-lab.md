@@ -17,8 +17,6 @@ just bug-lab
 | All bugs on | `http://larchwood:8084` | http://127.0.0.1:18084 |
 | Every bug fixed | `http://larchwood:8085` | http://127.0.0.1:18085 |
 
-Both origins are in the default `SCOUT_ALLOWED_ORIGINS`. If your `.env` sets that variable, add them to it and run `docker compose up -d api browser-worker`.
-
 On this computer, without Docker (needs Node 22):
 
 ```sh
@@ -28,11 +26,11 @@ just bug-lab-local 4100 --bugs price-sort,cart-total
 just bug-lab-local 4100 --pair     # bugs on 4100, fixed on 4101
 ```
 
-Spekios's browser runs in Docker, where `localhost` is its own container. Give it `http://host.docker.internal:4100` and add that origin to `SCOUT_ALLOWED_ORIGINS`. The workspace's URL field suggests this address when you type a `localhost` one.
+Spekios's browser runs in Docker, where `localhost` is its own container. Submit `http://localhost:4100` from the workspace: the API rewrites it to `http://host.docker.internal:4100`, which reaches your machine under Docker Desktop.
 
 ## Explore and score
 
-1. Turn off App memory in Settings, or forget the Larchwood origin under **Settings → App memory**. Otherwise a second run skips controls the first one tried, and the two scores don't compare.
+1. Turn off app memory under **Settings → Memory & sessions**, or forget the Larchwood scope there. Otherwise a second run skips controls the first one tried, and the two scores don't compare.
 2. Explore `http://larchwood:8084`. Several bugs need a few steps (add to cart, then change the quantity), so give the run room: an action limit of about 100 is a reasonable start. The mobile-only bug needs a run with the **Mobile** screen size.
 3. Score one or more runs:
 

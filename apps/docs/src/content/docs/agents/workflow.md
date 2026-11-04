@@ -2,7 +2,7 @@
 {
   "title": "Submit, poll, report, fix",
   "description": "Give Spekios a URL, continue other work, retrieve a consistent report and use recorded evidence to investigate a fix in your own codebase.",
-  "reviewed": "2026-10-31",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 2
   }
@@ -19,12 +19,12 @@ Generate a non-nil UUID locally, or call **scout_new_request_id** if the client 
   "name": "scout_start_exploration",
   "arguments": {
     "job_id": "00000000-0000-4000-8000-000000000001",
-    "url": "http://exploration-fixture:8082/branches"
+    "url": "https://your-app.example/"
   }
 }
 ~~~
 
-The UUID here is illustrative. Generate a new one for a new task. A retry uses the same UUID and identical inputs. Changed inputs with an existing ID conflict rather than starting duplicate work.
+The UUID here is illustrative. Generate a new one for a new task. Any HTTP(S) URL without embedded credentials works if Spekios's browser can reach it; add **project_id** to use that project's model and limits. A retry uses the same UUID and identical inputs. Changed inputs with an existing ID conflict rather than starting duplicate work.
 
 Starting exploration can change data on the target site and consume its configured provider allowance.
 

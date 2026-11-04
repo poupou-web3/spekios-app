@@ -1,6 +1,6 @@
-# Screenshot difference prototype
+# Screenshot difference (image-diff)
 
-An independently runnable Node.js module and CLI for comparing two recorded screenshots. It preserves a change as small as one channel value at one pixel. This package does **not** execute browser actions, connect a model, upload evidence, or decide whether a change is a bug. Those integrations remain separate application work.
+A dependency-light Node.js module and CLI that compares two PNG screenshots pixel by pixel, keeping a change as small as one channel value at one pixel. The browser runtime ([`packages/browser-runtime`](../browser-runtime/README.md): `recorder.ts`, `explorer.ts`, `assessment-vision.ts`) uses it for every action's before/after comparison and to build the cropped images sent to the model; the recorder image installs it alongside that package. It does not drive a browser, call a model, upload evidence or decide whether a change is a bug.
 
 ## Run
 
@@ -8,7 +8,7 @@ Requires Node.js 22 or newer. From this directory:
 
 ```sh
 npm ci --ignore-scripts
-npm test
+npm test          # also run by `just test` and the Vision evaluation contracts workflow
 node cli.mjs --before /path/before.png --after /path/after.png --out /path/new-result-directory --before-id cap-before --after-id cap-after
 ```
 
@@ -49,7 +49,7 @@ await compareFiles({
 
 Camel-case JavaScript parameters map to canonical `before_capture_id` / `after_capture_id` fields in JSON. Each source descriptor also contains its `capture_id`. IDs identify distinct capture occurrences, even if their PNG bytes are identical and share a content hash. The caller provides capture IDs; the module generates a fresh difference UUID. IDs accept 1–128 characters from letters, digits, `_`, `.`, `:`, and `-`, beginning with a letter or digit.
 
-An eventual worker should persist both original capture references, then attach these derivatives and metadata to its action record in the evidence bucket. It must still run the semantic check when the mask is empty: no visual response can itself violate an expected outcome, and nonvisual state changes are possible. Timing, viewport, scroll, device scale, DOM/network signals, and pre-action expectations belong in that surrounding action record. Nothing here labels a model-training example as a confirmed bug.
+The caller (the browser runtime) stores the original captures and attaches these derivatives and metadata to the action record. An empty mask does not mean the action passed: a missing visual response can itself violate the expected outcome, so the semantic assessment still runs.
 
 ## Explicit limits
 
@@ -57,8 +57,8 @@ An eventual worker should persist both original capture references, then attach 
 - Each encoded input is capped at 16 MiB. Each input and the combined canvas are capped at 8,388,608 pixels and 8192 pixels per side. Headers and the canvas are checked before decoding. File reads are bounded even if a file grows after it is opened.
 - PNG chunk structure, required ending, and decoder checksums are checked. Interlaced input is rejected because the selected decoder uses an unbounded inflate path for that format.
 - Decoding/comparison is synchronous and intended for a worker process, not an API request thread. Memory and runtime are bounded by these limits, but this is not a sandbox for arbitrary hostile codecs.
-- This is a pixel comparison, not perceptual matching. Fonts, animation, cursors, time, and scrolling can produce differences. Future prioritization or alignment must create separate derivatives; neither may replace the raw originals or raw mask.
-- No cloud upload, crash-recovery protocol, video, or semantic bug judgment is implemented by this package. Runtime integration is provided by the browser worker. A process crash can leave an incomplete output directory; consumers should require readable metadata plus verified derivative hashes, and retry into a fresh directory.
+- This is a pixel comparison, not perceptual matching. Fonts, animation, cursors, time, and scrolling can produce differences. Derived views, such as the focus regions below, are separate derivatives and never replace the raw originals or raw mask.
+- No upload, crash recovery, video or semantic bug judgment happens here. A process crash can leave an incomplete output directory; consumers should require readable metadata plus verified derivative hashes, and retry into a fresh directory.
 
 The pinned decoder is [pngjs 7.0.0](https://github.com/pngjs/pngjs). Tests cover exact equality, a one-value single-pixel change, alpha changes, invisible RGB changes, geometry changes, differing PNG encodings, corrupt/unsupported/oversized inputs, canvas limits, capture identity, RGB/RGBA equivalence, CLI output hashes, original preservation, and overwrite refusal.
 

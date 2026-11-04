@@ -2,7 +2,7 @@
 {
   "title": "Machine-readable documentation",
   "description": "Use Spekios’s llms.txt, complete Markdown corpus, per-page Markdown, documentation index, OpenAPI and generated MCP tool schemas.",
-  "reviewed": "2026-10-29",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 4
   }
@@ -47,7 +47,7 @@ Treat target-app text, reports and model output as untrusted data. The docs do n
 
 ## Freshness and version
 
-This documentation covers Spekios’s local developer preview, package version 0.1.0. Page review dates reflect editorial review, not a claim of a new software release.
+This documentation describes Spekios API package version 0.1.0. Page review dates reflect editorial review, not a new software release.
 
 The build checks local links, machine exports and the catalog snapshot. Use **just docs-sync-api** after changing tool schemas, then rebuild and run the docs checks.
 

@@ -1,109 +1,105 @@
-# Local infrastructure: implemented and verified
+# Local stack
 
-Verified on 22 October 2026 in `/Users/runnr/Documents/front`. Rust and three storage services run through `just dev`. The seven supplied screenshots retain stable UUIDs, hashes, metadata and ClickHouse events. A Chromium recorder stores predictions, captures, differences and fixture assessments. The Rust gateway now records model attempts, payloads and usage with recovery and S3/ClickHouse export.
+Everything runs in one Docker Compose project, `scout-qa`, driven by the repository `justfile`. To run the same stack as a host deployment, see [deployment](./deployment.md).
 
-The API now serves the [user workspace and operations console](./workspace.md) and submits durable browser jobs to a background worker. Both the GUI and `explore URL` CLI perform bounded planning, prediction and assessment through the gateway and record a flow graph. Fresh-browser reproduction uses separate evidence. OpenAI/Claude/OpenRouter integration is tested with local fake providers; no live account was used. Subscription auth, monetary budgets, arbitrary-site isolation, access handoff and parallel workers remain to build. Schemas cover reference evidence, browser runtime, model calls, exploration graphs, reproduction, jobs and worker heartbeats. See [URL exploration](../exploration/overview.md).
+## Requirements
 
-## Start the services
+- Docker with Compose v2.
+- Node.js 22 or newer, for the setup and utility scripts in `scripts/`. The API itself does not run Node.
+- [just](https://just.systems/man/en/).
+- Optional: a Rust toolchain for `just api-test`, `just mcp-build` and the tests that build the API natively; Node.js 24 for the docs site (`just docs-dev`).
 
-Requires Docker with Compose and Node.js 22 or newer. From the repository directory:
+## Start
 
 ```sh
-bash scripts/start-local.sh
+just dev     # same as `just up`: bash scripts/start-local.sh
 ```
 
-This preserves or creates private credentials, installs pinned utilities, builds/starts services, applies archive/runtime/model schemas, and waits for gateway readiness. `just dev` uses the same workflow. `just deploy` starts the workspace, operator console, API, workers and databases on a host and applies the same schemas; see [deployment](./deployment.md). Initial setup needs network access for packages/images. Credentials live in ignored `.env` with mode `0600` and are not printed. Preserve it alongside the volumes. Changing passwords in this file does not rotate credentials already stored in PostgreSQL.
+`scripts/start-local.sh`:
 
-| Service | Version | Host access | Persistent volume | Container cap |
+1. Runs `scripts/setup-local.mjs`, which creates `.env` with independent random credentials (`POSTGRES_PASSWORD`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `CLICKHOUSE_PASSWORD`, `SCOUT_API_TOKEN`, `SCOUT_PROVIDER_VAULT_KEY`) and mode `0600`, or validates and keeps an existing one.
+2. Installs the script dependencies (`npm ci --prefix scripts`).
+3. Builds and starts every default Compose service and waits for health checks.
+4. Applies the PostgreSQL and ClickHouse schemas (`scripts/bootstrap-local.mjs`) and waits for the API.
+
+Optional settings (provider keys, exploration defaults, allowed origins, sign-in) are documented in `.env.example`; copy the lines you need into `.env`. Run `just reload-env` after editing `.env` to recreate the API with the new values. Changing a password in `.env` does not rotate a credential already stored in a database volume.
+
+| Address | What |
+| --- | --- |
+| `http://127.0.0.1:18080` | Customer workspace and API ([workspace](./workspace.md)) |
+| `http://127.0.0.1:18083` | Operator back office |
+| `http://127.0.0.1:18333` | S3 API of the evidence bucket |
+| `http://127.0.0.1:18123` | ClickHouse HTTP |
+| `http://127.0.0.1:18090` | Docs site, started separately with `just docs-up` |
+
+Every published port binds to loopback. PostgreSQL has no host port. With the default `SCOUT_DEV_AUTH_BYPASS=false`, the workspace asks for a token: paste `SCOUT_API_TOKEN` from `.env`. Setting `SCOUT_DEV_AUTH_BYPASS=true` skips the token screen on literal `localhost`/`127.0.0.1` addresses.
+
+No model key is needed to browse stored runs or run the fixture tests. A live exploration needs a model: add a personal key in **Settings → Models**, or set `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `META_API_KEY` in `.env` ([model gateway](./model-gateway.md)).
+
+## Common commands
+
+`just --list` shows every recipe. The everyday ones:
+
+```sh
+just status             # docker compose ps
+just stop               # stop containers, keep volumes
+just reload             # rebuild the API (with the embedded workspace) and the back office
+just reload-api         # rebuild only the API and workspace
+just reload-backoffice  # rebuild only the back office
+just reload-env         # recreate the API so it reads the current .env
+just logs               # last 100 API log lines
+just runs               # latest runs through the API (token not printed)
+just run RUN_UUID       # one run with its evidence references
+just jobs               # browser jobs and worker heartbeats
+just models             # configured providers, without keys
+just usage              # model usage for the current mode
+just fixture            # controlled test app: http://exploration-fixture:8082 inside Compose, 127.0.0.1:18082 on the host
+just bug-lab            # Larchwood shop with known bugs: http://larchwood:8084 (bugs) and :8085 (fixed)
+just explore URL        # one exploration from the command line
+just explore-matrix URL # desktop, tablet and mobile at once
+just test               # API, runtime, web and script tests; the stack must be running
+```
+
+`just model-test`, `just workspace-test` and the other fixture suites briefly restart services in a simulated-model mode and restore normal mode afterwards. Run them while the workspace is idle.
+
+## Services
+
+| Service | Image | Host access | Data | Limit |
 | --- | --- | --- | --- | --- |
-| Rust API | Axum 0.8.9; Rust 1.91 container build | `http://127.0.0.1:18080` | `scout-qa_gateway-spool` response journals; PostgreSQL state | 256 MiB, 1 CPU |
-| SeaweedFS S3 | 4.48 | `http://127.0.0.1:18333` | `scout-qa_evidence-data` | 1 GiB, 1 CPU |
-| PostgreSQL | 17.11 | Compose network only; no host port | `scout-qa_postgres-data` | 512 MiB, 1 CPU |
-| ClickHouse | 26.7.35.11 | `http://127.0.0.1:18123` | `scout-qa_clickhouse-data` | 2 GiB, 2 CPUs |
-| Recorder, one-shot `runtime` profile | Playwright/Chromium 1.64.0 image | No published port | `scout-qa_recorder-spool` | 1 GiB, 2 CPUs |
-| Background browser worker | Same recorder image, queue daemon | No published port | Shared recorder spool; PostgreSQL jobs | 1 GiB, 2 CPUs |
-| Log collector and Docker API proxy | Vector 0.60.0; socket-proxy 1.13.1 | No published port | ClickHouse `scout.service_logs`, 14 days | 128 MiB / 0.5 CPU; 32 MiB / 0.25 CPU |
+| `api` | Rust 1.91 build, Axum 0.8.9 | `127.0.0.1:18080` | `gateway-spool` (model response journals) | 256 MiB, 1 CPU |
+| `backoffice` | nginx (unprivileged), proxies `/v1` to the API | `127.0.0.1:18083` | none | 64 MiB, 0.5 CPU |
+| `postgres` | PostgreSQL 17.11 | none | `postgres-data` | 512 MiB, 1 CPU |
+| `evidence` | SeaweedFS 4.48, bucket `qa-evidence` | `127.0.0.1:18333` | `evidence-data` | 1 GiB, 1 CPU |
+| `clickhouse` | ClickHouse 26.7.35.11 | `127.0.0.1:18123` | `clickhouse-data` | 2 GiB, 2 CPUs |
+| `browser-worker` | Playwright 1.64.0 image, job queue | none | `recorder-spool`, `auth-vault` | 1 GiB, 2 CPUs |
+| `browser-sandbox` | Same image, Chromium only; `SCOUT_BROWSER_SLOTS` replicas | none | none | 1 GiB, 2 CPUs each |
+| `posthog-worker` | Same image, [PostHog](./posthog.md) importer | none | PostgreSQL | 384 MiB, 0.5 CPU |
+| `log-socket`, `log-collector` | socket-proxy 1.13.1, Vector 0.60.0 | none | ClickHouse `scout.service_logs` | 32 MiB / 0.25 CPU; 128 MiB / 0.5 CPU |
+| `recorder` (profile `runtime`) | Same image, one-shot CLI (`just explore`, `just demo`) | none | `recorder-spool`, `auth-vault` | 1 GiB, 2 CPUs |
+| `exploration-fixture`, `larchwood` (profile `runtime`) | Same image | `18082`; `18084`/`18085` | none | 128 MiB |
 
-Images are pinned by digest in Compose or the service Dockerfiles. PostgreSQL and ClickHouse use small derived images containing their initialization/configuration files, so startup does not depend on Docker Desktop reading bind mounts from macOS Documents. Application builds copy explicit source files; `.dockerignore` excludes `.env`, artifacts, dependency/build directories and local tools. ClickHouse listens on the container interface while Compose publishes it on host loopback only; query threads and server memory are separately limited. The global thread-pool ceiling leaves enough room for background work and table initialization.
+Images are pinned by digest in Compose or the Dockerfiles under `infra/`. PostgreSQL and ClickHouse use small derived images that contain their schema and configuration files. Application containers run read-only with all capabilities dropped.
 
-No Redis, Kubernetes cluster or OpenTelemetry collector is installed. Container output reaches ClickHouse through the log collector; see [service logs](./logs.md). ClickHouse receives archive, browser and model events through durable PostgreSQL outboxes. Model bodies are uploaded to S3 with hash verification. Kubernetes follows stable service/isolation boundaries; see [development and deployment](./deployment.md).
+Networks: `default` connects the application and storage. `browser` connects the worker, the sandboxes and the test apps; storage and the model gateway are not on it. `logs` is internal and holds only the log collector and its Docker API proxy.
 
-## Screenshot archive
+Model, browser and archive events reach ClickHouse through durable PostgreSQL outboxes; container output reaches it through the [log collector](./logs.md). There is no Redis, Kubernetes or OpenTelemetry collector.
 
-Bucket: **`qa-evidence`**. Archive ID: **`15cd1da9-d8c4-4f26-b8b4-9b4ebae6481f`**.
+## Persistence
 
-The [local manifest](../../artifacts/reference-screenshots/manifest.json) lists all seven capture IDs, SHA256 hashes, filenames, byte lengths and object keys. The original PNGs total **2,568,363 bytes** (2.57 MB decimal). The bucket contains 15 archive objects: seven original blobs, seven capture-ID records, and one manifest. This size describes these references, not a forecast of browser-run storage.
+Use `just stop` when idle and `just dev` to resume. Keep the named volumes and `.env` together; removing volumes deletes the evidence and databases. The evidence bucket is a local volume, not an off-machine backup, and nothing expires evidence automatically.
 
-```text
-design-reference/blobs/sha256/<prefix>/<sha256>.png
-design-reference/captures/<capture_id>.json
-design-reference/archives/<archive_id>/manifest.json
-```
+## Reference screenshot archive
 
-Capture IDs identify occurrences; SHA256 identifies original encoded bytes. An unchanged image can therefore be referenced by distinct future capture IDs without requiring duplicate blob storage. The reference screenshots are labeled `purpose: design_reference` and `training_status: excluded_reference`; they are not represented as executed browser actions or training examples.
-
-To archive or verify the source files again:
+The tracked [manifest](../../artifacts/reference-screenshots/manifest.json) lists seven design-reference screenshots with capture IDs, SHA-256 hashes and object keys (`design-reference/...` in `qa-evidence`). They are labelled `purpose: design_reference` and `training_status: excluded_reference`; they are not browser observations.
 
 ```sh
-node scripts/archive-reference-screenshots.mjs
-node scripts/verify-local.mjs
+node scripts/archive-reference-screenshots.mjs   # archive the files listed in scripts/reference-sources.json
+node scripts/verify-local.mjs                    # verify the archive (also part of `just test`)
+node scripts/get-reference-capture.mjs CAPTURE_UUID /path/to/new-file.png
 ```
 
-The source list in `scripts/reference-sources.json` refers to this task's original attachments. On another machine, supply paths to the same byte-identical files under the same filenames. The saved manifest preserves IDs across reruns; changed inputs are rejected. A failed export leaves committed rows in PostgreSQL for retry.
+The archive script needs the original files at the paths in `scripts/reference-sources.json`; changed inputs are rejected and existing IDs are preserved. `just test` runs the verifier, so it fails on a machine where the archive was never created. Retrieval verifies the checksum and refuses to overwrite an existing file.
 
-Retrieve one screenshot by its capture ID, without needing its original attachment path:
+## ClickHouse memory
 
-```sh
-node scripts/get-reference-capture.mjs 15412f53-4ffe-47d3-bb13-49035ac513cc /tmp/scout-first-capture.png
-```
-
-The destination must be a new file. Retrieval resolves the capture record in S3, verifies its classification and checksum, then writes with mode `0600`. No public object URL is created. Anonymous object requests were verified to return HTTP 403.
-
-Uploads use conditional creation and verify bytes by reading them back. An existing object with different contents is rejected. Capture metadata and immutable export events commit together in PostgreSQL. ClickHouse queries use `scout.evidence_events_current`, which deduplicates repeated deliveries by event ID. Its raw table can contain delivery duplicates; use the view for logical counts.
-
-## Verification results
-
-All of these checks passed:
-
-- Seven distinct capture IDs; every original image and capture record resolves with the expected SHA256 and size.
-- Seven PostgreSQL captures/blobs/outbox events; zero pending exports; seven logical ClickHouse events.
-- Repeating the archive command preserves IDs and creates no new logical events.
-- Recreating all three containers without deleting volumes preserves the objects and database records.
-- S3 conditional creation rejects a conflicting write; anonymous access is denied.
-- A simulated exporter outage retains the pending event. Retrying delivery restores the projection without inflating logical counts.
-- Capture-ID retrieval reproduces the exact original bytes and refuses to overwrite an existing local file.
-- Seven archive-client tests and eleven image-difference tests pass.
-
-Reproduce the automated checks:
-
-```sh
-npm test --prefix scripts
-node scripts/verify-local.mjs
-node scripts/verify-recovery.mjs
-npm ci --prefix packages/image-diff --ignore-scripts
-npm test --prefix packages/image-diff
-```
-
-The recovery test writes and removes one uniquely named probe object and replays one real archive event. It does not delete screenshot evidence. The archive verifier currently targets this seven-file reference archive; it is not a general browser-run verifier.
-
-The [image-difference module](../../packages/image-diff/README.md) produces a raw absolute RGBA delta, an opaque binary mask, optional geometry mask, and metadata linked to the two capture IDs. Tests include a one-value change in one pixel, alpha changes, identical pixels with different PNG encodings, dimension changes, invalid inputs, and overwrite refusal. A single local smoke measurement comparing a 3004×1630 reference PNG to itself, including decode and derivative encoding, took about 0.5 seconds; this is not a production performance benchmark. The module produces evidence; the recorder separately assigns a deterministic fixture assessment.
-
-## Browser recorder and Rust API verification
-
-All 12 recorder tests passed in the browser increment. Rust tests now include provider/usage checks alongside auth/handler coverage; static checks pass with warnings treated as errors. The API verifier checks real recorder data and workspace scope. The model suite passed 19 requests, 20 attempts and 59 events; a separate journal test verifies recovery after settlement failure without redispatch or double accounting. These tests use fake providers. See [gateway verification](./model-gateway.md).
-
-The URL-explorer integration also passed with real browser/storage services and simulated providers. Its saved demonstration records 5 actions, 10 screenshots, 4 states, 10 model requests, hash-verified payloads and ClickHouse export. The older recorder and gateway outage/recovery suites passed again after integration. See [exploration verification](../../artifacts/explorer/verification.json) and [run instructions](../exploration/overview.md).
-
-The [saved demo report](../../artifacts/runtime-demo/results.json) contains three real browser flows, with two actions/four unique capture occurrences per flow. Its click results are: working control — 361 changed pixels and expected value observed; broken control — zero changed pixels and suspect; tiny control — one changed pixel and expected value observed. No model made these judgments, and no bug is marked confirmed.
-
-Runtime screenshot IDs resolve to immutable S3 capture records, with hash-addressed image blobs and run/action/phase relationships. Captures are spooled durably before upload; failures stop advancement and remain visible. Interrupted dispatch recovery does not repeat the action. Events use stable IDs and a deduplicated ClickHouse view. Fixture captures are labeled `excluded_fixture`, and video remains disabled. Full instructions: [recorder](../../packages/browser-runtime/README.md), [Rust API](../../apps/api/README.md).
-
-## Persistence and next integration
-
-Use `docker compose stop` when idle and the startup command to resume. Retain the named volumes and `.env`; removing volumes deletes the stored evidence/databases. This is a private **local bucket**, not a remote cloud backup. An off-machine backup and restore test have not been configured. There is no automatic evidence expiry.
-
-Model predictions/assessments, bounded URL-only exploration and independent reproduction run through the recorder and queued worker. The recorder still needs a scoped worker protocol and enforced network isolation before arbitrary apps are admitted. Live-provider quality verification, access handoff and subscription authentication remain outstanding; API-key configuration is available now. GUI job/evidence integration passed; visual browser interaction remains unverified after a computer-use restriction.
-
-## ClickHouse merge memory in local development
-
-The 2 GiB local container uses merge blocks of at most 128 rows and a 1 MiB block-size target. During agent-report verification, wide rows in the internal system.metric_log caused background merges to hit the server memory limit and reject Spekios telemetry inserts. The configuration also lowers the vertical-merge row threshold to 1 so small, very wide log parts use column-wise merging. Smaller blocks and vertical merging reduce this local memory pressure at the cost of merge throughput; all system logs and Spekios evidence/event rows remain retained. See the [ClickHouse merge settings](https://clickhouse.com/docs/reference/settings/merge-tree-settings/merge-max). The configuration is in infra/clickhouse/limits.xml and is applied when the image is rebuilt.
+The local server is capped at 2 GiB. `infra/clickhouse/limits.xml` limits merge blocks to 128 rows and 1 MiB and enables vertical merges for every part, because wide `system.metric_log` rows otherwise made background merges exceed the memory limit and reject Spekios inserts. Changes apply when the ClickHouse image is rebuilt.

@@ -1,12 +1,14 @@
 # Action completion and form journeys
 
-Implemented 25 October 2026 (`action-completion-v1`, `browser-interactions-v2`). The URL explorer now waits for an observed action outcome before assessing it and selecting another branch. This also applies to fresh-browser reproduction.
+After each dispatched action, the explorer waits for an observed outcome (`action-completion-v1`) before assessing it and choosing the next action. Fresh-browser reproduction does the same.
 
 ## Completion evidence
 
 After dispatch, the worker samples the viewport and a bounded DOM projection. It checks exact screenshot hashes, visible text and control state, URL changes, visible `aria-busy`/progress indicators, and requests started by this page during the action. It requires at least one second of observation and 600 ms of quiet, with no young tracked requests pending and no observed busy indicator. A connection still open after two seconds is treated as a background channel. A screenshot may use the time remaining in the window, so one slow frame can still be kept. Sampling is approximately every 200 ms, bounded to 24 frames and a five-second observation window. Dispatch, durable uploads and individual browser operations have their own timeouts, so this is not a five-second total wall-clock limit for the action.
 
 Small pixel changes are preserved. CSS animation is held still while sampling, so a spinner does not by itself use up the deadline. A page that stays busy, or whose visible text keeps changing, can still reach the deadline; that action is assessed as **inconclusive**. When before/after observations and the model assessment are complete, exploration records `exploration.action_recovered`, blocks that control for this run, and can continue to another control or branch without repeating the dispatched action. Reproduction and fix verification remain strict. Missing evidence or a failed assessment still stops work. A change in the route or visible copy after the quiet sample also invalidates it. Screenshot pixels alone do not. Intermediate samples do not create exploration graph nodes. Before/after state identity uses the URL, controls and visible text.
+
+When an assessment suspects overlapping content, the worker waits once more (up to 8 seconds, 700 ms of quiet), recaptures the after screenshot and asks for a second assessment of the later pair. The run records the outcome in `layout_recheck` (`still_present`, `cleared` or `revised`); overlap that separated is treated as loading, not a defect.
 
 This is bounded observation, not proof that all asynchronous work is finished. Delayed work beginning after the observation window, unmarked spinners, unobserved DOM content and background polling can still require application-specific completion signals. Existing stale-plan checks remain active before the next action.
 
@@ -29,31 +31,27 @@ Two submission categories are supported:
 - Same-origin GET search forms, identified by a search input or `role="search"`, with no detected sensitive/unsupported fields or risky action.
 - Exact test forms explicitly allowed by the operator through `SCOUT_TEST_FORM_RULES`. Rules bind the full action URL, method and submitter's accessible name. No wildcards or page-provided permission attributes are accepted.
 
-For a controlled test app, set this in the private `.env` and recreate the worker (for example, `docker compose up -d browser-worker`):
+For a controlled test app, set this in the private `.env` and recreate the worker (for example `docker compose up -d api browser-worker`):
 
 ```dotenv
 SCOUT_TEST_FORM_RULES='[{"action_url":"http://exploration-fixture:8082/journeys/draft-result","method":"post","submitter":"Save test draft"}]'
 ```
 
-The target must already belong to `SCOUT_ALLOWED_ORIGINS`. The default rules are `[]`; no POST forms are enabled by default. The CLI and queued worker share this configuration. No new launch brief is required.
+The default rules are `[]`; no POST forms are enabled by default. The CLI and queued worker share this configuration.
 
 Sensitive fields, file uploads, credential/payment/destructive actions, off-origin destinations and new-window targets remain blocked even with a matching rule. Hidden fields participate in sensitive-field checks. The effective destination, method, target, field signature and permission are captured and checked again immediately before dispatch. A changed form contract fails closed. These are conservative heuristics, not proof that a GET handler is read-only or a browser script cannot perform a side effect.
 
 Fresh reproduction retains the exact submission command and filled values, with the current operator rules still required. Replay does not reset backend data: permit write forms only in disposable test environments where repetition is appropriate.
 
-## Workspace and operations
+## In the workspace
 
-Open a recorded action and expand **Action completion** to see its wait outcome, request/error counts and sampled screenshot timeline. Clicking a timestamp shows that retained frame and its unique ID in the existing evidence viewer. **Inspect completion and diagnostics** shows the stored structured data. Operations includes settling frame counts, and its event view contains the same action-linked events.
+Open a recorded action and expand **Action completion** to see its wait outcome, request/error counts and sampled screenshot timeline. Clicking a timestamp shows that retained frame and its ID in the evidence viewer. **Inspect completion and diagnostics** shows the stored structured data. Screenshot occurrence counts include both before/after captures and settling frames; shared bucket blobs are not counted as separate storage copies.
 
-Old runs without completion metadata continue to render normally. Screenshot occurrence counts include both before/after captures and settling frames; shared bucket blobs are not counted as separate storage copies.
-
-## Verification
+## Tests
 
 ```sh
-.tools/bin/just outcomes-test
-.tools/bin/just explorer-test
-.tools/bin/just web-test
-.tools/bin/just web-contract-test
+just outcomes-test
+just explorer-test
 ```
 
-The controlled real-browser tests cover empty submission and native validation, delayed responses, dynamically exposed results, alternative branch exploration, HTTP 503/disconnect/console/page-error evidence, exact reproduction, configured POST permission, destination changes, persistent busy/animated pages, and a failed final screenshot. Existing authentication, recording and exploration suites cover regressions. Worker shutdown during collection is classified as interruption, with retained partial evidence and no action replay. Verified run IDs are saved in [artifacts/action-outcomes/verification.json](../../artifacts/action-outcomes/verification.json). Providers are simulated: this verifies execution/evidence behavior, not live-model QA accuracy. Live-model evaluation and visual GUI validation remain separate outstanding checks.
+`just outcomes-test` runs `test/outcomes.test.ts` with real Chromium and simulated providers: empty submission and native validation, delayed responses, dynamically exposed results, HTTP 503/disconnect/console/page-error evidence, exact reproduction, configured POST permission, destination changes, persistent busy or animated pages, layout rechecks and a failed final screenshot. `just explorer-test` includes the same file. Providers are simulated, so this checks execution and evidence, not live-model accuracy.
