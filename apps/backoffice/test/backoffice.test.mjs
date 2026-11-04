@@ -7,9 +7,9 @@ import vm from 'node:vm';
 function view(){
   const node={innerHTML:'',classList:{add(){},remove(){}},addEventListener(){},querySelectorAll(){return[];}};
   const sandbox={document:{querySelector(){return node;},addEventListener(){}},window:{addEventListener(){}},
-    sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,Date,Number,JSON,String,console};
+    sessionStorage:{getItem(){return null;}},setInterval(){},setTimeout(){return 0;},clearTimeout(){},Map,Set,URL,URLSearchParams,Date,Number,JSON,String,console};
   vm.createContext(sandbox);
-  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,picker,operations,opsOverview,jobsView,modelsView,eventsView,connections,demoCredits};',sandbox);
+  vm.runInContext(appSource('main.js')+'\nglobalThis.testing={state,picker,operations,opsOverview,jobsView,modelsView,eventsView,connections,demoCredits,logsView,mergeLogs,logQuery,freshLogs,stamp,MAX_LOG_ROWS};',sandbox);
   return sandbox.testing;
 }
 function configured(ui){
@@ -181,3 +181,65 @@ test('operator sign-in uses its own session key and development mode sends no be
   const locked=interactive({fetch:async()=>response({mode:'bearer_token'})});await locked.bootstrapSession();
   assert.match(locked.node.innerHTML,/Operator access token/);assert.match(locked.node.innerHTML,/id="login-form"/);
 });
+
+const line=(id,ts,extra={})=>({log_id:id,ts,service:'api',replica:'api-1',stream:'stdout',level:'info',message:'http_request',fields:null,run_id:null,request_id:null,...extra});
+test('logs tab streams structured Meta calls with escaped text and run actions',()=>{
+  const ui=view(),run='0b6f4c53-6d3d-4a0e-9a59-3c7f5f0f6a11';configured(ui);
+  ui.state.opsTab='logs';
+  ui.state.logs.services=[{service:'api',last_seen:'2026-11-04T10:12:03Z',lines:12},{service:'browser-worker',last_seen:'2026-11-04T10:12:03Z',lines:3}];
+  ui.state.logs.exclude.add('evidence');ui.state.logs.checkedAt='2026-11-04T10:12:04Z';
+  ui.mergeLogs(ui.state.logs.rows,[
+    line('b','2026-11-04T10:12:03.200000000Z',{level:'info',message:'model_call_finished',run_id:run,request_id:run,fields:{provider:'meta',model:'muse-spark-1.3',http_status:200,elapsed_ms:1834,input_tokens:3120,output_tokens:240,request_id:run}}),
+    line('a','2026-11-04T10:12:03.100000000Z',{service:'browser-worker',level:'error',message:'<img src=x onerror="bad()"> Catalogue failure'}),
+    line('c','2026-11-04T10:12:03.300000000Z',{level:'debug'}),
+  ],ui.state.logs.ids);
+  const html=ui.operations();
+  assert.match(html,/id="ops-tab-logs"[^>]*aria-selected="true"/);
+  assert.match(html,/Service logs/);assert.match(html,/role="log"/);assert.match(html,/Live · checked/);
+  assert.ok(html.indexOf('data-log="a"')<html.indexOf('data-log="b"')&&html.indexOf('data-log="b"')<html.indexOf('data-log="c"'));
+  assert.match(html,/class="log-row error"/);assert.match(html,/class="log-row debug"/);
+  assert.match(html,/<strong class="log-text">model_call_finished<\/strong>/);
+  assert.match(html,/provider=<\/span>meta/);assert.match(html,/http_status=<\/span>200/);assert.match(html,/request_id=<\/span>0b6f4c53</);
+  assert.ok(!html.includes('<img src=x'));assert.match(html,/&lt;img src=x/);
+  assert.match(html,new RegExp(`data-action="log-run" data-run="${run}"`));assert.match(html,new RegExp(`href="#/models/${run}"`));
+  assert.match(html,/data-service="evidence" aria-pressed="false"/);assert.match(html,/data-service="api" aria-pressed="true"/);
+  assert.match(html,/Pick a run above to filter by it/);
+  ui.state.runId=run;ui.state.logs.runOnly=true;assert.match(ui.operations(),/id="log-run-only" checked/);
+  ui.state.logs.follow=false;ui.state.logs.unseen=4;assert.match(ui.operations(),/4 new lines · jump to latest/);
+});
+
+test('log merging deduplicates by id, keeps time order and caps the buffer',()=>{
+  const ui=view(),rows=[],ids=new Set();
+  let result=ui.mergeLogs(rows,[line('b','2026-11-04T10:00:02.000000000Z'),line('a','2026-11-04T10:00:01.000000000Z')],ids);
+  assert.equal(result.added,2);assert.deepEqual(rows.map(r=>r.log_id),['a','b']);
+  result=ui.mergeLogs(rows,[line('b','2026-11-04T10:00:02.000000000Z'),line('late','2026-11-04T10:00:01.500000000Z'),{ts:'x'}],ids);
+  assert.equal(result.added,1);assert.deepEqual(rows.map(r=>r.log_id),['a','late','b']);
+  result=ui.mergeLogs(rows,[line('c','2026-11-04T10:00:03.000000000Z'),line('d','2026-11-04T10:00:04.000000000Z')],ids,3);
+  assert.equal(result.trimmed,2);assert.deepEqual(rows.map(r=>r.log_id),['b','c','d']);assert.ok(!ids.has('a')&&ids.has('d'));
+  assert.equal(ui.MAX_LOG_ROWS,1500);
+});
+
+test('log queries carry the level, exclusions, search, run and tail cursor',()=>{
+  const ui=view(),logs=ui.freshLogs();
+  assert.equal(ui.logQuery(logs,null),'/v1/admin/logs?level=info&limit=300');
+  logs.level='warning';logs.exclude=new Set(['evidence','browser-sandbox']);logs.q='  model_call ';logs.runOnly=true;
+  const url=new URL(ui.logQuery(logs,'run-one',{after:'17_ffffffff-ffff-ffff-ffff-ffffffffffff'}),'http://x');
+  assert.equal(url.searchParams.get('level'),'warning');assert.equal(url.searchParams.get('exclude'),'browser-sandbox,evidence');
+  assert.equal(url.searchParams.get('q'),'model_call');assert.equal(url.searchParams.get('run_id'),'run-one');
+  assert.equal(url.searchParams.get('after'),'17_ffffffff-ffff-ffff-ffff-ffffffffffff');
+  logs.runOnly=false;assert.equal(new URL(ui.logQuery(logs,'run-one'),'http://x').searchParams.get('run_id'),null);
+  const reset=ui.freshLogs(logs);assert.equal(reset.level,'warning');assert.equal(reset.rows.length,0);assert.equal(reset.generation,logs.generation+1);
+  assert.equal(ui.stamp('nonsense').time,'nonsense');assert.match(ui.stamp('2026-11-04T10:12:03.123456789Z').time,/^\d\d:\d\d:03\.123$/);
+});
+
+test('logs explain an empty collector, unmatched filters, a cleared view and an unavailable service',()=>{
+  const ui=view();configured(ui);ui.state.opsTab='logs';
+  assert.match(ui.operations(),/No logs collected yet[\s\S]*docker compose up -d log-socket log-collector/);
+  ui.state.logs.services=[{service:'api',lines:1}];ui.state.logs.q='nothing';
+  assert.match(ui.operations(),/No matching lines/);
+  ui.state.logs.cleared='2026-11-04T10:12:04Z';assert.match(ui.operations(),/View cleared/);
+  ui.state.logs.error='Logs are unavailable. Check that the log-collector service is running and the ClickHouse schema is applied.';
+  assert.match(ui.operations(),/Logs unavailable[\s\S]*log-collector service is running/);
+  ui.state.logs.live=false;assert.match(ui.operations(),/Paused/);
+});
+

@@ -22,10 +22,11 @@ This preserves or creates private credentials, installs pinned utilities, builds
 | ClickHouse | 26.7.35.11 | `http://127.0.0.1:18123` | `scout-qa_clickhouse-data` | 2 GiB, 2 CPUs |
 | Recorder, one-shot `runtime` profile | Playwright/Chromium 1.64.0 image | No published port | `scout-qa_recorder-spool` | 1 GiB, 2 CPUs |
 | Background browser worker | Same recorder image, queue daemon | No published port | Shared recorder spool; PostgreSQL jobs | 1 GiB, 2 CPUs |
+| Log collector and Docker API proxy | Vector 0.60.0; socket-proxy 1.13.1 | No published port | ClickHouse `scout.service_logs`, 14 days | 128 MiB / 0.5 CPU; 32 MiB / 0.25 CPU |
 
 Images are pinned by digest in Compose or the service Dockerfiles. PostgreSQL and ClickHouse use small derived images containing their initialization/configuration files, so startup does not depend on Docker Desktop reading bind mounts from macOS Documents. Application builds copy explicit source files; `.dockerignore` excludes `.env`, artifacts, dependency/build directories and local tools. ClickHouse listens on the container interface while Compose publishes it on host loopback only; query threads and server memory are separately limited. The global thread-pool ceiling leaves enough room for background work and table initialization.
 
-No Redis, Kubernetes cluster or OpenTelemetry collector is installed. ClickHouse receives archive, browser and model events through durable PostgreSQL outboxes. Model bodies are uploaded to S3 with hash verification. Kubernetes follows stable service/isolation boundaries; see [development and deployment](./deployment.md).
+No Redis, Kubernetes cluster or OpenTelemetry collector is installed. Container output reaches ClickHouse through the log collector; see [service logs](./logs.md). ClickHouse receives archive, browser and model events through durable PostgreSQL outboxes. Model bodies are uploaded to S3 with hash verification. Kubernetes follows stable service/isolation boundaries; see [development and deployment](./deployment.md).
 
 ## Screenshot archive
 

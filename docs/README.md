@@ -35,6 +35,7 @@ Internal design and operator notes for Scout QA. The published user guide is sep
 - [Model gateway](./platform/model-gateway.md) — connect a provider, submit a call, and inspect usage
 - [Deployment](./platform/deployment.md) — local commands and the Kubernetes direction
 - [Workspace](./platform/workspace.md) — user workspace and operations console
+- [Service logs](./platform/logs.md) — every container's output, live in the back office, and what Scout prints
 
 ## Agents
 

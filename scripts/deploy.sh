@@ -107,19 +107,29 @@ if [[ "$bypass" == "true" && "$SCOUT_PUBLISH" != "127.0.0.1" ]]; then
   exit 1
 fi
 
+# The log collector reads container output through a proxy that runs as the
+# Docker socket's group. Docker Desktop's socket is group 0, the default.
+if [[ -z "${SCOUT_DOCKER_GID:-}" && "$(uname -s)" == Linux ]]; then
+  socket="${SCOUT_DOCKER_SOCKET:-/var/run/docker.sock}"
+  if [[ -S "$socket" ]]; then
+    SCOUT_DOCKER_GID=$(stat -c %g "$socket")
+    export SCOUT_DOCKER_GID
+  fi
+fi
+
 echo "Starting PostgreSQL, ClickHouse and evidence storage."
 docker compose up -d --build --wait postgres evidence clickhouse
 
 bash scripts/apply-schemas.sh
 
-echo "Starting the workspace, operator console, API and browser workers."
+echo "Starting the workspace, operator console, API, browser workers and log collector."
 echo "The first build compiles the API and the browser image."
 if [[ "$edge" == 1 ]]; then
   docker compose --profile edge up -d --build --wait \
-    api backoffice browser-worker browser-sandbox edge
+    api backoffice browser-worker browser-sandbox log-socket log-collector edge
 else
   docker compose up -d --build --wait \
-    api backoffice browser-worker browser-sandbox
+    api backoffice browser-worker browser-sandbox log-socket log-collector
 fi
 
 workspace_port="${SCOUT_WORKSPACE_PORT:-18080}"

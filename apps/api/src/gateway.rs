@@ -5,6 +5,7 @@
 use crate::identity::ScopedState;
 use crate::{
     error,
+    logs::emit as log,
     models::{CallResult, ModelRequest, Provider, interpret, wire_request},
     query,
 };
@@ -354,7 +355,11 @@ impl Gateway {
                         if let Err(code) = worker.recover().await {
                             worker.release_leader().await;
                             worker.set_role(Role::Starting);
-                            eprintln!("model_gateway_initializing: {code}");
+                            log(
+                                "warning",
+                                "model_gateway_initializing",
+                                json!({"error":code}),
+                            );
                             tokio::time::sleep(Duration::from_secs(2)).await;
                             continue;
                         }
@@ -363,14 +368,14 @@ impl Gateway {
                             if !worker.leader_alive().await {
                                 worker.release_leader().await;
                                 worker.set_role(Role::Starting);
-                                eprintln!("model_gateway_leader_connection_lost");
+                                log("warning", "model_gateway_leader_connection_lost", json!({}));
                                 break;
                             }
                             match worker.process_next().await {
                                 Ok(true) => continue,
                                 Ok(false) => {}
                                 Err("database_unavailable") => {
-                                    eprintln!("model_gateway_database_unavailable");
+                                    log("warning", "model_gateway_database_unavailable", json!({}));
                                     if !worker.leader_alive().await {
                                         worker.release_leader().await;
                                         worker.set_role(Role::Starting);
@@ -381,8 +386,10 @@ impl Gateway {
                                     // A failed local journal/settlement must stop new spending.
                                     // Keep the lock so another replica does not dispatch it.
                                     worker.set_role(Role::Halted);
-                                    eprintln!(
-                                        "model_gateway_halted: {code}; restart after restoring storage"
+                                    log(
+                                        "error",
+                                        "model_gateway_halted",
+                                        json!({"error":code,"action":"restart after restoring storage"}),
                                     );
                                     return;
                                 }
@@ -396,7 +403,11 @@ impl Gateway {
                     }
                     Err(code) => {
                         worker.set_role(Role::Starting);
-                        eprintln!("model_gateway_initializing: {code}");
+                        log(
+                            "warning",
+                            "model_gateway_initializing",
+                            json!({"error":code}),
+                        );
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
                 }
@@ -415,7 +426,7 @@ impl Gateway {
                             continue;
                         }
                         Ok(false) => {}
-                        Err(code) => eprintln!("model_export_pending: {code}"),
+                        Err(code) => log("warning", "model_export_pending", json!({"error":code})),
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(5)).await;
@@ -680,6 +691,11 @@ impl Gateway {
         tx.execute("INSERT INTO model_requests(request_id,workspace_id,user_id,run_id,action_id,provider,model,spec,spec_sha256,state,execution_mode,agent_id,funding_source,provider_key_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,$11,$12,$13)",&[&spec.request_id,&workspace_id,&user_id,&spec.run_id,&spec.action_id,&spec.provider.name(),&spec.model,&value,&sha,&self.execution_mode(),&agent_id,&funding.source,&funding.key_id]).await.map_err(|_| "database_unavailable")?;
         event(&tx,spec.request_id,None,"request_accepted",&json!({"spec":value,"training_status":if self.fixture_url.is_some(){"excluded_fixture"}else{"pending_review"}})).await?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
+        log(
+            "info",
+            "model_request_queued",
+            json!({"provider":spec.provider.name(),"model":spec.model,"request_id":spec.request_id,"run_id":spec.run_id,"action_id":spec.action_id,"execution_mode":self.execution_mode(),"funding":funding.source}),
+        );
         self.notify.notify_one();
         Ok(true)
     }
@@ -754,7 +770,7 @@ impl Gateway {
             0
         };
         let call_id = Uuid::new_v4();
-        {
+        let attempt = {
             let mut db = self.conn().await?;
             let tx = db.transaction().await.map_err(|_| "database_unavailable")?;
             // Admission can precede cancellation while images are loading or
@@ -805,8 +821,46 @@ impl Gateway {
             let reference = payload(&tx, call_id, "request", &bytes).await?;
             event(&tx,spec.request_id,Some(call_id),"call_dispatched",&json!({"attempt":attempt,"request":reference,"prompt":spec.prompt,"system":spec.system,"capture_ids":spec.capture_ids,"assessment_image_ids":spec.assessment_image_ids})).await?;
             tx.commit().await.map_err(|_| "database_unavailable")?;
+            attempt
+        };
+        // Identifiers and sizes only: the prompt, images and response stay in
+        // the request's stored evidence.
+        let call = json!({"provider":spec.provider.name(),"model":spec.model,"request_id":spec.request_id,"call_id":call_id,"run_id":spec.run_id,"action_id":spec.action_id,"attempt":attempt,"execution_mode":self.execution_mode(),"funding":source});
+        let mut started = call.clone();
+        started["endpoint"] = json!(self.endpoint(spec.provider));
+        started["images"] = json!(images.len());
+        started["request_bytes"] = json!(bytes.len());
+        if spec.computer_use {
+            started["computer_use"] = json!(true);
         }
+        log("info", "model_call_started", started);
         let result = self.invoke(&spec, call_id, &key, bytes).await;
+        let mut finished = call;
+        let u = &result.usage;
+        for (name, value) in [
+            ("state", json!(result.state)),
+            ("http_status", json!(result.http_status)),
+            ("elapsed_ms", json!(result.elapsed_ms)),
+            ("input_tokens", json!(u.input_tokens)),
+            ("output_tokens", json!(u.output_tokens)),
+            ("reasoning_tokens", json!(u.reasoning_tokens)),
+            ("cached_input_tokens", json!(u.cached_input_tokens)),
+            ("cost_usd", json!(u.cost_usd)),
+            ("returned_model", json!(result.returned_model)),
+            ("provider_request_id", json!(result.provider_request_id)),
+            ("error", json!(result.error)),
+        ] {
+            finished[name] = value;
+        }
+        log(
+            if result.state == "completed" {
+                "info"
+            } else {
+                "warning"
+            },
+            "model_call_finished",
+            finished,
+        );
         // A sync'd response journal survives a crash or database outage before
         // settlement. Database idempotency makes replay safe and non-billable.
         if let Err(code) = self.write_journal(&result).await {
@@ -870,6 +924,16 @@ impl Gateway {
         )
         .await?;
         tx.commit().await.map_err(|_| "database_unavailable")?;
+        let cancelled = code == "run_cancelled_before_dispatch";
+        log(
+            if cancelled { "info" } else { "warning" },
+            if cancelled {
+                "model_request_cancelled"
+            } else {
+                "model_request_failed"
+            },
+            json!({"request_id":id,"error":code,"provider_dispatched":false}),
+        );
         Ok(())
     }
 
@@ -881,14 +945,9 @@ impl Gateway {
         body: Vec<u8>,
     ) -> CallResult {
         let start = Instant::now();
-        let endpoint = self
-            .fixture_url
-            .as_ref()
-            .map(|base| format!("{base}/{}", spec.provider.name()))
-            .unwrap_or_else(|| spec.provider.endpoint().into());
         let mut request = self
             .http
-            .post(endpoint)
+            .post(self.endpoint(spec.provider))
             .header("content-type", "application/json")
             .body(body);
         if spec.provider == Provider::Anthropic {
@@ -978,6 +1037,59 @@ impl Gateway {
         }
         result.elapsed_ms = Some(start.elapsed().as_millis().min(i64::MAX as u128) as i64);
         result
+    }
+
+    fn endpoint(&self, provider: Provider) -> String {
+        self.fixture_url
+            .as_ref()
+            .map(|base| format!("{base}/{}", provider.name()))
+            .unwrap_or_else(|| provider.endpoint().into())
+    }
+
+    /// Read-only ClickHouse query with bound `{name:Type}` parameters, as
+    /// JSONEachRow objects. 64-bit integers come back as JSON numbers.
+    pub(crate) async fn clickhouse_rows(
+        &self,
+        sql: &str,
+        params: &[(String, String)],
+    ) -> GResult<Vec<Value>> {
+        let mut query = vec![
+            ("readonly".to_owned(), "2".to_owned()),
+            ("max_execution_time".to_owned(), "5".to_owned()),
+            (
+                "output_format_json_quote_64bit_integers".to_owned(),
+                "0".to_owned(),
+            ),
+        ];
+        query.extend(
+            params
+                .iter()
+                .map(|(k, v)| (format!("param_{k}"), v.clone())),
+        );
+        let response = self
+            .http
+            .post(&self.clickhouse_url)
+            .query(&query)
+            .header("x-clickhouse-user", "scout")
+            .header("x-clickhouse-key", &self.clickhouse_password)
+            .body(sql.to_owned())
+            .timeout(Duration::from_secs(8))
+            .send()
+            .await
+            .map_err(|_| "clickhouse_unavailable")?;
+        if !response.status().is_success() {
+            return Err("clickhouse_query_failed");
+        }
+        let body = response
+            .bytes()
+            .await
+            .map_err(|_| "clickhouse_unavailable")?;
+        std::str::from_utf8(&body)
+            .map_err(|_| "clickhouse_unexpected_response")?
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_str(line).map_err(|_| "clickhouse_unexpected_response"))
+            .collect()
     }
 
     async fn count_demo_input(&self, key: &str, body: &[u8]) -> GResult<i64> {

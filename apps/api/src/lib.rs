@@ -20,6 +20,7 @@ pub mod history;
 pub mod identity;
 pub mod issues;
 pub mod jobs;
+pub mod logs;
 pub mod memory;
 use identity::{Principal, ScopedState};
 pub mod models;
@@ -257,6 +258,7 @@ pub fn router(state: AppState) -> Router {
             "/v1/admin/demo",
             get(provider_access::admin_get).post(provider_access::admin_update),
         )
+        .route("/v1/admin/logs", get(logs::list))
         .route(
             "/v1/model-requests",
             axum::routing::post(gateway::submit).layer(axum::extract::DefaultBodyLimit::max(
@@ -306,6 +308,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(|| async { Json(json!({"status":"ok","service":"scout-api","version":env!("CARGO_PKG_VERSION")})) }))
         .merge(protected)
         .merge(mcp)
+        .layer(middleware::from_fn(logs::access_log))
         .layer(middleware::from_fn(no_store))
         .with_state(state)
 }
@@ -810,6 +813,30 @@ mod tests {
         app.oneshot(builder.body(Body::empty()).unwrap())
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn operator_logs_require_a_token_and_validate_before_reading_clickhouse() {
+        let bearer = format!("Bearer {TOKEN}");
+        let status = |response: Response| response.status();
+        assert_eq!(
+            status(request("/v1/admin/logs", None).await),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(request("/v1/admin/logs?level=loud", Some(&bearer)).await),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status(request("/v1/admin/logs?unknown=1", Some(&bearer)).await),
+            StatusCode::BAD_REQUEST
+        );
+        // No gateway means no ClickHouse connection in this test state.
+        let response = request("/v1/admin/logs?level=info&limit=5", Some(&bearer)).await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024).await.unwrap()).unwrap();
+        assert_eq!(body["error"], "logs_unavailable");
     }
 
     #[tokio::test]

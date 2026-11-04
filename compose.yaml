@@ -326,10 +326,75 @@ services:
     cpus: 2
     restart: unless-stopped
 
+  # Read-only Docker API for the log collector: it answers container listing,
+  # inspection, log streaming and events, and refuses everything else. Only the
+  # collector can reach it, on the internal logs network.
+  log-socket:
+    image: wollomatic/socket-proxy:1.13.1@sha256:3935b709275e4ec35d6ed5a5c4a1f0d01ed31eec5e7234efc3357ecd47689002
+    command:
+      - -loglevel=WARN
+      - -listenip=0.0.0.0
+      - -allowfrom=log-collector
+      # Each pattern must match the whole path; the proxy anchors it.
+      - -allowGET=/(v[0-9.]+/)?(_ping|version|events|containers/json|containers/[a-zA-Z0-9_.-]+/(json|logs))
+      - -allowHEAD=/(v[0-9.]+/)?_ping
+      - -watchdoginterval=60
+      - -stoponwatchdog
+      - -shutdowngracetime=5
+    # The socket's group: 0 on Docker Desktop, the docker group on Linux hosts
+    # (scripts/deploy.sh sets it).
+    user: '65534:${SCOUT_DOCKER_GID:-0}'
+    volumes:
+      - ${SCOUT_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    networks:
+      logs: {}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 32m
+    cpus: 0.25
+    restart: unless-stopped
+
+  # Ships every container's stdout and stderr to ClickHouse for the back office
+  # Logs tab (infra/logs/vector.yaml, docs/platform/logs.md).
+  log-collector:
+    image: timberio/vector:0.60.0-alpine@sha256:1c6a6c4c5c9de08df357fa8adbe72e5a7abcea458b0bd82de0b14ac9b79d5b31
+    command: [--config, /etc/vector/vector.yaml]
+    environment:
+      # Read through the exec secret backend in vector.yaml, not interpolated.
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Run node scripts/setup-local.mjs}
+      VECTOR_LOG: warn
+      VECTOR_LOG_FORMAT: json
+    volumes:
+      - ./infra/logs/vector.yaml:/etc/vector/vector.yaml:ro
+    tmpfs:
+      - /var/lib/vector:size=16m,mode=1777
+    networks:
+      default: {}
+      logs: {}
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      log-socket: { condition: service_started }
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8686/health']
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    user: '65534:65534'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    restart: unless-stopped
+
 networks:
   default: {}
   # Target sites and the browser. Scout's storage, API and model gateway are not on it.
   browser: {}
+  # The log collector and its Docker API proxy, with no route out.
+  logs:
+    internal: true
 
 volumes:
   postgres-data:
