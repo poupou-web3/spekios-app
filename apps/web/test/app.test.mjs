@@ -444,7 +444,7 @@ test('a test can run under a project and on its own model; readiness follows the
   const html=ui.launchChoices();
   assert.match(html,/id="launch-project"[\s\S]*Shop &lt;b&gt; · claude-sonnet-5-5[\s\S]*22222222/);
   assert.match(html,/id="launch-model"[\s\S]*openrouter\/free \(default\)/);
-  assert.doesNotMatch(html,/vendor\/paid/,'Free-only hides paid OpenRouter models.');
+  assert.match(html,/id="launch-model"[\s\S]*vendor\/paid[\s\S]*gpt-6\.1-sol[\s\S]*Sonnet/,'Every saved model is offered: OpenRouter before OpenAI and Anthropic.');
   ui.state.launchProject=project;
   assert.deepEqual({...ui.launchModel()},{provider:'anthropic',model:'claude-sonnet-5-5',label:'claude-sonnet-5-5',source:'project'});
   assert.match(ui.launchChoices(),/claude-sonnet-5-5 \(project\)/);
@@ -459,9 +459,7 @@ test('a test can run under a project and on its own model; readiness follows the
   ui.state.launchProject='33333333-3333-4333-8333-333333333333';ui.state.launchModel='openrouter|vendor/paid';
   request=ui.explorationRequest(fields);
   assert.equal(request.project_id,undefined,'A project no longer in settings is not sent.');
-  assert.equal(request.model,undefined,'A model hidden by free-only is not sent.');
-  ui.state.settings={...ui.state.settings,freeOnly:false};
-  assert.deepEqual({...ui.explorationRequest(fields).model},{provider:'openrouter',model:'vendor/paid',free_only:false},'A paid OpenRouter pick turns free-only off for this test.');
+  assert.deepEqual({...request.model},{provider:'openrouter',model:'vendor/paid',free_only:false},'A paid OpenRouter pick turns free-only off for this test.');
   ui.state.settings={provider:'openrouter',model:'openrouter/free'};
   assert.equal(ui.launchChoices(),'','Nothing to choose without saved models or projects.');
 });

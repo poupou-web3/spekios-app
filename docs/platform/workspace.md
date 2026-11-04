@@ -63,7 +63,6 @@ Open **Settings** in the workspace. Supported fields are:
 | Limits | Optional maximum actions (1–10,000), minutes (1–10,080), reported tokens and reported cost; empty means no limit. Stop after 50 consecutive actions with nothing new, unless turned off |
 | Limit overrides | Different limits for a project, a model or a model within a project; the most specific matching override wins |
 | Default viewport | Desktop, tablet or mobile |
-| Restrict OpenRouter to free model IDs | Requires `openrouter/free` or a model ending in `:free`; direct-provider calls, including Meta AI, use their own API billing |
 | Automatic checks by default | Optional boolean; each URL launch can explicitly override it |
 | Maximum automatic cases | Integer from 1 to 3 |
 | Total additional replay actions | Integer from 1 to 100 across complete selected paths |

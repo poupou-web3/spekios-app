@@ -1,14 +1,14 @@
 ---
 {
   "title": "Connect a model provider",
-  "description": "Configure OpenAI, Anthropic, OpenRouter or Meta AI API access, understand free-only routing, saved defaults and nullable token/cost accounting.",
-  "reviewed": "2026-11-03",
+  "description": "Configure Meta AI, OpenRouter, OpenAI or Anthropic API access, saved defaults, per-project and per-run models, and nullable token/cost accounting.",
+  "reviewed": "2026-11-04",
   "sidebar": {
     "order": 3
   }
 }
 ---
-Spekios supports OpenAI, Anthropic, OpenRouter and Meta AI. Use the sponsored demo connection or add your own named API keys in **Settings → Models**.
+Spekios supports Meta AI, OpenRouter, OpenAI and Anthropic. Model menus list Meta first, then OpenRouter. Use the sponsored demo connection or add your own named API keys in **Settings → Models**.
 
 ## Demo credits
 
@@ -28,7 +28,7 @@ Self-hosted operators can still configure environment keys for local/operator wo
 
 ## Save nonsecret defaults
 
-In the workspace, open **Settings → Models**. Under **Your models**, pick a listed model or type another model ID. Listed models already have a name and a standard price: Meta AI (including Muse Spark), Claude and ChatGPT on their own providers, and those same models plus DeepSeek, Mistral and GLM on OpenRouter. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Choose an **API key** independently of each model. A missing or removed key prevents new tests until you select a usable connection. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
+In the workspace, open **Settings → Models**. Under **Your models**, pick a listed model or type another model ID. Listed models already have a name and a standard price: Meta AI (including Muse Spark), ChatGPT and Claude on their own providers, and those same models plus DeepSeek, Mistral and GLM on OpenRouter. Then choose the **Exploration model** and an optional cheaper **Navigation model** from that list and select **Save defaults**. Choose an **API key** independently of each model. A missing or removed key prevents new tests until you select a usable connection. Viewport, strategy and limits are under **Settings → Exploration** and **Settings → Limits**.
 
 Defaults are append-only revisions. A newly admitted job freezes its effective settings; retries preserve the original admission. Your model list is saved with the defaults, but jobs do not freeze it.
 
@@ -42,13 +42,13 @@ A run uses, in order of precedence:
 
 The job records where its model came from in `settings.modelSource` (`run`, `project` or `default`), and the run page says so next to the model. Limit overrides for a model match the model the run ends up using. **GET /v1/projects**, **scout_list_projects** and **scout_get_project** show the model and limits a new run in each project would use, so agents can look up project IDs before starting work.
 
-Free-only stays on for a project or run choice unless it picks a paid OpenRouter model, and when **Restrict OpenRouter to free model IDs** is on the workspace only offers free OpenRouter models there. A free-only choice never inherits a paid OpenRouter navigation model; the run uses one model instead.
+The workspace does not offer an OpenRouter free-only switch: every saved model can be chosen, and saving **Models** clears a free-only default saved earlier. A project or run choice made in the workspace keeps free-only only when its OpenRouter model ID is itself free. A free-only choice never inherits a paid OpenRouter navigation model; the run uses one model instead.
 
 Preferences select saved keys by opaque reference. Key values are managed separately; allowed origins remain operator configuration.
 
-## OpenRouter free-only mode
+## OpenRouter free-only mode (API)
 
-When enabled, the model ID must be **openrouter/free** or end in **:free**. The gateway checks that the returned routing/pricing metadata satisfies its zero-price constraints and does not accept a paid fallback list or paid plugins.
+The API and agent tools still accept `free_only`. When it is on, the model ID must be **openrouter/free** or end in **:free**. The gateway checks that the returned routing/pricing metadata satisfies its zero-price constraints and does not accept a paid fallback list or paid plugins.
 
 Free-only mode applies to OpenRouter. It is normalized off for direct OpenAI, Anthropic and Meta AI connections.
 

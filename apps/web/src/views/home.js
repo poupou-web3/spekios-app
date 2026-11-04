@@ -1,6 +1,6 @@
 // Workspace home: launch form, setup checklist and the runs table.
 import {button,empty,icon,pill} from '/assets/ui/components.js';
-import {date,elapsed,esc,fixture,name,number,providerName,runStatus,short} from '/assets/ui/format.js';
+import {date,elapsed,esc,fixture,name,number,providerName,providerRank,runStatus,short} from '/assets/ui/format.js';
 import {continueButton,restartButton,STOPPED} from '../jobs.js';
 import {state} from '../state.js';
 import {freeModel} from './settings.js';
@@ -22,10 +22,9 @@ export function launchProjects(){
   for(const o of Array.isArray(state.settings.limitOverrides)?state.settings.limitOverrides:[])if(o?.projectId&&!projects.has(o.projectId))projects.set(o.projectId,{projectId:o.projectId});
   return [...projects.values()];
 }
-// Models a single test can choose: the saved list. With free-only on, paid OpenRouter models are left out.
+// Models a single test can choose: the saved list, Meta first, then OpenRouter.
 export function launchModels(){
-  const restricted=state.settings.provider==='openrouter'&&state.settings.freeOnly===true;
-  return (Array.isArray(state.settings.savedModels)?state.settings.savedModels:[]).filter(m=>m?.provider&&m?.model&&!(restricted&&m.provider==='openrouter'&&!freeModel(m.model)));
+  return (Array.isArray(state.settings.savedModels)?state.settings.savedModels:[]).filter(m=>m?.provider&&m?.model).sort((a,b)=>providerRank(a.provider)-providerRank(b.provider));
 }
 const choiceOf=m=>`${m.provider}|${m.model}`;
 // The model the next test will use: chosen for this test, else its project's, else the default.
