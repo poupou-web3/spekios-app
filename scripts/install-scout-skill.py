@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the three-file Scout skill using only Python's standard library."""
+"""Install the three-file Spekios skill using only Python's standard library."""
 
 import argparse
 import json
@@ -52,7 +52,7 @@ def install(package_root, target, dry_run=False):
             return "Already installed; no files changed: " + str(target)
         raise ValueError("A different skill already exists; review it before replacing it: " + str(target))
     if dry_run:
-        return "Would install ScoutQA " + manifest["version"] + " to " + str(target)
+        return "Would install Spekios " + manifest["version"] + " to " + str(target)
 
     # Reserve a new directory exclusively. Never merge into or replace a skill.
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ def install(package_root, target, dry_run=False):
         except OSError:
             pass
         raise
-    return "Installed ScoutQA " + manifest["version"] + " to " + str(target)
+    return "Installed Spekios " + manifest["version"] + " to " + str(target)
 
 
 def main():
@@ -95,9 +95,9 @@ def main():
     try:
         result = install(package_root, destination(args.client, args.project, args.skills_dir), args.dry_run)
     except (OSError, ValueError, KeyError) as error:
-        parser.exit(1, "Scout skill installation failed: " + str(error) + "\n")
+        parser.exit(1, "Spekios skill installation failed: " + str(error) + "\n")
     print(result)
-    print("Connect Scout MCP or configure HTTP separately. No services, permissions or credentials were changed.")
+    print("Connect Spekios MCP or configure HTTP separately. No services, permissions or credentials were changed.")
 
 
 if __name__ == "__main__":

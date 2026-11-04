@@ -223,7 +223,7 @@ pub fn tools() -> Vec<Tool> {
         ),
         tool(
             "scout_status",
-            "Inspect Scout readiness, configured provider availability, operator scope and defaults. No model call.",
+            "Inspect Spekios readiness, configured provider availability, operator scope and defaults. No model call.",
             schema(json!({}), &[]),
             true,
             false,

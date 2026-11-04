@@ -1,18 +1,18 @@
 ---
 {
   "title": "Triage findings and recheck a deploy",
-  "description": "Decide whether a Scout issue is a bug, intended behavior or a duplicate, let later runs recognize it, and recheck every open issue after a deploy from the workspace, an agent or CI.",
+  "description": "Decide whether a Spekios issue is a bug, intended behavior or a duplicate, let later runs recognize it, and recheck every open issue after a deploy from the workspace, an agent or CI.",
   "reviewed": "2026-11-03",
   "sidebar": {"order": 3}
 }
 ---
-Scout records every suspected problem as a permanent issue. Triage decides what each issue is, so Scout knows what to keep checking and what to recognize next time.
+Spekios records every suspected problem as a permanent issue. Triage decides what each issue is, so Spekios knows what to keep checking and what to recognize next time.
 
 ## Decide what an issue is
 
 Open **Issues & fixes**, choose an issue and answer **What is this?**:
 
-| Decision | Meaning | What Scout does next |
+| Decision | Meaning | What Spekios does next |
 | --- | --- | --- |
 | **Bug** | The app should behave as expected. | Keeps it open, includes it in deployment rechecks, and records matching repeats on the same issue. |
 | **Intended behavior** | The app works as designed; the expectation was wrong. | Keeps the decision on matching repeats; a different failure on the control needs its own review. |
@@ -21,11 +21,11 @@ Open **Issues & fixes**, choose an issue and answer **What is this?**:
 
 Write why: what the product should do, and the evidence for it. Every decision is kept, with who made it and when.
 
-Agents can triage too, with **scout_triage_issue**. Their decisions are shown as made by an agent. An agent cannot replace a decision made by a person; a person can change any decision. Earlier automatic matching decisions remain visible with their Scout attribution. New unmatched failures are left for review.
+Agents can triage too, with **scout_triage_issue**. Their decisions are shown as made by an agent. An agent cannot replace a decision made by a person; a person can change any decision. Earlier automatic matching decisions remain visible with their Spekios attribution. New unmatched failures are left for review.
 
 ## How later runs recognize known behavior
 
-A later run can reach the same behavior by a different path. Scout compares the page address without its fragment, the control and action, exact viewport, project, execution mode, saved sign-in account and normalized expected/observed behavior. Case and whitespace differences are ignored. A matching failure adds an occurrence to the existing issue, so its triage and review history remain intact.
+A later run can reach the same behavior by a different path. Spekios compares the page address without its fragment, the control and action, exact viewport, project, execution mode, saved sign-in account and normalized expected/observed behavior. Case and whitespace differences are ignored. A matching failure adds an occurrence to the existing issue, so its triage and review history remain intact.
 
 A different or paraphrased failure on the same control remains a separate finding. **Related findings** shows possible matches and manually linked duplicates; a person or agent can review the evidence and link a duplicate explicitly. This avoids carrying an intended-behavior decision over to a new bug on the same button.
 
@@ -49,7 +49,7 @@ SCOUT_API=https://scout.internal.example SCOUT_TOKEN=$SCOUT_AGENT_TOKEN \
   --source https://staging.example --label "$GIT_SHA"
 ~~~
 
-It waits for every verdict and exits 1 if any issue still reproduces. With **--strict** it also fails when a check was blocked, inconclusive or could not run. Set **SCOUT_RECHECK_ID** to a UUID derived from the CI run to make a retried step reuse the same recheck. The token needs the **runs:write** scope. Run the same script from cron or a scheduled CI job for periodic rechecks; Scout has no built-in scheduler.
+It waits for every verdict and exits 1 if any issue still reproduces. With **--strict** it also fails when a check was blocked, inconclusive or could not run. Set **SCOUT_RECHECK_ID** to a UUID derived from the CI run to make a retried step reuse the same recheck. The token needs the **runs:write** scope. Run the same script from cron or a scheduled CI job for periodic rechecks; Spekios has no built-in scheduler.
 
 A **resolved** item means the recorded expected behavior was observed on that deployment. It is not proof of a production fix or full coverage.
 

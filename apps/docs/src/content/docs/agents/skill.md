@@ -1,18 +1,18 @@
 ---
 {
   "title": "Install the lightweight agent skill",
-  "description": "Install ScoutQA’s small Agent Skills package for Codex, Claude Code or a compatible agent, then submit URLs and retrieve evidence-backed feedback.",
+  "description": "Install Spekios’s small Agent Skills package for Codex, Claude Code or a compatible agent, then submit URLs and retrieve evidence-backed feedback.",
   "reviewed": "2026-10-29",
   "sidebar": {
     "order": 0
   }
 }
 ---
-Install the **scout-qa** skill to give an agent a short starting workflow for Scout. It explains which tools to call, how to return for a report and how to investigate findings without confusing AI suspicion with human confirmation.
+Install the **scout-qa** skill to give an agent a short starting workflow for Spekios. It explains which tools to call, how to return for a report and how to investigate findings without confusing AI suspicion with human confirmation.
 
 The package contains three text files: **SKILL.md**, client metadata and an optional HTTP reference. There is no SDK, daemon, executable hook, embedded token or automatic MCP configuration. Only the small entry point needs to be loaded for ordinary use.
 
-## Install from a Scout checkout
+## Install from a Spekios checkout
 
 Run from the repository root, using Python 3.9 or newer:
 
@@ -24,7 +24,7 @@ python3 scripts/install-scout-skill.py --client codex
 python3 scripts/install-scout-skill.py --client claude
 ~~~
 
-The installer uses only Python's standard library. It copies the allowlisted instruction files into a new **scout-qa** folder and does not start Scout, spend model usage or change client permissions.
+The installer uses only Python's standard library. It copies the allowlisted instruction files into a new **scout-qa** folder and does not start Spekios, spend model usage or change client permissions.
 
 | Client | User installation | Project installation |
 | --- | --- | --- |
@@ -59,9 +59,9 @@ For Claude Code, use **$HOME/.claude/skills** as the extraction destination. The
 
 The checksum verifies download integrity. It is not a publisher signature; obtain the package and checksum from a documentation deployment you trust.
 
-## Connect Scout once
+## Connect Spekios once
 
-Follow [Connect your agent](../connect/) to add the HTTP connection URL and approve in your browser. The local Rust bridge remains an optional developer path. Scout must already be running. A skill teaches an agent how to use the connection; installing instructions alone does not create it.
+Follow [Connect your agent](../connect/) to add the HTTP connection URL and approve in your browser. The local Rust bridge remains an optional developer path. Spekios must already be running. A skill teaches an agent how to use the connection; installing instructions alone does not create it.
 
 If MCP is unavailable, the skill's optional HTTP reference explains the same tool dispatcher. Configure the trusted API origin and token through your agent's local secret mechanism. Do not paste credentials into a prompt or embed them in the skill.
 
@@ -81,7 +81,7 @@ In Claude Code:
 /scout-qa Explore https://your-app.example/ and report the findings.
 ~~~
 
-Replace the example URL with an exact permitted origin reachable by Scout's browser worker. To inspect existing work, give the saved job/run ID instead of asking for another exploration.
+Replace the example URL with an exact permitted origin reachable by Spekios's browser worker. To inspect existing work, give the saved job/run ID instead of asking for another exploration.
 
 For a coding agent with repository access, add that it should investigate a selected finding and fix it if appropriate. The skill preserves your requested scope; asking for a report does not implicitly request code changes.
 
@@ -96,6 +96,6 @@ For a coding agent with repository access, add that it should investigate a sele
 - Keep the permanent issue ID, submit a candidate with **scout_verify_fix** and report its recorded outcome with original/candidate evidence and usage.
 - Cancel durable work explicitly when asked.
 
-Agents can change an active exploration’s [testing focus](../../guides/testing-focus/) through the documented tools. The skill does not provide direct browser driving, source-code diagnosis, training approval or access to private sign-in material. Scout continues using its configured provider's API access; installing a skill does not transfer a client subscription allowance.
+Agents can change an active exploration’s [testing focus](../../guides/testing-focus/) through the documented tools. The skill does not provide direct browser driving, source-code diagnosis, training approval or access to private sign-in material. Spekios continues using its configured provider's API access; installing a skill does not transfer a client subscription allowance.
 
 Read the [full agent workflow](../workflow/) or [tool reference](../tools/) when you need more detail.

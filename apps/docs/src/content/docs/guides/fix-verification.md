@@ -1,7 +1,7 @@
 ---
-{"title":"Verify a candidate fix","description":"Follow a permanent ScoutQA issue from its frozen expectation and original screenshots to a fresh-browser candidate verification, shared across the dashboard, MCP and REST API.","reviewed":"2026-11-03","sidebar":{"order":5}}
+{"title":"Verify a candidate fix","description":"Follow a permanent Spekios issue from its frozen expectation and original screenshots to a fresh-browser candidate verification, shared across the dashboard, MCP and REST API.","reviewed":"2026-11-03","sidebar":{"order":5}}
 ---
-Scout assigns a permanent UUID to a completed, evidence-backed suspected behavior mismatch. That issue keeps its original expected result, actual behavior, action path and screenshot references. Repeated observations with the same page, control, viewport, project, execution mode, saved account and normalized expected/observed behavior share the ID, even when reached by a different path. Matching normalizes case and whitespace; paraphrased expectations or different failures remain separate findings for review.
+Spekios assigns a permanent UUID to a completed, evidence-backed suspected behavior mismatch. That issue keeps its original expected result, actual behavior, action path and screenshot references. Repeated observations with the same page, control, viewport, project, execution mode, saved account and normalized expected/observed behavior share the ID, even when reached by a different path. Matching normalizes case and whitespace; paraphrased expectations or different failures remain separate findings for review.
 
 ## Follow an issue in the dashboard
 
@@ -33,7 +33,7 @@ spekios verification show <verification-uuid>
 
 A matching failure adds an occurrence to the permanent issue and keeps its original evidence and triage decision. Existing issue IDs survive the matching upgrade. Historical IDs are not silently merged.
 
-Tracking distinguishes **new**, **observed again**, **checking**, **verified on candidate**, **still reproducible**, **blocked** and **inconclusive**. A later failure after a successful candidate check becomes **observed again** while retaining that earlier check in history. The candidate URL and caller-supplied deployment label stay attached to each check. Scout does not infer a production fix, or a regression on the same deployment, from these labels alone.
+Tracking distinguishes **new**, **observed again**, **checking**, **verified on candidate**, **still reproducible**, **blocked** and **inconclusive**. A later failure after a successful candidate check becomes **observed again** while retaining that earlier check in history. The candidate URL and caller-supplied deployment label stay attached to each check. Spekios does not infer a production fix, or a regression on the same deployment, from these labels alone.
 
 Not seeing a bug in another exploration never closes it. Only a targeted positive candidate check can produce **resolved**, and that verdict applies to the checked deployment and preconditions.
 
@@ -50,7 +50,7 @@ A completed browser job alone is insufficient. No new suspicion is insufficient.
 
 ## Preconditions and deployment mapping
 
-Scout inherits the original viewport, action parameters and expected result. It maps the original entry URL to your explicit candidate entry URL and other recorded same-origin routes to the candidate origin. External routes remain subject to the existing allowlist. New native control IDs are bound only after matching the recorded page text, control states, route, viewport and authenticated/public context. Clock and date labels, and scroll within 8 pixels, still match. A changed control or meaningful page context stops dispatch and remains inconclusive. Appearance alone may change; every new screenshot and difference mask is stored independently. Fresh reproduction of a suspect uses this same comparison.
+Spekios inherits the original viewport, action parameters and expected result. It maps the original entry URL to your explicit candidate entry URL and other recorded same-origin routes to the candidate origin. External routes remain subject to the existing allowlist. New native control IDs are bound only after matching the recorded page text, control states, route, viewport and authenticated/public context. Clock and date labels, and scroll within 8 pixels, still match. A changed control or meaningful page context stops dispatch and remains inconclusive. Appearance alone may change; every new screenshot and difference mask is stored independently. Fresh reproduction of a suspect uses this same comparison.
 
 This initial implementation is deliberately conservative about content and data changes. It does not invent a replacement journey when the original preconditions cannot be reached. Both live and simulated provider modes are supported, but a simulated source cannot be silently verified using a live provider or vice versa.
 

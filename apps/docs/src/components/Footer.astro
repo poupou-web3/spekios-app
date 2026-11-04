@@ -5,7 +5,7 @@ const { entry } = Astro.locals.starlightRoute;
 ---
 <DefaultFooter />
 <div class="docs-footer" data-pagefind-ignore>
-  <p>ScoutQA · Local developer preview{entry.data.reviewed && <> · Reviewed <time datetime={entry.data.reviewed}>{entry.data.reviewed}</time></>}</p>
+  <p>Spekios · Local developer preview{entry.data.reviewed && <> · Reviewed <time datetime={entry.data.reviewed}>{entry.data.reviewed}</time></>}</p>
   <nav aria-label="Documentation resources">
     <a href={settings.href('llms.txt')}>LLM index</a>
     <a href={settings.href('openapi.json')}>OpenAPI</a>

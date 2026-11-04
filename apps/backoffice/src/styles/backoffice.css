@@ -9,7 +9,12 @@
 .ops-header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 32px; border-bottom: 1px solid var(--border); background: var(--bg); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: saturate(1.4) blur(10px); }
 .ops-header .brand { padding: 0; font-size: 19px; }
 .ops-header .brand small { margin-left: 4px; padding: 3px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); }
-.ops-app .mark, .login .mark { background: var(--text); color: var(--bg); }
+/* Same circular signal mark as the customer workspace, with a cobalt dot so operators know they are in the back office. */
+.ops-app .mark, .login .mark { width: 24px; height: 24px; border: 1.5px solid var(--text); border-radius: 50%; background: transparent; }
+.ops-app .mark svg, .login .mark svg { display: none; }
+.ops-app .mark::before, .login .mark::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--brand); }
+.boot-mark { border: 1.5px solid var(--text); border-radius: 50%; background: transparent; }
+.boot-mark::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--brand); }
 .ops-status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
 .ops-header .topbar-right { margin-left: auto; }
 .backoffice-heading { margin-bottom: 8px; }

@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Store } from './store.js';
 
 // Target sites run in the browser sandbox containers whenever an endpoint is
-// configured. A sandbox holds no Scout credentials, joins only the browser
+// configured. A sandbox holds no Spekios credentials, joins only the browser
 // network and serves one connection before it restarts, so every run gets a
 // fresh browser. Without an endpoint Chromium runs in this process's container;
 // tests use that for fixtures served in-process.

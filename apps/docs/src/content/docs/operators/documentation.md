@@ -1,7 +1,7 @@
 ---
 {
   "title": "Self-host these docs",
-  "description": "Build and deploy ScoutQA documentation as static HTML with Astro Starlight, local search, Markdown exports, OpenAPI, sitemap and Docker.",
+  "description": "Build and deploy Spekios documentation as static HTML with Astro Starlight, local search, Markdown exports, OpenAPI, sitemap and Docker.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 5
@@ -88,6 +88,6 @@ The site delivers useful page text in static HTML, stable headings, crawlable li
 
 These foundations make content accessible to crawlers and LLM consumers. No metadata, llms file or schema guarantees rankings or AI citations. This site does not invent geographic offices, reviews or customer claims.
 
-The site tooling, Astro and Starlight, is MIT licensed. Hosting resources and domains remain your responsibility; this does not assign a new license to Scout’s product code.
+The site tooling, Astro and Starlight, is MIT licensed. Hosting resources and domains remain your responsibility; this does not assign a new license to Spekios’s product code.
 
 For the underlying guidance, see [Astro static deployment](https://docs.astro.build/en/guides/deploy/), [Starlight](https://starlight.astro.build/), [the llms.txt proposal](https://llmstxt.org/) and [Google’s AI search guidance](https://developers.google.com/search/docs/appearance/ai-features).

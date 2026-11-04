@@ -1,6 +1,6 @@
 {
   "app": "Larchwood",
-  "about": "Every bug the shop ships with, and four behaviours that look odd but are correct. 'match' tells the scorer which recorded actions trigger an entry. before and after are regular expressions on the page path and query before and after the action; role and control match the control Scout used; every: n means only every nth matching action in a run triggers it.",
+  "about": "Every bug the shop ships with, and four behaviours that look odd but are correct. 'match' tells the scorer which recorded actions trigger an entry. before and after are regular expressions on the page path and query before and after the action; role and control match the control Spekios used; every: n means only every nth matching action in a run triggers it.",
   "bugs": [
     {
       "id": "wishlist-dead",

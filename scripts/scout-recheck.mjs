@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Recheck a deployment against every open Scout issue, then wait for the
+// Recheck a deployment against every open Spekios issue, then wait for the
 // verdicts. Built for CI after a deploy: no dependencies beyond Node 22.
 //
 //   node scripts/scout-recheck.mjs --candidate https://preview-42.example \
 //     [--source https://staging.example] [--label "commit abc123"] [--strict]
 //
-// Token: SCOUT_TOKEN (an agent credential with runs:write) or, on the Scout
+// Token: SCOUT_TOKEN (an agent credential with runs:write) or, on the Spekios
 // machine itself, SCOUT_API_TOKEN from .env. API: SCOUT_API (default local).
 // Exit 0 when no issue is still reproducible (with --strict: and every issue
 // was checked and resolved), 1 on regressions, 2 when the recheck was refused,
@@ -24,9 +24,9 @@ if (!args.candidate) fail(2, 'Pass --candidate with the deployment URL to rechec
 const api = (args.api ?? process.env.SCOUT_API ?? 'http://127.0.0.1:18080').replace(/\/+$/, '');
 let token = process.env.SCOUT_TOKEN;
 if (!token) {
-  try { token = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8')).SCOUT_API_TOKEN; } catch { /* Not on the Scout machine. */ }
+  try { token = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8')).SCOUT_API_TOKEN; } catch { /* Not on the Spekios machine. */ }
 }
-if (!token) fail(2, 'Set SCOUT_TOKEN to a Scout agent credential with runs:write.');
+if (!token) fail(2, 'Set SCOUT_TOKEN to a Spekios agent credential with runs:write.');
 // The same recheck ID makes a retried CI step reuse every admitted check.
 const recheckId = args['recheck-id'] ?? process.env.SCOUT_RECHECK_ID ?? randomUUID();
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recheckId)) fail(2, 'The recheck ID must be a UUID.');
@@ -38,9 +38,9 @@ async function call(path, body) {
         headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body && JSON.stringify(body) });
       const value = await response.json().catch(() => ({}));
       if (response.ok) return value;
-      if (response.status < 500 || attempt >= 5) fail(2, `Scout refused the recheck: ${value.error ?? 'HTTP ' + response.status}`);
+      if (response.status < 500 || attempt >= 5) fail(2, `Spekios refused the recheck: ${value.error ?? 'HTTP ' + response.status}`);
     } catch (error) {
-      if (attempt >= 5) fail(2, `Scout is unreachable at ${api}: ${error.message}`);
+      if (attempt >= 5) fail(2, `Spekios is unreachable at ${api}: ${error.message}`);
     }
     await delay(2000 * attempt);
   }

@@ -1,7 +1,7 @@
 ---
 {
   "title": "Models, usage and settings API",
-  "description": "Inspect provider availability, submit bounded model requests, read nullable usage and save revisioned Scout exploration defaults.",
+  "description": "Inspect provider availability, submit bounded model requests, read nullable usage and save revisioned Spekios exploration defaults.",
   "reviewed": "2026-10-29",
   "sidebar": {
     "order": 7

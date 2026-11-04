@@ -241,7 +241,7 @@
 
 # Run from the real release path (not the symlink) so Compose bind mounts point
 # at this release and an edited Caddyfile recreates the edge container.
-- name: Build and start Scout (the first build compiles the API; allow ~20 minutes)
+- name: Build and start Spekios (the first build compiles the API; allow ~20 minutes)
   become_user: "{{ ansible_user }}"
   ansible.builtin.command:
     cmd: bash scripts/deploy.sh edge

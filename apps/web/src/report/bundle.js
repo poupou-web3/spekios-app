@@ -103,5 +103,5 @@ export async function buildEvidenceBundle(report,options={}){
   const fileManifest=[];for(const f of files){abort(signal);fileManifest.push({path:f.path,byte_length:f.bytes.length,sha256:await sha256(f.bytes)});}
   const manifest={schema_version:1,export_kind:'scout_run_report',export_id:exportId,generated_at:generatedAt,source_run_id:runId,source_lifecycle:report.run.lifecycle,active_snapshot:report.run.lifecycle==='active',evidence_status:!evidence.length?'no_evidence_listed':evidence.every(e=>e.status==='included')?'all_listed_files_verified':'contains_gaps',training_approval:false,related_run_evidence_included:false,integrity_scope:'Downloaded bytes match the recorded length and SHA256; this does not confirm product behavior or provenance.',limits:EXPORT_LIMITS,summary:reportSummary(report),files:fileManifest,evidence};
   const manifestBytes=reportJson(manifest);if(manifestBytes.length>EXPORT_LIMITS.maxReportBytes)fail('export_manifest_too_large');files.push({path:'manifest.json',bytes:manifestBytes});abort(signal);
-  return {blob:zipStore(files,generatedAt),manifest,filename:`scout-run-${runId}-evidence.zip`};
+  return {blob:zipStore(files,generatedAt),manifest,filename:`spekios-run-${runId}-evidence.zip`};
 }

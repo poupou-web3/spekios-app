@@ -1,6 +1,6 @@
 # Larchwood
 
-A small home-goods shop that ships with 14 known bugs and 4 odd-looking but correct behaviours, for measuring what a Scout exploration finds. No dependencies; Node 22 or later.
+A small home-goods shop that ships with 14 known bugs and 4 odd-looking but correct behaviours, for measuring what a Spekios exploration finds. No dependencies; Node 22 or later.
 
 ```sh
 node apps/bug-lab/server.mjs            # all bugs, http://127.0.0.1:4100
@@ -18,5 +18,5 @@ Guide: [docs/exploration/bug-lab.md](../../docs/exploration/bug-lab.md).
 The production deployment can publish both variants as separate HTTPS sites:
 `https://larchwood.spekios.com` (fixed) and
 `https://larchwood-faulty.spekios.com` (14 intentional bugs). Their hostnames
-keep browser cookies, carts and Scout histories separate. See
+keep browser cookies, carts and Spekios histories separate. See
 [hosted demos](../../infra/deploy/README.md#public-demonstration-shops).

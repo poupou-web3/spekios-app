@@ -33,15 +33,15 @@ fn private_parent(path: &Path) -> Result<(), &'static str> {
         builder.recursive(true).mode(0o700);
         builder
             .create(parent)
-            .map_err(|_| "Cannot create the private Scout configuration directory.")?;
+            .map_err(|_| "Cannot create the private Spekios configuration directory.")?;
         let metadata = fs::symlink_metadata(parent)
-            .map_err(|_| "Cannot inspect the Scout configuration directory.")?;
+            .map_err(|_| "Cannot inspect the Spekios configuration directory.")?;
         if !metadata.is_dir()
             || metadata.file_type().is_symlink()
             || metadata.permissions().mode() & 0o077 != 0
         {
             return Err(
-                "The Scout credential directory must be a real directory accessible only to its owner (mode 0700).",
+                "The Spekios credential directory must be a real directory accessible only to its owner (mode 0700).",
             );
         }
     }
@@ -60,24 +60,24 @@ pub fn default_file() -> Result<PathBuf, &'static str> {
 pub fn read(path: &Path) -> Result<Credential, &'static str> {
     let before=fs::symlink_metadata(path).map_err(|_|"No saved agent connection. Run scout-mcp login first, or explicitly select an operator env file.")?;
     if !before.is_file() || before.file_type().is_symlink() || before.len() > 8192 {
-        return Err("The Scout credential must be a small regular file, not a symlink.");
+        return Err("The Spekios credential must be a small regular file, not a symlink.");
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if before.permissions().mode() & 0o077 != 0 {
             return Err(
-                "The Scout credential file must be accessible only to its owner (mode 0600).",
+                "The Spekios credential file must be accessible only to its owner (mode 0600).",
             );
         }
     }
-    let mut file = fs::File::open(path).map_err(|_| "Cannot read the saved Scout credential.")?;
+    let mut file = fs::File::open(path).map_err(|_| "Cannot read the saved Spekios credential.")?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         let after = file
             .metadata()
-            .map_err(|_| "Cannot inspect the saved Scout credential.")?;
+            .map_err(|_| "Cannot inspect the saved Spekios credential.")?;
         if before.ino() != after.ino() || before.dev() != after.dev() {
             return Err("The credential file changed while opening it.");
         }
@@ -86,16 +86,16 @@ pub fn read(path: &Path) -> Result<Credential, &'static str> {
     std::io::Read::by_ref(&mut file)
         .take(8193)
         .read_to_end(&mut bytes)
-        .map_err(|_| "Cannot read the saved Scout credential.")?;
+        .map_err(|_| "Cannot read the saved Spekios credential.")?;
     let credential: Credential =
-        serde_json::from_slice(&bytes).map_err(|_| "The saved Scout credential is invalid.")?;
+        serde_json::from_slice(&bytes).map_err(|_| "The saved Spekios credential is invalid.")?;
     if credential.version != 1
         || credential.agent_id.is_nil()
         || credential.workspace_id.is_nil()
         || !valid_token(&credential.access_token)
         || endpoint(&credential.api_url).is_err()
     {
-        return Err("The saved Scout credential is invalid.");
+        return Err("The saved Spekios credential is invalid.");
     }
     Ok(credential)
 }
@@ -110,14 +110,14 @@ fn save(path: &Path, credential: &Credential) -> Result<(), &'static str> {
     }
     let mut file=options.open(path).map_err(|_|"A credential already exists or the selected path is not writable. Log out first or choose another --credential-file.")?;
     let bytes =
-        serde_json::to_vec(credential).map_err(|_| "Cannot encode the Scout credential.")?;
+        serde_json::to_vec(credential).map_err(|_| "Cannot encode the Spekios credential.")?;
     if file
         .write_all(&bytes)
         .and_then(|_| file.sync_all())
         .is_err()
     {
         let _ = fs::remove_file(path);
-        return Err("Cannot persist the Scout credential.");
+        return Err("Cannot persist the Spekios credential.");
     }
     if let Some(parent) = path.parent() {
         let _ = fs::File::open(parent).and_then(|f| f.sync_all());
@@ -199,16 +199,16 @@ pub async fn command(command: &str, args: Vec<String>) -> Result<(), Box<dyn std
             .send()
             .await
             .map_err(
-                |_| "Cannot reach Scout to revoke the credential. It has not been removed locally.",
+                |_| "Cannot reach Spekios to revoke the credential. It has not been removed locally.",
             )?;
         if !response.status().is_success() && response.status() != 401 {
             return Err(
-                "Scout could not revoke the credential. It has not been removed locally.".into(),
+                "Spekios could not revoke the credential. It has not been removed locally.".into(),
             );
         }
         fs::remove_file(&path)
             .map_err(|_| "Access is revoked, but the local credential could not be removed.")?;
-        eprintln!("Scout agent disconnected. Existing browser work was not cancelled.");
+        eprintln!("Spekios agent disconnected. Existing browser work was not cancelled.");
         return Ok(());
     }
     if path.try_exists().unwrap_or(true) || fs::symlink_metadata(&path).is_ok() {
@@ -224,14 +224,14 @@ pub async fn command(command: &str, args: Vec<String>) -> Result<(), Box<dyn std
     )?;
     let verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let challenge = format!("{:x}", Sha256::digest(verifier.as_bytes()));
-    let response=client.post(route(&url,"/v1/agent-connections")).json(&json!({"agent_name":name,"scopes":["runs:read","runs:write","usage:read"],"code_challenge":challenge})).send().await.map_err(|_|"Cannot reach Scout to start agent login.")?;
+    let response=client.post(route(&url,"/v1/agent-connections")).json(&json!({"agent_name":name,"scopes":["runs:read","runs:write","usage:read"],"code_challenge":challenge})).send().await.map_err(|_|"Cannot reach Spekios to start agent login.")?;
     if !response.status().is_success() {
-        return Err("Scout could not start agent login.".into());
+        return Err("Spekios could not start agent login.".into());
     }
     let data: serde_json::Value = response
         .json()
         .await
-        .map_err(|_| "Invalid Scout login response.")?;
+        .map_err(|_| "Invalid Spekios login response.")?;
     let device = data["device_code"]
         .as_str()
         .filter(|c| c.len() == 64)
@@ -275,21 +275,21 @@ pub async fn command(command: &str, args: Vec<String>) -> Result<(), Box<dyn std
             .send()
             .await
             .map_err(
-                |_| "Scout login was interrupted. Start a new login; no credential was saved.",
+                |_| "Spekios login was interrupted. Start a new login; no credential was saved.",
             )?;
         if response.status() == 202 || response.status() == 429 {
             continue;
         }
         if !response.status().is_success() {
             return Err(
-                "Scout login was denied, expired or already consumed. Start a new login if needed."
+                "Spekios login was denied, expired or already consumed. Start a new login if needed."
                     .into(),
             );
         }
         let data: serde_json::Value = response
             .json()
             .await
-            .map_err(|_| "Invalid Scout credential response.")?;
+            .map_err(|_| "Invalid Spekios credential response.")?;
         let credential = Credential {
             version: 1,
             api_url: route(&url, "/").to_string(),
@@ -324,7 +324,7 @@ pub async fn command(command: &str, args: Vec<String>) -> Result<(), Box<dyn std
         );
         return Ok(());
     }
-    Err("Scout login expired. No credential was saved.".into())
+    Err("Spekios login expired. No credential was saved.".into())
 }
 #[cfg(test)]
 mod tests {

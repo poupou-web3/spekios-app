@@ -1,14 +1,14 @@
 ---
 {
   "title": "Change the testing focus",
-  "description": "Steer an active ScoutQA exploration from the dashboard, HTTP API or MCP and track when each version is applied to planning.",
+  "description": "Steer an active Spekios exploration from the dashboard, HTTP API or MCP and track when each version is applied to planning.",
   "reviewed": "2026-10-29",
   "sidebar": {"order": 4}
 }
 ---
-Open a running exploration and use **Testing focus** to describe what Scout should explore next. For example: “Focus on search, filters and opening a result.” Start with a URL as usual; a testing focus is optional.
+Open a running exploration and use **Testing focus** to describe what Spekios should explore next. For example: “Focus on search, filters and opening a result.” Start with a URL as usual; a testing focus is optional.
 
-Scout finishes assessing its current action before applying the change to its next planning decision. Existing evidence and frozen expectations keep their original meaning. Focus changes do not expand the action budget, permitted origins or access rules.
+Spekios finishes assessing its current action before applying the change to its next planning decision. Existing evidence and frozen expectations keep their original meaning. Focus changes do not expand the action budget, permitted origins or access rules.
 
 ## Follow the acknowledgement
 

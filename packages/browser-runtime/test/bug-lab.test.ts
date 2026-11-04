@@ -1,6 +1,6 @@
 // Ground truth for the Larchwood shop (apps/bug-lab). Each bug in bugs.json
 // must show in Chromium when it is on and be gone when it is off; each
-// odd-but-correct case must behave the same in both builds. Scout's own
+// odd-but-correct case must behave the same in both builds. Spekios's own
 // control observer must see every trigger as a usable control, otherwise a
 // "never tried" result would say nothing about the explorer.
 import test, { after, before } from 'node:test';
@@ -26,7 +26,7 @@ after(async () => {
 });
 
 type Session = { page: Page; errors: string[]; url: (path: string) => string };
-// A fresh browser context per check, like a fresh Scout browser.
+// A fresh browser context per check, like a fresh Spekios browser.
 async function session(mode: Mode, fn: (s: Session) => Promise<void>, viewport: Viewport = viewportProfiles.desktop) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
@@ -249,7 +249,7 @@ function usable(seen: Seen[], role: string, name: string | RegExp) {
   return control;
 }
 
-test('Scout observes every trigger as a usable control', async () => {
+test('Spekios observes every trigger as a usable control', async () => {
   await session('buggy', async ({ page, url }) => {
     await page.goto(url('/'));
     let seen = await scoutControls(page);
@@ -279,7 +279,7 @@ test('Scout observes every trigger as a usable control', async () => {
     seen = await scoutControls(page);
     for (const name of ['Increase quantity of Oak Side Table', 'Apply code']) usable(seen, 'button', name);
     usable(seen, 'textbox', 'Promo code');
-    assert.equal(seen.find(c => c.name === 'Checkout')?.blocked, 'payment_or_transaction_requires_handoff', 'Scout leaves checkout alone');
+    assert.equal(seen.find(c => c.name === 'Checkout')?.blocked, 'payment_or_transaction_requires_handoff', 'Spekios leaves checkout alone');
 
     await page.goto(url('/help'));
     usable(await scoutControls(page), 'button', 'Can I exchange an item?');

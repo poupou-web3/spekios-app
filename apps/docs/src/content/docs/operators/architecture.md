@@ -1,14 +1,14 @@
 ---
 {
   "title": "How the services fit together",
-  "description": "Understand ScoutQA’s Rust API, browser worker, browser sandbox, model gateway, PostgreSQL, S3-compatible evidence store and ClickHouse outbox architecture.",
+  "description": "Understand Spekios’s Rust API, browser worker, browser sandbox, model gateway, PostgreSQL, S3-compatible evidence store and ClickHouse outbox architecture.",
   "reviewed": "2026-10-30",
   "sidebar": {
     "order": 1
   }
 }
 ---
-Scout separates browser execution, authoritative records, evidence bytes and analytical delivery. The local Compose stack runs these services on one machine.
+Spekios separates browser execution, authoritative records, evidence bytes and analytical delivery. The local Compose stack runs these services on one machine.
 
 ## Execution path
 
@@ -25,7 +25,7 @@ Scout separates browser execution, authoritative records, evidence bytes and ana
 | --- | --- |
 | Rust/Axum API | Authentication, admission, model gateway, read projections, evidence access and agent adapters. |
 | TypeScript/Playwright worker | Observation, browser actions, planner loop, completion sampling, replay and private human handoff. Holds storage credentials and the saved-login vault. |
-| Browser sandbox | Runs Chromium for every target page, with no Scout credentials or storage network. Restarts after each run. See [access and recording boundaries](../security/). |
+| Browser sandbox | Runs Chromium for every target page, with no Spekios credentials or storage network. Restarts after each run. See [access and recording boundaries](../security/). |
 | PostgreSQL | Authoritative jobs, runs, actions, settings, review history, model requests and outbox state. |
 | SeaweedFS S3 | Private screenshot/artifact and model-payload objects in the qa-evidence bucket. |
 | ClickHouse | Analytical runtime/model/review events delivered from durable records. |

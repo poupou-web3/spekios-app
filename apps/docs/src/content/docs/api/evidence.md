@@ -1,7 +1,7 @@
 ---
 {
   "title": "Retrieve verified evidence",
-  "description": "Fetch ScoutQA capture metadata, screenshot PNGs and artifacts with run-scoped MCP retrieval and server-side SHA-256 verification.",
+  "description": "Fetch Spekios capture metadata, screenshot PNGs and artifacts with run-scoped MCP retrieval and server-side SHA-256 verification.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 5

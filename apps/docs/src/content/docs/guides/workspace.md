@@ -1,18 +1,18 @@
 ---
 {
   "title": "Use the workspace",
-  "description": "Navigate ScoutQA’s run timeline, flow graph, evidence inspector, review filters, settings and theme.",
+  "description": "Navigate Spekios’s run timeline, flow graph, evidence inspector, review filters, settings and theme.",
   "reviewed": "2026-11-01",
   "sidebar": {
     "order": 1
   }
 }
 ---
-The workspace helps a tester follow behavior. Operators of a Scout deployment use a separate back office for execution and delivery; it is not part of the workspace and the workspace does not link to it.
+The workspace helps a tester follow behavior. Operators of a Spekios deployment use a separate back office for execution and delivery; it is not part of the workspace and the workspace does not link to it.
 
 ## User workspace
 
-Paste a URL on the workspace home and choose **Start testing**. The scheme is optional: `app.example.com` is tested as `https://app.example.com`. The line under the field shows whether Scout is ready; **Change** opens screen size, sign-in and automatic rechecks. Follow the durable job and open its run. The timeline records each automated action with its expectation, outcome and assessment.
+Paste a URL on the workspace home and choose **Start testing**. The scheme is optional: `app.example.com` is tested as `https://app.example.com`. The line under the field shows whether Spekios is ready; **Change** opens screen size, sign-in and automatic rechecks. Follow the durable job and open its run. The timeline records each automated action with its expectation, outcome and assessment.
 
 Use **Inspect action** to see exact typed parameters and linked evidence. Compare Before/After captures, open masks and sampled frames, and move between actions. The inspector preserves native image detail so small changes remain inspectable.
 
@@ -38,7 +38,7 @@ Settings has one page per section, listed beside the content (or as tabs on a na
 
 ## Operator back office
 
-The team running Scout uses a separate back office for service readiness, the browser job queue, model requests and attempts, ordered events and read-only server configuration. Outbox counters there indicate delivery state; they are not direct health probes for every service.
+The team running Spekios uses a separate back office for service readiness, the browser job queue, model requests and attempts, ordered events and read-only server configuration. Outbox counters there indicate delivery state; they are not direct health probes for every service.
 
 ## Configuration changes
 

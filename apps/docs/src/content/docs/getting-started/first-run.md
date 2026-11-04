@@ -1,20 +1,20 @@
 ---
 {
   "title": "Explore your first URL",
-  "description": "Submit a URL to ScoutQA, choose access and viewport settings, follow a durable run and inspect recorded actions and findings.",
+  "description": "Submit a URL to Spekios, choose access and viewport settings, follow a durable run and inspect recorded actions and findings.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 2
   }
 }
 ---
-Start with a small action budget. You only need the URL; Scout infers likely user flows. Any public https site works; a local or private app needs its origin allowed first.
+Start with a small action budget. You only need the URL; Spekios infers likely user flows. Any public https site works; a local or private app needs its origin allowed first.
 
 ## Before submitting
 
 Confirm the stack is ready and a provider key and model are configured. For a local or private app, confirm its origin is allowed. Prepare a dedicated test account if the app requires sign-in.
 
-Scout acts like a user: it clicks, types and submits search or permitted test forms, so it can change data on the site. It skips recognized sign-out, payment and deletion controls. On an app with real data, prefer a test account.
+Spekios acts like a user: it clicks, types and submits search or permitted test forms, so it can change data on the site. It skips recognized sign-out, payment and deletion controls. On an app with real data, prefer a test account.
 
 ## Start the run
 

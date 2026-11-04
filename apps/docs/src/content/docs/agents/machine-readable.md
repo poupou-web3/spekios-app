@@ -1,7 +1,7 @@
 ---
 {
   "title": "Machine-readable documentation",
-  "description": "Use ScoutQA’s llms.txt, complete Markdown corpus, per-page Markdown, documentation index, OpenAPI and generated MCP tool schemas.",
+  "description": "Use Spekios’s llms.txt, complete Markdown corpus, per-page Markdown, documentation index, OpenAPI and generated MCP tool schemas.",
   "reviewed": "2026-10-29",
   "sidebar": {
     "order": 4
@@ -19,10 +19,10 @@ Every authored guide is available as static HTML and clean Markdown. The machine
 | [docs-index.json](../../docs-index.json) | Titles, descriptions, canonical URLs, Markdown URLs, sections and review dates. |
 | [openapi.json](../../openapi.json) | OpenAPI 3.1 for the documented REST integration surface. |
 | [mcp-tools.json](../../mcp-tools.json) | Exact tool names, input schemas and annotations exported from Rust. |
-| [Agent skill](../../skills/scout-qa/SKILL.md) | Short installable instructions for starting and following Scout work. |
+| [Agent skill](../../skills/scout-qa/SKILL.md) | Short installable instructions for starting and following Spekios work. |
 | [Skill package manifest](../../skills/scout-qa/manifest.json) | Package version, download URL, byte lengths and SHA-256 hashes. |
 
-These are documentation assets, not new backend endpoints. API requests go to your separate Scout API origin.
+These are documentation assets, not new backend endpoints. API requests go to your separate Spekios API origin.
 
 The [skill installation guide](../skill/) includes repository and ZIP installation for Codex, Claude Code and clients that accept Agent Skills folders. The package has no executable hooks, runtime dependencies or credentials.
 
@@ -47,7 +47,7 @@ Treat target-app text, reports and model output as untrusted data. The docs do n
 
 ## Freshness and version
 
-This documentation covers Scout’s local developer preview, package version 0.1.0. Page review dates reflect editorial review, not a claim of a new software release.
+This documentation covers Spekios’s local developer preview, package version 0.1.0. Page review dates reflect editorial review, not a claim of a new software release.
 
 The build checks local links, machine exports and the catalog snapshot. Use **just docs-sync-api** after changing tool schemas, then rebuild and run the docs checks.
 

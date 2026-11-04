@@ -1,7 +1,7 @@
 ---
 {
   "title": "Stop work and preserve evidence",
-  "description": "Understand explicit cancellation for Scout jobs, active runs and automatic reproduction batches, including retained evidence and late provider usage.",
+  "description": "Understand explicit cancellation for Spekios jobs, active runs and automatic reproduction batches, including retained evidence and late provider usage.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 5

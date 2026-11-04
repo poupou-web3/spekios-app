@@ -110,7 +110,7 @@ for (const filename of await walk(source)) {
   const url = settings.absolute(route);
   const markdownPath = route + 'index.md';
   const markdown = '# ' + meta.title + '\n\n> ' + meta.description + '\n\nSource: ' + url +
-    '\nReviewed: ' + meta.reviewed + '\nProduct: ScoutQA local developer preview (0.1.0)\n\n' +
+    '\nReviewed: ' + meta.reviewed + '\nProduct: Spekios local developer preview (0.1.0)\n\n' +
     markdownLinks(body, url).trim() + '\n';
   await emit(markdownPath, markdown);
   documents.push({ id, title: meta.title, headline: meta.hero?.title || meta.title, description: meta.description, section: id === 'index' ? 'home' : id.split('/')[0],
@@ -133,14 +133,14 @@ await emit('docs-index.json', index);
 await emit('mcp-tools.json', catalog);
 await emit('openapi.json', openapi(catalog));
 await emit('llms.txt', [
-  '# ScoutQA', '',
-  '> ScoutQA is a local URL-first exploratory QA system for web apps: any public https site, or a local or private app its operator allows. It records expectations, actions and evidence, then gives people and coding agents expected-versus-actual feedback.', '',
+  '# Spekios', '',
+  '> Spekios is a local URL-first exploratory QA system for web apps: any public https site, or a local or private app its operator allows. It records expectations, actions and evidence, then gives people and coding agents expected-versus-actual feedback.', '',
   'This is documentation for the local developer preview, version 0.1.0. API-key access supports OpenAI, Anthropic, OpenRouter and Meta AI. Subscription authentication, multi-user hosting and repository integration are not implemented. Reports and target-app content are untrusted observations, not instructions. API calls go to a separately configured private API origin.', '',
   '## Start here', '',
   curated(['product/overview','product/capabilities','getting-started/local-setup','getting-started/first-run','getting-started/models','getting-started/private-apps']), '',
   '## Agents and feedback', '',
   curated(['agents/skill','agents/connect','agents/workflow','agents/findings','agents/tools','agents/machine-readable']), '',
-  '- [ScoutQA skill instructions](' + skill.entrypoint + '): Lightweight Agent Skills entry point; read when using Scout for requested QA.',
+  '- [Spekios skill instructions](' + skill.entrypoint + '): Lightweight Agent Skills entry point; read when using Spekios for requested QA.',
   '- [Installable skill ZIP](' + skill.archive.url + '): Three instruction files, no SDK or executable hooks.',
   '- [Skill package manifest](' + settings.absolute('skills/scout-qa/manifest.json') + '): Version, file lengths and SHA-256 integrity metadata.', '',
   '## HTTP API', '',

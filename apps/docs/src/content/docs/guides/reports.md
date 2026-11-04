@@ -1,7 +1,7 @@
 ---
 {
   "title": "Export and share a report",
-  "description": "Download ScoutQA Markdown reports, JSON snapshots and portable evidence ZIPs with a SHA-256 manifest.",
+  "description": "Download Spekios Markdown reports, JSON snapshots and portable evidence ZIPs with a SHA-256 manifest.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 3

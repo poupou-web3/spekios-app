@@ -1,7 +1,7 @@
 ---
 {
   "title": "Common questions",
-  "description": "Answers about URL-only input, unchanged screenshots, model access, free models, training evidence, API access and ScoutQA coverage.",
+  "description": "Answers about URL-only input, unchanged screenshots, model access, free models, training evidence, API access and Spekios coverage.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 6
@@ -14,7 +14,7 @@ No. The first version starts from a URL and infers likely user actions. The oper
 
 ## Does every screenshot change mean a bug?
 
-No. Changes help locate the outcome. Scout compares behavior with an expectation recorded before acting. A broken control can also leave the screenshot completely unchanged.
+No. Changes help locate the outcome. Spekios compares behavior with an expectation recorded before acting. A broken control can also leave the screenshot completely unchanged.
 
 ## Can I use my own model?
 
@@ -24,7 +24,7 @@ You can configure an OpenAI, Anthropic, OpenRouter or Meta AI API key and select
 
 Yes. The job is durable and survives client disconnection. The agent can poll progress, request a paged report and retrieve evidence through MCP or HTTP. Reads do not trigger new model calls. See the [agent workflow](../../agents/workflow/).
 
-## Will Scout log in with my Google account?
+## Will Spekios log in with my Google account?
 
 External Google/OAuth handoff is not supported. A person can use the private GUI handoff for supported same-origin native login forms and verification codes.
 

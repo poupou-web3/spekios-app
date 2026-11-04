@@ -1,14 +1,14 @@
 ---
 {
   "title": "HTTP API overview",
-  "description": "Integrate ScoutQA’s authenticated REST API, durable browser jobs, progress, reports, evidence and shared agent tools.",
+  "description": "Integrate Spekios’s authenticated REST API, durable browser jobs, progress, reports, evidence and shared agent tools.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 1
   }
 }
 ---
-The Scout API is a Rust/Axum service. The local Compose stack exposes it at **http://127.0.0.1:18080**. The documentation is a separate static service and never proxies credentials or API requests.
+The Spekios API is a Rust/Axum service. The local Compose stack exposes it at **http://127.0.0.1:18080**. The documentation is a separate static service and never proxies credentials or API requests.
 
 ## Choose an interface
 

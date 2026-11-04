@@ -1,7 +1,7 @@
 ---
 {
   "title": "Storage, observability and backups",
-  "description": "Operate ScoutQA’s private evidence bucket, PostgreSQL authority, ClickHouse observability, durable outboxes and separate encrypted authentication vault.",
+  "description": "Operate Spekios’s private evidence bucket, PostgreSQL authority, ClickHouse observability, durable outboxes and separate encrypted authentication vault.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 2

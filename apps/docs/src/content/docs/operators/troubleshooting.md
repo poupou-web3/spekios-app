@@ -1,7 +1,7 @@
 ---
 {
   "title": "Troubleshoot a local run",
-  "description": "Diagnose ScoutQA startup, target connectivity, provider availability, sign-in blockers, report conflicts, evidence failures and interrupted work.",
+  "description": "Diagnose Spekios startup, target connectivity, provider availability, sign-in blockers, report conflicts, evidence failures and interrupted work.",
   "reviewed": "2026-10-30",
   "sidebar": {
     "order": 4

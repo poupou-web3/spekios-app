@@ -1,6 +1,6 @@
 # Triage, known behavior and deployment rechecks
 
-Triage closes Scout's loop: the agent decides what is wrong, Scout records it, people see it, and the requesting agent or CI job gets an answer. It sits on top of [permanent issues](../../apps/docs/src/content/docs/guides/fix-verification.md) and never rewrites evidence, model assessments or [human finding reviews](./finding-reviews.md). The user guide is [Triage findings and recheck a deploy](../../apps/docs/src/content/docs/guides/triage.md).
+Triage closes Spekios's loop: the agent decides what is wrong, Spekios records it, people see it, and the requesting agent or CI job gets an answer. It sits on top of [permanent issues](../../apps/docs/src/content/docs/guides/fix-verification.md) and never rewrites evidence, model assessments or [human finding reviews](./finding-reviews.md). The user guide is [Triage findings and recheck a deploy](../../apps/docs/src/content/docs/guides/triage.md).
 
 ## Decisions
 
@@ -9,12 +9,12 @@ Triage closes Scout's loop: the agent decides what is wrong, Scout records it, p
 | Actor | Source | May replace |
 | --- | --- | --- |
 | `human` | Workspace UI or a human REST request | Any decision |
-| `agent` | `scout_triage_issue`, or any request with an agent credential | Agent and Scout decisions |
+| `agent` | `scout_triage_issue`, or any request with an agent credential | Agent and Spekios decisions |
 | `system` | Historical automatic matches retained for audit | Nothing; it only triages new issues |
 
 `scout_triage_issue(...)` is the single write path. It locks the issue, resolves `duplicate_of` to its canonical issue (refusing cycles), returns an identical current decision as `reused`, checks `expected_revision`, and refuses `human_decision_present` when an agent would replace a person. Each revision bumps the issue revision and appends an `issue.triaged` event, exported to ClickHouse with the other issue events.
 
-Finding reviews stay separate: they label one action's evidence (with reproduction requirements for confirmation and training implications). Triage decides what Scout does next with an issue.
+Finding reviews stay separate: they label one action's evidence (with reproduction requirements for confirmation and training implications). Triage decides what Spekios does next with an issue.
 
 ## Behavior identity and known behavior
 
@@ -26,7 +26,7 @@ Existing IDs, fingerprints and snapshots remain unchanged. Backfill assigns a si
 
 `GET /v1/issues/{id}` and `scout_get_issue` share `handoff.agent_description`: bounded deterministic Markdown generated from structured evidence, including uncertainty and review decisions. The UI previews and copies this exact string without inference; an open preview is outside the polling root and remains frozen. The CLI exposes `issue show`, durable `issue verify`, and `verification show`.
 
-`GET /v1/knowledge` and `scout_list_knowledge` list canonical decisions (bug or intended behavior, not Scout's own matches), with page, control, viewport, sign-in state, and duplicates, matches and occurrences rolled up.
+`GET /v1/knowledge` and `scout_list_knowledge` list canonical decisions (bug or intended behavior, not Spekios's own matches), with page, control, viewport, sign-in state, and duplicates, matches and occurrences rolled up.
 
 ## Reports
 

@@ -11,9 +11,9 @@ export default defineConfig({
   output: 'static',
   integrations: [
     starlight({
-      title: 'ScoutQA',
+      title: 'Spekios',
       description: 'URL-first exploratory QA. Understand every action, inspect the evidence, and give coding agents precise feedback.',
-      logo: { src: './src/assets/scout-mark.svg', replacesTitle: false },
+      logo: { src: './src/assets/spekios-mark.svg', replacesTitle: false },
       favicon: '/favicon.svg',
       customCss: ['./src/styles/custom.css'],
       components: {
@@ -26,12 +26,12 @@ export default defineConfig({
       sidebar: [
         { label: 'Start here', items: [
           { label: 'Overview', slug: 'product/overview' },
-          { label: 'Run Scout locally', slug: 'getting-started/local-setup' },
+          { label: 'Run Spekios locally', slug: 'getting-started/local-setup' },
           { label: 'Your first URL', slug: 'getting-started/first-run' },
           { label: 'Connect a model', slug: 'getting-started/models' },
           { label: 'Sign in to a target app', slug: 'getting-started/private-apps' },
         ] },
-        { label: 'Understand Scout', items: [{ autogenerate: { directory: 'product' } }], collapsed: true },
+        { label: 'Understand Spekios', items: [{ autogenerate: { directory: 'product' } }], collapsed: true },
         { label: 'Use the workspace', items: [{ autogenerate: { directory: 'guides' } }] },
         { label: 'Agents & LLMs', items: [
           { label: 'Install the agent skill', slug: 'agents/skill' },

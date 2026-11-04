@@ -67,7 +67,7 @@ From the repository root, with the local stack running:
 just export-report RUN_UUID
 ```
 
-The command reads the local workspace token from the ignored `.env`, fetches the selected report and runs the same bundle implementation. It prints the export UUID, output path and verified/gap counts. Files are written under `artifacts/run-reports/<export_uuid>/scout-run-<run_uuid>-evidence.zip`. The token is not included in the file or output. This command does not start a browser or call a model.
+The command reads the local workspace token from the ignored `.env`, fetches the selected report and runs the same bundle implementation. It prints the export UUID, output path and verified/gap counts. Files are written under `artifacts/run-reports/<export_uuid>/spekios-run-<run_uuid>-evidence.zip`. The token is not included in the file or output. This command does not start a browser or call a model.
 
 ## Verification
 
