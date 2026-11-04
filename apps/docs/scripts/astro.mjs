@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 if (Number(process.versions.node.split('.')[0]) < 24) {
-  console.error('Scout docs require Node 24 or newer. Use .nvmrc or the standalone Docker build.');
+  console.error('Spekios docs require Node 24 or newer. Use .nvmrc or the standalone Docker build.');
   process.exit(1);
 }
 const child = spawn(process.execPath, [

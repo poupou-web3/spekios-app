@@ -1,6 +1,6 @@
 # Larchwood: a shop with known bugs
 
-A clean run on a real site is ambiguous: the site may work, or Scout may have missed something. Larchwood is a small home-goods shop that ships with 14 bugs we planted and 4 behaviours that look odd but are correct. Exploring it and scoring the run shows what Scout found, what it tried but judged fine, what it never reached, and what it flagged that isn't a bug.
+A clean run on a real site is ambiguous: the site may work, or Spekios may have missed something. Larchwood is a small home-goods shop that ships with 14 bugs we planted and 4 behaviours that look odd but are correct. Exploring it and scoring the run shows what Spekios found, what it tried but judged fine, what it never reached, and what it flagged that isn't a bug.
 
 The code is in [apps/bug-lab](../../apps/bug-lab/). The bug list, [bugs.json](../../apps/bug-lab/bugs.json), is the ground truth: the shop, its tests and the scorer all read it.
 
@@ -12,7 +12,7 @@ In Compose, next to the rest of the stack:
 just bug-lab
 ```
 
-| Build | Scout's browser uses | Preview on this machine |
+| Build | Spekios's browser uses | Preview on this machine |
 |---|---|---|
 | All bugs on | `http://larchwood:8084` | http://127.0.0.1:18084 |
 | Every bug fixed | `http://larchwood:8085` | http://127.0.0.1:18085 |
@@ -28,7 +28,7 @@ just bug-lab-local 4100 --bugs price-sort,cart-total
 just bug-lab-local 4100 --pair     # bugs on 4100, fixed on 4101
 ```
 
-Scout's browser runs in Docker, where `localhost` is its own container. Give it `http://host.docker.internal:4100` and add that origin to `SCOUT_ALLOWED_ORIGINS`. The workspace's URL field suggests this address when you type a `localhost` one.
+Spekios's browser runs in Docker, where `localhost` is its own container. Give it `http://host.docker.internal:4100` and add that origin to `SCOUT_ALLOWED_ORIGINS`. The workspace's URL field suggests this address when you type a `localhost` one.
 
 ## Explore and score
 
@@ -46,8 +46,8 @@ The scorer reads runs through the API with `SCOUT_TOKEN`, or `SCOUT_API_TOKEN` f
 | Result | Meaning |
 |---|---|
 | found | An action that triggers the bug was assessed as suspect |
-| tried, judged fine | Scout triggered the bug and at least once assessed it as fine. A judgement miss |
-| inconclusive | Scout triggered it and no assessment was conclusive |
+| tried, judged fine | Spekios triggered the bug and at least once assessed it as fine. A judgement miss |
+| inconclusive | Spekios triggered it and no assessment was conclusive |
 | never tried | No action triggers the bug. A coverage miss |
 | n/a | The bug needs another screen size than the run used |
 
@@ -55,9 +55,9 @@ Suspects on the odd-but-correct cases are **false alarms**. Other suspects are l
 
 ### How actions are matched
 
-Each entry's `match` names the page before and after the action (regular expressions on path and query, from the recorded screenshots' URLs) and the control Scout used (role and name). `every: 2` means only every second matching action triggers it, for the add that fails every second time.
+Each entry's `match` names the page before and after the action (regular expressions on path and query, from the recorded screenshots' URLs) and the control Spekios used (role and name). `every: 2` means only every second matching action triggers it, for the add that fails every second time.
 
-The scorer credits the action that triggers a bug. If Scout notices the problem one action later, for example the cart total after leaving the cart, that is counted as a miss. Matching depends on control names: the browser test below fails if a trigger control is renamed or stops being usable, so the two stay in step.
+The scorer credits the action that triggers a bug. If Spekios notices the problem one action later, for example the cart total after leaving the cart, that is counted as a miss. Matching depends on control names: the browser test below fails if a trigger control is renamed or stops being usable, so the two stay in step.
 
 ## The bugs
 
@@ -80,7 +80,7 @@ The scorer credits the action that triggers a bug. If Scout notices the problem 
 
 Correct but odd-looking: sold-out products with a disabled "Sold out" button, the promo code field refusing anything but WELCOME10, the empty cart, and a free product (Fabric Swatch Set, €0, free delivery).
 
-None of the bugs sit behind words Scout refuses to click (sign in, checkout, delete, remove, reset, subscribe…) or behind a POST form. The only form submissions are GET search forms.
+None of the bugs sit behind words Spekios refuses to click (sign in, checkout, delete, remove, reset, subscribe…) or behind a POST form. The only form submissions are GET search forms.
 
 ## Fix verification
 
@@ -95,7 +95,7 @@ node scripts/scout-recheck.mjs --candidate http://larchwood:8085 --source http:/
 ## Adding or changing a bug
 
 1. Add the entry to `bugs.json` with its `match`, and the switch in [pages.mjs](../../apps/bug-lab/pages.mjs) or [shop.mjs](../../apps/bug-lab/shop.mjs). The server decides which code a page gets: nothing sent to the browser may name a bug or say whether it is on.
-2. Put the bug on a control Scout can use: a link, button, search box, select, checkbox or radio with a unique name on its page, no `role` attribute that differs from the element's own, no number inputs, and no blocked word in its name or link.
+2. Put the bug on a control Spekios can use: a link, button, search box, select, checkbox or radio with a unique name on its page, no `role` attribute that differs from the element's own, no number inputs, and no blocked word in its name or link.
 3. Add its check to [bug-lab.test.ts](../../packages/browser-runtime/test/bug-lab.test.ts): it must show with the bug on and be gone with it off.
 
 ## Tests
@@ -104,7 +104,7 @@ node scripts/scout-recheck.mjs --candidate http://larchwood:8085 --source http:/
 just bug-lab-test
 ```
 
-This runs the HTTP and scoring tests (`node --test apps/bug-lab/test/*.test.mjs`) and the Chromium test in the recorder image. The HTTP tests also check that the fixed build has no dead links, that the buggy build's only dead link is the planted one, and that no page, URL or header contains a giveaway word or a bug ID. The Chromium test proves every bug and correct case in a real browser, and runs Scout's own control observer on the shop to check that every trigger is a usable, unambiguous control.
+This runs the HTTP and scoring tests (`node --test apps/bug-lab/test/*.test.mjs`) and the Chromium test in the recorder image. The HTTP tests also check that the fixed build has no dead links, that the buggy build's only dead link is the planted one, and that no page, URL or header contains a giveaway word or a bug ID. The Chromium test proves every bug and correct case in a real browser, and runs Spekios's own control observer on the shop to check that every trigger is a usable, unambiguous control.
 
 ## Compare full screenshots with crop-focused assessments
 

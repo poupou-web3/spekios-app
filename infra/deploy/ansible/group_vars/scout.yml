@@ -1,4 +1,4 @@
-# Defaults for the Scout host. Per-host values (address, user, public host)
+# Defaults for the Spekios host. Per-host values (address, user, public host)
 # come from inventory.yml, which Terraform writes.
 
 # Production deploys the tip of this branch as it is on GitHub (fetched first),

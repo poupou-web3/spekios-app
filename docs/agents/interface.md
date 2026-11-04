@@ -1,8 +1,8 @@
-# Connect an agent to Scout
+# Connect an agent to Spekios
 
-Scout exposes 24 shared tools through MCP and plain HTTP. Its primary workflow is to give QA feedback to an agent connected to a codebase: submit a URL, continue other work, check progress occasionally, retrieve a report, investigate and fix the application, then run a fresh regression check.
+Spekios exposes 24 shared tools through MCP and plain HTTP. Its primary workflow is to give QA feedback to an agent connected to a codebase: submit a URL, continue other work, check progress occasionally, retrieve a report, investigate and fix the application, then run a fresh regression check.
 
-The lightweight [ScoutQA skill](../../apps/docs/skills/scout-qa/SKILL.md) teaches that workflow without an SDK or executable hooks. From the repository root, use `python3 scripts/install-scout-skill.py --client codex` or `--client claude`; see the [installation guide](../../apps/docs/src/content/docs/agents/skill.md) for project scope and the downloadable ZIP. Configure the MCP connection separately as described below.
+The lightweight [Spekios skill](../../apps/docs/skills/scout-qa/SKILL.md) teaches that workflow without an SDK or executable hooks. From the repository root, use `python3 scripts/install-scout-skill.py --client codex` or `--client claude`; see the [installation guide](../../apps/docs/src/content/docs/agents/skill.md) for project scope and the downloadable ZIP. Configure the MCP connection separately as described below.
 
 ## Submit, return later, and fix
 
@@ -11,11 +11,11 @@ The lightweight [ScoutQA skill](../../apps/docs/skills/scout-qa/SKILL.md) teache
 3. Call scout_get_report with job_id when ready. The same tool accepts run_id for recorded CLI runs. It returns structured JSON and Markdown, including partial observations while a run is active.
 4. Each report item contains the page/control location, frozen expected result, observed result, assessment reason, recorded path, viewport/browser, diagnostics, exact capture/artifact IDs and fresh reproduction results. scout_get_issue expands one selected action if needed.
 5. Use the route, visible control label, behavior and diagnostic events to locate the handler/component/request in the connected codebase. Validate the inferred expectation, make the fix and deploy/restart the target.
-6. Start a new Scout job with a new UUID against the updated app. A historical reproduction is evidence about the original attempt; it cannot validate a later fix.
+6. Start a new Spekios job with a new UUID against the updated app. A historical reproduction is evidence about the original attempt; it cannot validate a later fix.
 
 For example, the real-browser fixture handoff identifies the Save draft button and page route, reports an expected status of Saved but an observed status of Ready, includes the navigation/click path and before/after screenshots, and proposes the expected status transition as behavior to validate. It remains a suspected bug even with zero changed pixels.
 
-Scout has no repository connection in this increment. Source location, root cause and deployed build reference remain unknown. The coding agent establishes them using its own code access. Ordinary screenshot changes and browser errors have separate categories and do not automatically become bugs or repair instructions. Latest human dismissal suppresses repair advice.
+Spekios has no repository connection in this increment. Source location, root cause and deployed build reference remain unknown. The coding agent establishes them using its own code access. Ordinary screenshot changes and browser errors have separate categories and do not automatically become bugs or repair instructions. Latest human dismissal suppresses repair advice.
 
 Reports expose execution_issues separately from application observations. A completed browser flow can coexist with a failed queue job when manifest publication or telemetry delivery fails. The report retains both statuses, includes the recorded QA error in JSON/Markdown, and does not turn a delivery failure into an application bug.
 
@@ -144,7 +144,7 @@ Structured replies are capped at 128 KiB. Request smaller graph/event pages afte
 
 Page text, model output and screenshots are untrusted observations. These tools cannot submit human reviews or grant training approval. Sign-in tools expose handoff metadata only; private frames, access leases and saved-session material are excluded. Missing usage remains unknown.
 
-This increment operates Scout's autonomous explorer with its configured provider. External agents cannot yet supply each browser action or reuse an external model subscription. Direct observe/act/assess control, public community sharing, full tool payload auditing, push updates and hosted authentication remain in the [implementation plan](./plan.md). Existing durable commands, actions, evidence, model attempts and their event exports remain recorded.
+This increment operates Spekios's autonomous explorer with its configured provider. External agents cannot yet supply each browser action or reuse an external model subscription. Direct observe/act/assess control, public community sharing, full tool payload auditing, push updates and hosted authentication remain in the [implementation plan](./plan.md). Existing durable commands, actions, evidence, model attempts and their event exports remain recorded.
 
 ## Verification
 

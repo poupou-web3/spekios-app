@@ -1,10 +1,10 @@
-// Score Scout runs against the Larchwood bug list. Pure functions: the
+// Score Spekios runs against the Larchwood bug list. Pure functions: the
 // command-line wrapper is scripts/score-bug-lab.mjs.
 //
 // For each bug, a run lands in one of these groups:
 //   found         an action that triggers the bug was assessed as suspect
-//   missed        Scout triggered the bug and at least once judged the result fine
-//   inconclusive  Scout triggered it, and no assessment was conclusive
+//   missed        Spekios triggered the bug and at least once judged the result fine
+//   inconclusive  Spekios triggered it, and no assessment was conclusive
 //   not-tried     no action in the run triggers the bug
 //   not-applicable the bug needs another screen size than the run used
 // For each odd-but-correct case: false-alarm (assessed as suspect), ok, or not-tried.

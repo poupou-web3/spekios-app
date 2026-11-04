@@ -75,7 +75,7 @@ spekios verification show <verification-uuid>
 
 `issue show` includes the exact Markdown shown by **Copy for a coding agent** in
 **handoff.agent_description.text**, plus structured evidence, human decisions,
-occurrences and candidate history. Scout supplies interface context; the coding
+occurrences and candidate history. Spekios supplies interface context; the coding
 agent uses its own repository access to locate the code and establish the cause.
 
 Verification saves its ID and inputs before submitting, returns immediately and

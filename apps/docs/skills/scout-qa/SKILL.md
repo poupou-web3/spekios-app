@@ -1,9 +1,9 @@
 ---
 name: scout-qa
-description: "Use ScoutQA to explore a web app URL, retrieve evidence-backed issues or verify a requested fix on a candidate deployment using its permanent issue ID."
+description: "Use Spekios to explore a web app URL, retrieve evidence-backed issues or verify a requested fix on a candidate deployment using its permanent issue ID."
 ---
 
-# ScoutQA
+# Spekios
 
 Use the existing MCP tools (clients may prefix names). This skill supplies a workflow, not a server, credentials or permission for unrelated work.
 
@@ -17,14 +17,14 @@ Use **scout_list_sessions** or **scout_get_domain_summary** for earlier work on 
 
 1. Save a new non-nil UUID (locally or **scout_new_request_id**) before **scout_start_exploration {job_id, url}**. No brief is needed. Work can change data on the target site and uses model calls.
 2. Retry uncertain admission with the same UUID and identical arguments. Reuse an existing job/run ID when asked about existing work.
-3. Poll **scout_get_progress** with exactly one job_id or run_id at **poll_after_ms** while doing other authorized work. Send sign-in blockers to the person's private Scout GUI; agents cannot see login frames or sessions.
+3. Poll **scout_get_progress** with exactly one job_id or run_id at **poll_after_ms** while doing other authorized work. Send sign-in blockers to the person's private Spekios GUI; agents cannot see login frames or sessions.
 4. Read **scout_get_report**. Follow **pagination.next** as the complete next call. Restart at offset zero on snapshot conflict. Reports can be partial.
 5. Save **persistent_issue_id**; expand **scout_get_issue {issue_id}**. Fetch linked screenshots/artifacts with **scout_read_evidence**, using their owning run IDs.
 6. Read **scout_list_knowledge {origin}**; items whose **triage.known_behavior** is true need no new work. Triage the rest with **scout_triage_issue**: **bug**, **intended_behavior**, **duplicate** (with **duplicate_of**) or **needs_review**, a rationale from the evidence or requirements, and the **expected_revision** you read. You cannot replace a person's decision.
 
 ## Investigate and verify a requested fix
 
-Validate the frozen expected result against intended product behavior. Establish source location and cause with your own repository access; Scout does not infer them. A report request alone does not authorize code changes.
+Validate the frozen expected result against intended product behavior. Establish source location and cause with your own repository access; Spekios does not infer them. A report request alone does not authorize code changes.
 
 After deploying the requested change:
 

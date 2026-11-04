@@ -1,14 +1,14 @@
 ---
 {
-  "title": "What is ScoutQA?",
-  "description": "Understand ScoutQA’s URL-first exploratory testing workflow and how it helps people and coding agents investigate web application behavior.",
+  "title": "What is Spekios?",
+  "description": "Understand Spekios’s URL-first exploratory testing workflow and how it helps people and coding agents investigate web application behavior.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 1
   }
 }
 ---
-ScoutQA is a local exploratory QA system for web applications. Give it the URL of any public https site, or of a local or private app the operator allows. It infers plausible user goals, chooses supported actions, records the resulting states and checks what happened against an expectation made before each action.
+Spekios is a local exploratory QA system for web applications. Give it the URL of any public https site, or of a local or private app the operator allows. It infers plausible user goals, chooses supported actions, records the resulting states and checks what happened against an expectation made before each action.
 
 ## The product workflow
 
@@ -18,13 +18,13 @@ ScoutQA is a local exploratory QA system for web applications. Give it the URL o
 4. **Investigate findings.** People review suspicions; an independent replay can try the recorded path in a fresh browser.
 5. **Give feedback to a coding agent.** Reports include expected versus actual behavior, locations, reproduction steps and evidence references.
 
-The workspace follows runs and findings, and its **Settings** page holds exploration defaults and saved app sessions. The back office, a separate deployment for the team operating Scout, shows queue state, model requests, usage and delivery status.
+The workspace follows runs and findings, and its **Settings** page holds exploration defaults and saved app sessions. The back office, a separate deployment for the team operating Spekios, shows queue state, model requests, usage and delivery status.
 
 ## Who it is for
 
-Use Scout on your own app while you develop it, on a staging environment, or on any public site you want to explore. It is useful for checking changes, exploring user journeys and collecting traceable observations for a person or agent to investigate.
+Use Spekios on your own app while you develop it, on a staging environment, or on any public site you want to explore. It is useful for checking changes, exploring user journeys and collecting traceable observations for a person or agent to investigate.
 
-Scout does not connect to a source repository or edit application code. A coding agent uses its own repository access to establish the source location and cause.
+Spekios does not connect to a source repository or edit application code. A coding agent uses its own repository access to establish the source location and cause.
 
 ## Start here
 

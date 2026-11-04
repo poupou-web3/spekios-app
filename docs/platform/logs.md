@@ -14,9 +14,9 @@ Each line's ID is a hash of its container, stream, Docker timestamp and text. Wh
 
 The tail pages on `ingested_at`, the time ClickHouse stored a batch, not on the line's own timestamp. The collector sends one batch at a time, so `ingested_at` only moves forward and lines that reach the collector late (from a slower container stream) are still picked up. The tab orders lines by their Docker timestamp.
 
-## What Scout prints
+## What Spekios prints
 
-Scout's own services print one JSON object per line: `{"level":"info","msg":"model_call_finished",...}`. The collector keeps `msg` as the message and the other keys as fields, which the tab shows inline and in full when a row is opened.
+Spekios's own services print one JSON object per line: `{"level":"info","msg":"model_call_finished",...}`. The collector keeps `msg` as the message and the other keys as fields, which the tab shows inline and in full when a row is opened.
 
 | Service | Messages | Fields |
 | --- | --- | --- |

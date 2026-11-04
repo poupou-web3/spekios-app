@@ -127,27 +127,27 @@ reload-env:
 # Rebuild the workspace and back office after a UI change. Databases and workers stay up.
 reload:
     docker compose up -d --build --wait --wait-timeout 120 api backoffice
-    @echo "Scout workspace: http://127.0.0.1:18080"
-    @echo "Scout back office (operators): http://127.0.0.1:18083"
+    @echo "Spekios workspace: http://127.0.0.1:18080"
+    @echo "Spekios back office (operators): http://127.0.0.1:18083"
 
 # Rebuild only the workspace API. It embeds apps/web, including the favicon.
 reload-api:
     docker compose up -d --build --wait --wait-timeout 120 api
-    @echo "Scout workspace: http://127.0.0.1:18080"
+    @echo "Spekios workspace: http://127.0.0.1:18080"
 
 # Rebuild only the operator console. Does not rebuild the API.
 reload-backoffice:
     docker compose up -d --build --no-deps --wait --wait-timeout 60 backoffice
-    @echo "Scout back office (operators): http://127.0.0.1:18083"
+    @echo "Spekios back office (operators): http://127.0.0.1:18083"
 
 # Start the local workspace and print its URL.
 ui: up
-    @echo "Scout workspace: http://127.0.0.1:18080"
-    @echo "Scout back office (operators): http://127.0.0.1:18083"
+    @echo "Spekios workspace: http://127.0.0.1:18080"
+    @echo "Spekios back office (operators): http://127.0.0.1:18083"
 
 # The operator console runs in its own container, separate from the customer workspace.
 backoffice: up
-    @echo "Scout back office (operators): http://127.0.0.1:18083"
+    @echo "Spekios back office (operators): http://127.0.0.1:18083"
 
 # Real GUI API/worker integration with simulated models; restores normal mode.
 workspace-test:
@@ -290,7 +290,7 @@ explorer-test:
 recheck candidate_url:
     node scripts/scout-recheck.mjs --candidate "$1"
 
-# Browser sandbox: no Scout credentials or storage network, Chromium sandbox on, one run per container.
+# Browser sandbox: no Spekios credentials or storage network, Chromium sandbox on, one run per container.
 isolation-test:
     bash scripts/test-browser-isolation.sh
 
@@ -325,7 +325,7 @@ fixture: build-recorder
 # Larchwood, a shop with known bugs. Explore it, then score the run with bug-lab-score.
 bug-lab: build-recorder
     docker compose up -d --no-build --wait larchwood
-    @echo "In Scout, explore http://larchwood:8084 (bugs on) or http://larchwood:8085 (every bug fixed)."
+    @echo "In Spekios, explore http://larchwood:8084 (bugs on) or http://larchwood:8085 (every bug fixed)."
     @echo "On this machine: http://127.0.0.1:18084 and http://127.0.0.1:18085"
 
 # The same shop on this computer, without Docker. Extra flags: --fixed, --bugs id,id, --pair.

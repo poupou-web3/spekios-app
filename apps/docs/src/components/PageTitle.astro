@@ -3,7 +3,7 @@ import DefaultPageTitle from '@astrojs/starlight/components/PageTitle.astro';
 import { settings } from '../../scripts/site.mjs';
 const { entry } = Astro.locals.starlightRoute;
 const path = Astro.url.pathname.slice(settings.base.length);
-const sections: Record<string, string> = { 'getting-started': 'Getting started', product: 'Understand Scout', guides: 'Workspace guides', agents: 'Agents & LLMs', api: 'HTTP API', operators: 'Operate & deploy' };
+const sections: Record<string, string> = { 'getting-started': 'Getting started', product: 'Understand Spekios', guides: 'Workspace guides', agents: 'Agents & LLMs', api: 'HTTP API', operators: 'Operate & deploy' };
 const section = sections[path.split('/')[0]] || 'Documentation';
 ---
 <nav class="doc-breadcrumb" aria-label="Breadcrumb">

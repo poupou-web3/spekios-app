@@ -1,10 +1,10 @@
 # Product requirements and implementation plan
 
-Prepared 14 October 2026; consistency review 21 October 2026. This is the product design for Scout QA, informed by the seven supplied screenshots. It specifies this application's behavior, schema, and interfaces.
+Prepared 14 October 2026; consistency review 21 October 2026. This is the product design for Spekios, informed by the seven supplied screenshots. It specifies this application's behavior, schema, and interfaces.
 
 ## Where this stands
 
-The current state and the decisions on each spec item (sessions, test cases and verdicts, knowledge base, triage, budgets, schedules and CI) are in [Building the Scout QA agent](./architecture.md#where-this-stands-31-october-2026). This document remains the design; dated implementation notes are in the [change log](#change-log) at the end.
+The current state and the decisions on each spec item (sessions, test cases and verdicts, knowledge base, triage, budgets, schedules and CI) are in [Building the Spekios agent](./architecture.md#where-this-stands-31-october-2026). This document remains the design; dated implementation notes are in the [change log](#change-log) at the end.
 
 ## 1. What the references establish
 

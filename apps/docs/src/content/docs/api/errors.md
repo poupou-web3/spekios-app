@@ -1,7 +1,7 @@
 ---
 {
   "title": "Errors, limits and safe retries",
-  "description": "Handle ScoutQA validation, authentication, admission conflicts, snapshot changes, unavailable evidence and bounded responses.",
+  "description": "Handle Spekios validation, authentication, admission conflicts, snapshot changes, unavailable evidence and bounded responses.",
   "reviewed": "2026-10-28",
   "sidebar": {
     "order": 8
@@ -22,7 +22,7 @@ Keep the original command ID when retrying an uncertain admission. A timeout can
 | 413 | Request or bounded result too large. Reduce page size or use a download endpoint. |
 | 503 | A required service, provider configuration or evidence path is unavailable. Inspect operations. |
 
-Framework-level parsing errors can differ from Scout’s JSON domain-error shape. Do not assume every non-2xx response has identical fields.
+Framework-level parsing errors can differ from Spekios’s JSON domain-error shape. Do not assume every non-2xx response has identical fields.
 
 ## Command conflicts
 

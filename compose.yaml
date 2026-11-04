@@ -182,7 +182,7 @@ services:
     cpus: 1
 
   # Larchwood, a small shop that ships with known bugs (apps/bug-lab/bugs.json),
-  # for measuring what an exploration finds. Scout's browser uses
+  # for measuring what an exploration finds. Spekios's browser uses
   # http://larchwood:8084 (bugs on) and http://larchwood:8085 (every bug fixed);
   # on this machine they are 127.0.0.1:18084 and 127.0.0.1:18085.
   larchwood:
@@ -323,7 +323,7 @@ services:
     mem_limit: 384m
     restart: unless-stopped
 
-  # Runs every target site. No Scout credentials, volumes or storage network:
+  # Runs every target site. No Spekios credentials, volumes or storage network:
   # it reaches the internet, the fixture app and the worker's token-protected
   # login port only. Each replica serves one run, then exits and restarts fresh.
   # Keep the replica count equal to SCOUT_BROWSER_SLOTS.
@@ -425,7 +425,7 @@ services:
 
 networks:
   default: {}
-  # Target sites and the browser. Scout's storage, API and model gateway are not on it.
+  # Target sites and the browser. Spekios's storage, API and model gateway are not on it.
   browser: {}
   # The log collector and its Docker API proxy, with no route out.
   logs:

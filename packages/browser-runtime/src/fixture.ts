@@ -6,7 +6,7 @@ export async function fixture() {
   const server = createServer((request, response) => {
     if (request.url === '/favicon.ico') { response.writeHead(204); response.end(); return; }
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    response.end(`<!doctype html><html><head><title>Scout recorder fixture</title><style>
+    response.end(`<!doctype html><html><head><title>Spekios recorder fixture</title><style>
       body{font:16px system-ui;background:#fff;color:#18202a;margin:40px}
       button{background:#eee;color:#18202a;border:1px solid #777;padding:10px 16px;margin-right:8px;font:inherit;outline:none}
       #pixel{position:absolute;left:700px;top:100px;width:1px;height:1px;background:rgb(128,128,128)}

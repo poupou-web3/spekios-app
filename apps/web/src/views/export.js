@@ -36,7 +36,7 @@ export async function downloadReport(format){
       },onProgress:progress=>{if(current()){d.progress=progress;render();}}});blob=result.blob;filename=result.filename;
     }else{
       const bytes=format==='json'?tools.reportJson(d.snapshot):tools.reportMarkdown(d.snapshot,opts);
-      blob=new Blob([bytes],{type:format==='json'?'application/json':'text/markdown;charset=utf-8'});filename=`scout-run-${d.snapshot.run.run_id}.${format==='json'?'json':'md'}`;
+      blob=new Blob([bytes],{type:format==='json'?'application/json':'text/markdown;charset=utf-8'});filename=`spekios-run-${d.snapshot.run.run_id}.${format==='json'?'json':'md'}`;
     }
     if(!current()||d.controller.signal.aborted)return;
     downloadBlob(blob,filename);

@@ -1,4 +1,4 @@
 interface:
-  display_name: "ScoutQA"
+  display_name: "Spekios"
   short_description: "Explore URLs, inspect issues and verify candidate fixes"
   default_prompt: "Use $scout-qa to test my app, investigate a recorded issue and verify a requested fix on its candidate deployment."

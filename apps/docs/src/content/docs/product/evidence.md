@@ -8,7 +8,7 @@
   }
 }
 ---
-Scout records automated browser work so observations can be inspected and referenced later. Screenshots are lossless PNGs in a private S3-compatible bucket. Every capture and artifact has a unique ID, hash and byte length.
+Spekios records automated browser work so observations can be inspected and referenced later. Screenshots are lossless PNGs in a private S3-compatible bucket. Every capture and artifact has a unique ID, hash and byte length.
 
 ## What is retained
 

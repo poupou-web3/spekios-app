@@ -1,7 +1,7 @@
 ---
 {
   "title": "Authentication and access scope",
-  "description": "Authenticate ScoutQA REST and MCP with workspace-bound agent credentials, understand manager and operator access, and protect local connection secrets.",
+  "description": "Authenticate Spekios REST and MCP with workspace-bound agent credentials, understand manager and operator access, and protect local connection secrets.",
   "reviewed": "2026-10-29",
   "sidebar": {"order": 2}
 }

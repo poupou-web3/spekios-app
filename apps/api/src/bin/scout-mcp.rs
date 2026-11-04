@@ -162,7 +162,7 @@ async fn forward(
         Ok(value) => value,
         Err(_) => {
             if let Some(id) = id {
-                write(&output,&rpc_error(id,-32001,"Scout is unavailable or the MCP request timed out. Start/check the local API. No command was automatically retried.")).await;
+                write(&output,&rpc_error(id,-32001,"Spekios is unavailable or the MCP request timed out. Start/check the local API. No command was automatically retried.")).await;
             }
             return;
         }
@@ -181,7 +181,7 @@ async fn forward(
                 &rpc_error(
                     id,
                     -32001,
-                    "Scout MCP response exceeds the bridge size limit.",
+                    "Spekios MCP response exceeds the bridge size limit.",
                 ),
             )
             .await;
@@ -197,7 +197,7 @@ async fn forward(
             Ok(None) => break,
             _ => {
                 if let Some(id) = id {
-                    write(&output,&rpc_error(id,-32001,"Scout MCP response was incomplete or too large. No command was automatically retried.")).await;
+                    write(&output,&rpc_error(id,-32001,"Spekios MCP response was incomplete or too large. No command was automatically retried.")).await;
                 }
                 return;
             }
@@ -215,7 +215,7 @@ async fn forward(
                     id,
                     -32001,
                     &format!(
-                        "Scout MCP returned HTTP {} without a JSON response.",
+                        "Spekios MCP returned HTTP {} without a JSON response.",
                         status.as_u16()
                     ),
                 ),
@@ -228,7 +228,7 @@ async fn forward(
         || value["id"] != id
         || (value.get("result").is_none() == value.get("error").is_none())
     {
-        write(&output,&rpc_error(id,-32001,&format!("Scout MCP request rejected (HTTP {}). Check the API token and protocol configuration.",status.as_u16()))).await;
+        write(&output,&rpc_error(id,-32001,&format!("Spekios MCP request rejected (HTTP {}). Check the API token and protocol configuration.",status.as_u16()))).await;
         return;
     }
     if initialize && let Some(protocol) = value["result"]["protocolVersion"].as_str() {
@@ -264,7 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .as_secs()
         {
             return Err(
-                "Saved Scout access has expired. Run scout-mcp logout, then login again.".into(),
+                "Saved Spekios access has expired. Run scout-mcp logout, then login again.".into(),
             );
         }
         let bound = endpoint(&credential.api_url)?;
@@ -329,7 +329,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &rpc_error(
                             id.clone(),
                             -32001,
-                            "Scout MCP bridge is busy; retry with the same command UUID.",
+                            "Spekios MCP bridge is busy; retry with the same command UUID.",
                         ),
                     )
                     .await;
@@ -349,7 +349,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             forward(client, url, bearer, message, version, output).await;
         });
     }
-    // EOF terminates this client connection only. Durable Scout jobs continue.
+    // EOF terminates this client connection only. Durable Spekios jobs continue.
     tasks.abort_all();
     Ok(())
 }

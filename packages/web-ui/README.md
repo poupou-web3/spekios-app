@@ -1,6 +1,6 @@
 # @scout/web-ui
 
-Shared browser kit for the two Scout frontends: the customer workspace (`apps/web`) and the operator back office (`apps/backoffice`). Plain ES modules and CSS with no build step, so the pages keep a strict `script-src 'self'; style-src 'self'` policy.
+Shared browser kit for the two Spekios frontends: the customer workspace (`apps/web`) and the operator back office (`apps/backoffice`). Plain ES modules and CSS with no build step, so the pages keep a strict `script-src 'self'; style-src 'self'` policy.
 
 ```
 src/

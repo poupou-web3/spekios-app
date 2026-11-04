@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
-// The browser sandbox runs every target site. It must hold no Scout credentials
-// or volumes, reach none of Scout's storage, API or model services, run
+// The browser sandbox runs every target site. It must hold no Spekios credentials
+// or volumes, reach none of Spekios's storage, API or model services, run
 // Chromium's own sandbox, and serve exactly one client per container start.
 const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const compose = (...args) => docker('compose', ...args);
@@ -18,7 +18,7 @@ assert.ok(sandboxes.length > 0, 'Start the browser sandbox first.');
 for (const sandbox of sandboxes) {
   assert.equal(sandbox.State.Health?.Status, 'healthy', 'Start the browser sandbox first.');
   const secrets = sandbox.Config.Env.map(entry => entry.split('=')[0]).filter(key => /PASSWORD|SECRET|TOKEN|API_KEY|ACCESS_KEY|VAULT|PGHOST|CLICKHOUSE|S3_/.test(key));
-  assert.deepEqual(secrets, [], 'The browser sandbox must not receive Scout credentials.');
+  assert.deepEqual(secrets, [], 'The browser sandbox must not receive Spekios credentials.');
   assert.deepEqual(sandbox.Mounts, [], 'The browser sandbox must not mount volumes.');
   const networks = Object.keys(sandbox.NetworkSettings.Networks);
   assert.deepEqual(networks.map(name => name.replace(/^.*_/, '')), ['browser']);

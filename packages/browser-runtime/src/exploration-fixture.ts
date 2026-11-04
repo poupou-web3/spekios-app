@@ -176,7 +176,7 @@ export async function explorationFixture(port = 0, host = '127.0.0.1') {
       </script>`;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(`<!doctype html><html><head><title>Scout exploration fixture</title><style>
+    res.end(`<!doctype html><html><head><title>Spekios exploration fixture</title><style>
       body{font:16px system-ui;background:#fff;color:#18202a;margin:40px}button,a{font:inherit;color:#18202a;outline:none}
       button{background:#eee;border:1px solid #777;padding:10px 16px;margin:8px}a,a:visited{color:#18202a}
       #pixel{position:absolute;left:700px;top:100px;width:1px;height:1px;background:rgb(128,128,128)}

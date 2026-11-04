@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Score one or more Scout runs of the Larchwood shop against its bug list.
+// Score one or more Spekios runs of the Larchwood shop against its bug list.
 //
 //   node scripts/score-bug-lab.mjs RUN_ID [RUN_ID...] [--json] [--api http://127.0.0.1:18080]
 //
@@ -20,14 +20,14 @@ if (!runIds.length || !runIds.every(id => uuid.test(id))) {
 const api = (args.api ?? process.env.SCOUT_API ?? 'http://127.0.0.1:18080').replace(/\/+$/, '');
 let token = process.env.SCOUT_TOKEN;
 if (!token) {
-  try { token = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8')).SCOUT_API_TOKEN; } catch { /* Not on the Scout machine, or bypass mode. */ }
+  try { token = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8')).SCOUT_API_TOKEN; } catch { /* Not on the Spekios machine, or bypass mode. */ }
 }
 const manifest = JSON.parse(await readFile(args.manifest ?? new URL('../apps/bug-lab/bugs.json', import.meta.url), 'utf8'));
 
 const scores = [];
 for (const id of runIds) {
   const response = await fetch(`${api}/v1/runs/${id}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, redirect: 'error', signal: AbortSignal.timeout(30000) })
-    .catch(error => { console.error(`Scout is unreachable at ${api}: ${error.message}`); process.exit(2); });
+    .catch(error => { console.error(`Spekios is unreachable at ${api}: ${error.message}`); process.exit(2); });
   if (!response.ok) {
     console.error(`Run ${id}: HTTP ${response.status}${response.status === 401 ? ' (set SCOUT_TOKEN)' : ''}`);
     process.exit(2);

@@ -1,7 +1,7 @@
 ---
 {
   "title": "Agent identity and private history",
-  "description": "Understand persistent agent identities, workspace permissions, domain and task history, credential revocation and usage attribution in ScoutQA.",
+  "description": "Understand persistent agent identities, workspace permissions, domain and task history, credential revocation and usage attribution in Spekios.",
   "reviewed": "2026-10-29",
   "sidebar": {"order": 3}
 }

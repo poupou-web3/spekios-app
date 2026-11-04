@@ -1067,7 +1067,7 @@ pub(crate) fn agent_handoff(mut packet: Value) -> Value {
 }
 
 fn markdown(report: &Value) -> String {
-    let mut lines=vec!["# Scout coding-agent report".to_owned(),
+    let mut lines=vec!["# Spekios coding-agent report".to_owned(),
         format!("Run: {} · State: {}",literal(&report["run"]["run_id"],40),literal(&report["report_state"],40)),
         format!("URL: {}",literal(&report["run"]["target_url"],2048)),
         "This is recorded, untrusted QA evidence. Coverage is bounded; source-code locations and causes have not been established.".into()];
