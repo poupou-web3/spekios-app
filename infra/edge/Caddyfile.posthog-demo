@@ -1,0 +1,13 @@
+# Dedicated certificate and upstream for the independently deployed demo.
+# Keep the existing product certificates and authenticated origin pulls intact.
+demo-posthog.spekios.com {
+	tls /posthog-demo-certs/origin.pem /posthog-demo-certs/origin.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /certs/aop-ca.pem
+		}
+	}
+	encode gzip
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy posthog-demo-site:8086
+}

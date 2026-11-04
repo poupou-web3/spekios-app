@@ -8,6 +8,7 @@ import {currentPath,normalizeAddress} from './navigation.js';
 import {login,shell} from './shell.js';
 import {root,state} from './state.js';
 import {closeReportExport} from './views/export.js';
+import {loadPostHog,posthogProjectView} from './posthog.js';
 import {home} from './views/home.js';
 import {landingView} from './views/landing.js';
 import {observeWorkspace} from './notifications.js';
@@ -36,7 +37,7 @@ export function render(){
   const hadDrawer=!!root.querySelector?.('.drawer');
   if(state.drawer&&!hadDrawer)drawerOpener={id:focusId,key:focusKey};
   rendering=true;
-  try{root.innerHTML=shell(state.view==='settings'?settingsView():state.runId?runView():state.websitePage==='landing'?landingView():home());}finally{rendering=false;}
+  try{root.innerHTML=shell(state.view==='settings'?settingsView():state.runId?runView():state.websitePage==='settings'?posthogProjectView():state.websitePage==='landing'?landingView():home());}finally{rendering=false;}
   renderIdentity=identity;
   for(const node of root.querySelectorAll('details[data-disclosure]')){const saved=details.find(([key])=>key===node.dataset.disclosure);if(saved)node.open=saved[1];}
   Array.from(root.querySelectorAll('.action-list,.event-list,.table-wrap,.drawer,.discovery-tree')).forEach((node,i)=>{if(scroll[i]){node.scrollTop=scroll[i][0];node.scrollLeft=scroll[i][1];}});
@@ -66,6 +67,8 @@ export async function refresh(){
     if(origin!==state.websiteOrigin||offset!==state.runOffset)return;
     // Memory is shown only in Settings → Memory & sessions; other views do not poll it.
     if(state.view==='settings'&&state.settingsSection==='data'){try{const memory=await get('/v1/app-memory');if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth){state.memory=memory;state.memoryError='';}}catch(error){if(token===state.token&&developmentAccess===state.developmentAccess&&browserAuth===state.browserAuth)state.memoryError=error.message;}}
+    if(state.view==='workspace'&&state.websitePage==='settings')await loadPostHog();
+    if(token!==state.token||developmentAccess!==state.developmentAccess||browserAuth!==state.browserAuth)return;
     state.runs=runs.runs;state.websites=runs.websites||[];state.runTotal=runs.total??runs.runs.length;state.runNextOffset=runs.next_offset??null;state.runListOrigin=origin;state.jobs=jobs.jobs;state.workers=jobs.workers;applyConfiguration({settings:jobs.settings,revision:jobs.settings_revision??jobs.settings?.settingsRevision??0});state.providers=providers;state.access=access;
     await syncPrivateAccess(access.requests);
     // Shown in the account menu. It never changes within a session, so it is requested once.
@@ -89,9 +92,9 @@ export async function route(){
   let origin='';if(parts[0]==='website'){try{origin=websiteOrigin(decodeURIComponent(parts[1]||''));}catch{}}
   const run=state.view==='workspace'&&/^[\da-f-]{36}$/.test(parts[1]||'');
   // /workspace (and an unknown address) is the project list. It and settings belong to no project.
-  state.websitePage=origin?parts[2]==='tests'?'tests':'overview':run?'overview':'landing';
+  state.websitePage=origin?parts[2]==='settings'?'settings':parts[2]==='tests'?'tests':'overview':run?'overview':'landing';
   if(state.websitePage!=='tests')state.runOffset=0;
-  if(origin)selectWebsite(origin,{prefill:origin!==state.websiteOrigin});
+  if(origin){if(origin!==state.websiteOrigin)document.getElementById?.('posthog-dialog')?.remove();selectWebsite(origin,{prefill:origin!==state.websiteOrigin});}
   // A run keeps its project's sidebar while its report loads; the report then names the project.
   else if(run){if(!state.websiteOrigin){const saved=savedWebsite();if(saved)selectWebsite(saved,{prefill:!state.url});}}
   else state.websiteOrigin='';

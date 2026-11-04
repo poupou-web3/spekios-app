@@ -62,6 +62,11 @@ printf '%s\n' "$AOP_CA_PEM" >"$deploy/.secrets/aop-ca.pem"
 if [[ "$demo_sites" == true ]]; then
   printf '%s\n' "$DEMO_ORIGIN_PEM" >"$deploy/.secrets/demo-origin.pem"
 fi
+if [[ -n "${POSTHOG_ORIGIN_PEM:-}" || -n "${POSTHOG_ORIGIN_KEY:-}" ]]; then
+  [[ -n "${POSTHOG_ORIGIN_PEM:-}" && -n "${POSTHOG_ORIGIN_KEY:-}" ]] || { echo '::error::Both PostHog demo certificate files are required.' >&2; exit 1; }
+  printf '%s\n' "$POSTHOG_ORIGIN_PEM" >"$deploy/.secrets/posthog-origin.pem"
+  printf '%s\n' "$POSTHOG_ORIGIN_KEY" >"$deploy/.secrets/posthog-origin.key"
+fi
 if [[ -n "${ANSIBLE_SECRETS_YML:-}" ]]; then
   printf '%s\n' "$ANSIBLE_SECRETS_YML" >"$deploy/ansible/secrets.yml"
 fi

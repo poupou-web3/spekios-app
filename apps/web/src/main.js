@@ -1,4 +1,5 @@
 import {checkComputerUse} from './computer-use.js';
+import {openPostHogDialog,posthogAction} from './posthog.js';
 import {showAgentHandoff,closeAgentHandoff} from './agent-handoff.js';
 // Workspace entry: delegated DOM events, polling and startup. Rendering lives in app.js.
 import {toast} from '/assets/ui/components.js';
@@ -67,6 +68,9 @@ root.addEventListener('click',async e=>{
   if(e.target.closest('a[href^="/workspace"],a[href^="/website/"],a[href^="/settings"]')&&state.trackedJobId)clearTrackedJob();
   const el=e.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action;
+  if(action==='add-posthog'){openPostHogDialog();return;}
+  if(action==='select-posthog'){await posthogAction('select',el.dataset.id);return;}
+  if(['posthog-sync','posthog-pause','posthog-remove','posthog-replay'].includes(action)){await posthogAction(action.slice(8),el.dataset.id);return;}
   if(action==='copy-agent-finding'){
     const runId=state.runId,actionId=el.dataset.id;
     el.disabled=true;try{const packet=await get(`/v1/runs/${runId}/issues/${actionId}`);if(state.connected&&state.runId===runId)showAgentHandoff(packet);}catch(error){toast(error.message);}finally{el.disabled=false;}return;
@@ -94,7 +98,7 @@ root.addEventListener('click',async e=>{
   if(action==='forget-memory'){try{await api('/v1/app-memory/'+el.dataset.id+'/forget',{});await refresh();toast('App memory forgotten. Recorded runs and evidence are unchanged.');}catch(error){toast(error.message);}}
   if(action==='refresh'){await refresh();if(state.connected&&!state.error)toast('Workspace refreshed.');}
   if(action==='logout'&&state.browserAuth){state.computerUseCheck=null;state.computerUseResult=null;closeAgentHandoff();resetNotifications();clearWebsiteNavigation();location.assign('/logout');return;}
-  if(action==='logout'){state.computerUseCheck=null;state.computerUseResult=null;closeAgentHandoff();resetNotifications();state.identity=null;closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
+  if(action==='logout'){document.getElementById?.('posthog-dialog')?.remove();state.posthog=null;state.posthogOrigin=null;state.posthogDetail=null;state.posthogSelected=null;state.computerUseCheck=null;state.computerUseResult=null;closeAgentHandoff();resetNotifications();state.identity=null;closeReportExport();await closePrivateLogin(true);state.token='';state.developmentAccess=false;state.connected=false;state.report=null;state.reportEtag='';state.drawer=null;state.trackedJobId=null;sessionStorage.removeItem('scout.workspace-token');sessionStorage.removeItem('scout.pending-job');sessionStorage.removeItem('scout.tracked-job');clearWebsiteNavigation();state.websiteOrigin='';state.websites=[];state.runs=[];clearImages();state.error='';state.configurationDraft=null;reviewDrafts.clear();steeringDrafts.clear();login();}
   if(action==='discard-configuration'||action==='rebase-configuration'){rebaseConfiguration(action==='discard-configuration');render();}
   if(action==='add-limit-override'||action==='remove-limit-override'){editOverrides(action==='add-limit-override',Number(el.dataset.index));render();}
   if(action==='add-project-model'||action==='remove-project-model'){editProjectModels(action==='add-project-model',Number(el.dataset.index));render();}

@@ -10,6 +10,10 @@ scout_ref: ""
 scout_demo_sites: false
 scout_demo_fixed_host: ""
 scout_demo_faulty_host: ""
+scout_posthog_demo: false
+scout_posthog_demo_project_token: ""
+scout_posthog_demo_cert_dir: /etc/scout/posthog-demo
+scout_posthog_demo_env_file: "{{ scout_root }}/shared/posthog-demo.env"
 
 scout_root: /opt/scout
 scout_releases_kept: 3
@@ -39,6 +43,9 @@ scout_managed_env:
   SCOUT_DEMO_SITES: "{{ scout_demo_sites | bool | ternary('true', 'false') }}"
   SCOUT_DEMO_FIXED_HOST: "{{ scout_demo_fixed_host }}"
   SCOUT_DEMO_FAULTY_HOST: "{{ scout_demo_faulty_host }}"
+  SCOUT_POSTHOG_DEMO_SITE: "{{ scout_posthog_demo | bool | ternary('true', 'false') }}"
+  SCOUT_POSTHOG_DEMO_CERT_DIR: "{{ scout_posthog_demo_cert_dir }}"
+  SCOUT_POSTHOG_DEMO_ENV_FILE: "{{ scout_posthog_demo_env_file }}"
 
 # Patch, reboot and refuse unfixed kernels (tasks/kernel.yml). Only for test
 # hosts that do not own their kernel, such as containers.

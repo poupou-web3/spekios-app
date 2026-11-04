@@ -1,0 +1,14 @@
+# Opt-in overlay with compose.yaml + compose.deploy.yaml + compose.edge-origin.yaml.
+# Start the separate demo project first to create its frontend network.
+services:
+  edge:
+    volumes:
+      - ./infra/edge/Caddyfile.posthog-demo:/etc/caddy/demos/posthog.caddy:ro
+      - ${SCOUT_POSTHOG_DEMO_CERT_DIR:?Set the folder containing demo origin.pem and origin.key}:/posthog-demo-certs:ro
+    networks:
+      default: {}
+      posthog-demo: {}
+networks:
+  posthog-demo:
+    external: true
+    name: spekios-posthog-demo-site_frontend

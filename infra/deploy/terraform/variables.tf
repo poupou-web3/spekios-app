@@ -76,6 +76,12 @@ variable "app_subdomain" {
   default = "app"
 }
 
+variable "posthog_demo_enabled" {
+  description = "Include the independent PostHog demo hostname in the strict origin TLS rule. Its certificate is installed separately."
+  type        = bool
+  default     = false
+}
+
 variable "backoffice_subdomain" {
   description = "Operator console hostname, protected by Cloudflare Access."
   type        = string
