@@ -777,10 +777,10 @@
                   },
                   "provider": {
                     "enum": [
-                      "openai",
-                      "anthropic",
+                      "meta",
                       "openrouter",
-                      "meta"
+                      "openai",
+                      "anthropic"
                     ],
                     "type": "string"
                   }
@@ -796,10 +796,10 @@
               },
               "provider": {
                 "enum": [
-                  "openai",
-                  "anthropic",
+                  "meta",
                   "openrouter",
-                  "meta"
+                  "openai",
+                  "anthropic"
                 ],
                 "type": "string"
               },
@@ -1291,10 +1291,10 @@
                   },
                   "provider": {
                     "enum": [
-                      "openai",
-                      "anthropic",
+                      "meta",
                       "openrouter",
-                      "meta"
+                      "openai",
+                      "anthropic"
                     ],
                     "type": "string"
                   }
@@ -1310,10 +1310,10 @@
               },
               "provider": {
                 "enum": [
-                  "openai",
-                  "anthropic",
+                  "meta",
                   "openrouter",
-                  "meta"
+                  "openai",
+                  "anthropic"
                 ],
                 "type": "string"
               },

@@ -167,7 +167,7 @@ const OPTION_SCHEMA={
   revision:{type:'integer',minimum:1,description:'Expected issue revision when paging history.'},
   viewport:{type:'string',enum:['desktop','tablet','mobile']},
   'auth-mode':{type:'string',enum:['auto','public','sign_in']},
-  provider:{type:'string',enum:['openai','anthropic','openrouter','meta']},
+  provider:{type:'string',enum:['meta','openrouter','openai','anthropic']},
   model:{type:'string',description:'Model ID; requires --provider.'},
   key:{type:'string',description:'Owned saved provider-key UUID or demo; never an API secret.'},
   'free-only':{type:'string',enum:['true','false'],description:'OpenRouter restriction for an explicit model override.'},
@@ -387,7 +387,7 @@ class Client {
       if(this.options.viewport!==undefined){if(!['desktop','tablet','mobile'].includes(this.options.viewport))fail('invalid_viewport','Viewport must be desktop, tablet or mobile.');input.viewport_profile=this.options.viewport;}
       if(this.options['auth-mode']!==undefined){if(!['auto','public','sign_in'].includes(this.options['auth-mode']))fail('invalid_auth_mode','Auth mode must be auto, public or sign_in.');input.auth_mode=this.options['auth-mode'];}
       if(['provider','model','key','free-only'].some(key=>this.options[key]!==undefined)){
-        if(!['openai','anthropic','openrouter','meta'].includes(this.options.provider)||!this.options.model)fail('invalid_model','Provide both --provider and --model for a model override.');
+        if(!['meta','openrouter','openai','anthropic'].includes(this.options.provider)||!this.options.model)fail('invalid_model','Provide both --provider and --model for a model override.');
         input.model={provider:this.options.provider,model:this.options.model};
         if(this.options['free-only']!==undefined){if(!['true','false'].includes(this.options['free-only']))fail('invalid_model','--free-only must be true or false.');input.model.free_only=this.options['free-only']==='true';}
         if(this.options.key!==undefined)input.model.provider_key_id=this.options.key==='demo'?'demo':uuid(this.options.key,'Key reference');

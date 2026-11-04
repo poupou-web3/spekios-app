@@ -13,7 +13,7 @@ pub enum Provider {
     Meta,
 }
 impl Provider {
-    pub const ALL: [Self; 4] = [Self::Openai, Self::Anthropic, Self::Openrouter, Self::Meta];
+    pub const ALL: [Self; 4] = [Self::Meta, Self::Openrouter, Self::Openai, Self::Anthropic];
     pub fn name(self) -> &'static str {
         match self {
             Self::Openai => "openai",
